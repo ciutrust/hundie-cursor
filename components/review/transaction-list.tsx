@@ -18,8 +18,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CategorySearchSelect } from "@/components/review/category-search-select";
+import { CategorySuggestionChips } from "@/components/review/category-suggestion-chips";
 import { TransactionSearchBar } from "@/components/review/transaction-search-bar";
 import { bulkReclassifyTransactions, reclassifyTransaction } from "@/lib/actions/reclassify";
+import { getBulkCategorySuggestions, getCategorySuggestions } from "@/lib/actions/suggestions";
+import type { CategorySuggestion } from "@/lib/suggestions/category-suggestions";
 import type { Category, Entity, TransactionWithDetails } from "@/lib/types/database";
 import {
   EMPTY_TRANSACTION_FILTERS,
@@ -282,25 +286,12 @@ function ClassificationForm({
       </div>
 
       {showCategories ? (
-        <div className="space-y-2">
-          <Label htmlFor={categoryFieldId}>Category (GBSL)</Label>
-          <Select
-            value={categoryId ?? "none"}
-            onValueChange={(value) => onCategoryChange(value === "none" ? null : value)}
-          >
-            <SelectTrigger id={categoryFieldId}>
-              <SelectValue placeholder="Select category" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">Unclassified</SelectItem>
-              {categories.map((category) => (
-                <SelectItem key={category.id} value={category.id}>
-                  {category.full_path}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <CategorySearchSelect
+          id={categoryFieldId}
+          categories={categories}
+          value={categoryId}
+          onChange={onCategoryChange}
+        />
       ) : (
         <p className="text-sm text-muted-foreground">
           Category picker for {selectedEntity?.name ?? "this entity"} coming soon. Entity changes save now;
@@ -332,10 +323,51 @@ function ReclassifyDialog({
   const [isPending, startTransition] = useTransition();
   const [entityId, setEntityId] = useState(transaction.classification.entity_id);
   const [categoryId, setCategoryId] = useState<string | null>(transaction.classification.category_id);
+  const [notes, setNotes] = useState(transaction.classification.notes ?? "");
   const [error, setError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<CategorySuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
 
   const selectedEntity = entities.find((entity) => entity.id === entityId);
   const showCategories = selectedEntity?.slug === "gbsl";
+
+  useEffect(() => {
+    if (!showCategories) {
+      setSuggestions([]);
+      setSuggestionsLoading(false);
+      setSuggestionsError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setSuggestionsLoading(true);
+    setSuggestionsError(null);
+
+    getCategorySuggestions({
+      description: transaction.description,
+      vendor: transaction.vendor,
+      entitySlug: "gbsl",
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setSuggestions(result.suggestions);
+        setSuggestionsError(result.error ?? null);
+        setSuggestionsLoading(false);
+      })
+      .catch((fetchError: unknown) => {
+        if (cancelled) return;
+        setSuggestions([]);
+        setSuggestionsError(
+          fetchError instanceof Error ? fetchError.message : "Failed to load suggestions",
+        );
+        setSuggestionsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showCategories, transaction.description, transaction.vendor]);
 
   function handleEntityChange(nextEntityId: string) {
     setEntityId(nextEntityId);
@@ -352,6 +384,7 @@ function ReclassifyDialog({
         classificationId: transaction.classification.id,
         entityId,
         categoryId: showCategories ? categoryId : null,
+        notes,
         month,
         entitySlug,
       });
@@ -387,6 +420,20 @@ function ReclassifyDialog({
             </p>
           </div>
 
+          {showCategories ? (
+            <CategorySuggestionChips
+              suggestions={suggestions}
+              selectedCategoryId={categoryId}
+              isLoading={suggestionsLoading}
+              error={suggestionsError}
+              onSelect={setCategoryId}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Set entity to <span className="font-medium">GBSL, LLC</span> to see category suggestions from QuickBooks history.
+            </p>
+          )}
+
           <ClassificationForm
             entities={entities}
             categories={categories}
@@ -395,6 +442,21 @@ function ReclassifyDialog({
             onEntityChange={handleEntityChange}
             onCategoryChange={setCategoryId}
           />
+
+          <div className="space-y-2">
+            <Label htmlFor="classification-notes">Notes</Label>
+            <textarea
+              id="classification-notes"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Why is this categorized this way? Context for export or CPA review."
+              rows={3}
+              className="flex min-h-[80px] w-full rounded-md border border-border bg-card px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            />
+            <p className="text-xs text-muted-foreground">
+              Saved with this transaction for export and review later.
+            </p>
+          </div>
 
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
@@ -436,10 +498,60 @@ function BulkAssignDialog({
   const [entityId, setEntityId] = useState(defaultEntityId);
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<CategorySuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
 
   const selectedEntity = entities.find((entity) => entity.id === entityId);
   const showCategories = selectedEntity?.slug === "gbsl";
   const totalAmount = transactions.reduce((sum, tx) => sum + Number(tx.amount), 0);
+  const suggestionKey = useMemo(
+    () =>
+      transactions
+        .map((tx) => `${tx.description}|${tx.vendor ?? ""}`)
+        .sort()
+        .join("\n"),
+    [transactions],
+  );
+
+  useEffect(() => {
+    if (!showCategories) {
+      setSuggestions([]);
+      setSuggestionsLoading(false);
+      setSuggestionsError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setSuggestionsLoading(true);
+    setSuggestionsError(null);
+
+    getBulkCategorySuggestions({
+      entitySlug: "gbsl",
+      transactions: transactions.map((tx) => ({
+        description: tx.description,
+        vendor: tx.vendor,
+      })),
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setSuggestions(result.suggestions);
+        setSuggestionsError(result.error ?? null);
+        setSuggestionsLoading(false);
+      })
+      .catch((fetchError: unknown) => {
+        if (cancelled) return;
+        setSuggestions([]);
+        setSuggestionsError(
+          fetchError instanceof Error ? fetchError.message : "Failed to load suggestions",
+        );
+        setSuggestionsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showCategories, suggestionKey]);
 
   function handleEntityChange(nextEntityId: string) {
     setEntityId(nextEntityId);
@@ -488,6 +600,20 @@ function BulkAssignDialog({
               <span className="text-muted-foreground">Combined amount:</span> {formatCurrency(totalAmount)}
             </p>
           </div>
+
+          {showCategories ? (
+            <CategorySuggestionChips
+              suggestions={suggestions}
+              selectedCategoryId={categoryId}
+              isLoading={suggestionsLoading}
+              error={suggestionsError}
+              onSelect={setCategoryId}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Set entity to <span className="font-medium">GBSL, LLC</span> to see category suggestions from QuickBooks history.
+            </p>
+          )}
 
           <ClassificationForm
             entities={entities}
