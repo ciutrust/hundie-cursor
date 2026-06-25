@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { monthLabel } from "@/lib/utils";
@@ -12,11 +12,15 @@ type MonthPickerProps = {
 
 export function MonthPicker({ year, month }: MonthPickerProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   function navigate(delta: number) {
     const date = new Date(year, month - 1 + delta, 1);
-    const next = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-    router.push(`/review?month=${next}`);
+    const nextMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("month", nextMonth);
+    router.push(`${pathname}?${params.toString()}`);
   }
 
   return (

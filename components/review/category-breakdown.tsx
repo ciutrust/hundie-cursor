@@ -1,11 +1,20 @@
+import Link from "next/link";
 import type { CategoryGroup } from "@/lib/types/database";
-import { formatCurrency } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 
 type CategoryBreakdownProps = {
   groups: CategoryGroup[];
+  entitySlug: string;
+  month: string;
+  selectedCategoryId?: string | null;
 };
 
-export function CategoryBreakdown({ groups }: CategoryBreakdownProps) {
+export function CategoryBreakdown({
+  groups,
+  entitySlug,
+  month,
+  selectedCategoryId,
+}: CategoryBreakdownProps) {
   if (groups.length === 0) return null;
 
   return (
@@ -14,17 +23,33 @@ export function CategoryBreakdown({ groups }: CategoryBreakdownProps) {
         <h2 className="text-sm font-medium">By category</h2>
       </div>
       <div className="divide-y divide-border">
-        {groups.map((group) => (
-          <div key={group.categoryId ?? "unclassified"} className="flex items-center justify-between px-4 py-3">
-            <div>
-              <p className="font-medium">{group.categoryName}</p>
-              <p className="text-sm text-muted-foreground">
-                {group.transactions.length} transaction{group.transactions.length === 1 ? "" : "s"}
-              </p>
-            </div>
-            <span className="font-medium">{formatCurrency(group.total)}</span>
-          </div>
-        ))}
+        {groups.map((group) => {
+          const categoryParam = group.categoryId ?? "unclassified";
+  const isSelected =
+    selectedCategoryId !== undefined &&
+    (group.categoryId === selectedCategoryId ||
+      (group.categoryId === null && selectedCategoryId === null));
+          const href = `/review/${entitySlug}?month=${month}&category=${categoryParam}`;
+
+          return (
+            <Link
+              key={group.categoryId ?? "unclassified"}
+              href={href}
+              className={cn(
+                "flex items-center justify-between px-4 py-3 transition-colors hover:bg-accent/50",
+                isSelected && "bg-accent/60",
+              )}
+            >
+              <div>
+                <p className="font-medium">{group.categoryName}</p>
+                <p className="text-sm text-muted-foreground">
+                  {group.transactions.length} transaction{group.transactions.length === 1 ? "" : "s"}
+                </p>
+              </div>
+              <span className="font-medium">{formatCurrency(group.total)}</span>
+            </Link>
+          );
+        })}
       </div>
     </div>
   );

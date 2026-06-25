@@ -447,8 +447,16 @@ export type EntitySummary = {
   slug: string
   name: string
   total: number
+  previousMonthTotal: number | null
   transactionCount: number
   unclassifiedCount: number
+}
+
+export type MonthlyEntityRow = {
+  slug: string
+  name: string
+  months: Record<number, number>
+  ytd: number
 }
 
 export type CategoryGroup = {

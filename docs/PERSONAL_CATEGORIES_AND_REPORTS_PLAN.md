@@ -157,15 +157,11 @@ These are **staging labels** — goal is to zero them out by reclassifying to th
 
 **Phase 1 (quick):** Monthly matrix on `/review` below entity cards
 
-```
-              Jan      Feb      Mar   …   Jun      YTD
-GBSL         $12k     $11k     $13k      $14k     $75k
-Personal      $8k      $7k      $9k       $8k     $48k
-Keller        $2k      $2k      $3k       $2k     $12k
-…
-```
-
-Click cell → drill to that entity + month (existing page).
+- Rows = entities; columns = Jan–Dec for selected year
+- Each cell: total + **↑ / ↓ vs prior month** (hover: “Higher/Lower than last month”)
+- **↑ / ↓ vs next month** on past months only — hidden for current month and future months (no future data)
+- Entity summary cards also show **vs last month** arrow on the selected month total
+- Click cell → drill to that entity + month
 
 **Phase 2:** Category × month on entity drill-down (heatmap or table).
 

@@ -1,7 +1,8 @@
 import { AppHeader } from "@/components/layout/app-header";
 import { EntitySummaryGrid } from "@/components/review/entity-summary-grid";
+import { MonthlyEntityMatrix } from "@/components/review/monthly-entity-matrix";
 import { MonthPicker } from "@/components/review/month-picker";
-import { getEntitySummaries } from "@/lib/queries/review";
+import { getEntitySummaries, getMonthlyEntityMatrix } from "@/lib/queries/review";
 import { formatCurrency, monthLabel, parseMonthParam } from "@/lib/utils";
 
 type ReviewPageProps = {
@@ -12,8 +13,15 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
   const params = await searchParams;
   const { year, month } = parseMonthParam(params.month);
   const monthParam = `${year}-${String(month).padStart(2, "0")}`;
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
 
-  const summaries = await getEntitySummaries(year, month);
+  const [summaries, monthlyMatrix] = await Promise.all([
+    getEntitySummaries(year, month),
+    getMonthlyEntityMatrix(year),
+  ]);
+
   const grandTotal = summaries
     .filter((summary) => summary.slug !== "unclassified")
     .reduce((sum, summary) => sum + summary.total, 0);
@@ -33,6 +41,13 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
         </div>
 
         <EntitySummaryGrid summaries={summaries} month={monthParam} />
+
+        <MonthlyEntityMatrix
+          rows={monthlyMatrix}
+          year={year}
+          currentYear={currentYear}
+          currentMonth={currentMonth}
+        />
       </main>
     </div>
   );

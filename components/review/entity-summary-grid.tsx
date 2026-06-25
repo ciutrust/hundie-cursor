@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { MonthTrendIndicator } from "@/components/review/month-trend-indicator";
 import type { EntitySummary } from "@/lib/types/database";
 import { cn, formatCurrency } from "@/lib/utils";
 
@@ -27,7 +28,14 @@ export function EntitySummaryGrid({ summaries, month }: EntitySummaryGridProps) 
                 <CardTitle className="text-base">{summary.name}</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-semibold">{formatCurrency(summary.total)}</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-2xl font-semibold">{formatCurrency(summary.total)}</p>
+                  <MonthTrendIndicator
+                    current={summary.total}
+                    compareTo={summary.previousMonthTotal}
+                    label="last month"
+                  />
+                </div>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {summary.transactionCount} transaction{summary.transactionCount === 1 ? "" : "s"}
                   {summary.unclassifiedCount > 0 && !isUnclassified

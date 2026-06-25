@@ -34,10 +34,13 @@ import {
 } from "@/lib/transaction-filters";
 import { cn, formatCurrency } from "@/lib/utils";
 
+type EntityCategory = Pick<Category, "id" | "full_path">;
+
 type TransactionListProps = {
   transactions: TransactionWithDetails[];
   entities: Pick<Entity, "id" | "name" | "slug">[];
-  categories: Pick<Category, "id" | "full_path">[];
+  categories: EntityCategory[];
+  categoriesByEntity: Record<string, EntityCategory[]>;
   month: string;
   entitySlug: string;
 };
@@ -46,6 +49,7 @@ export function TransactionList({
   transactions,
   entities,
   categories,
+  categoriesByEntity,
   month,
   entitySlug,
 }: TransactionListProps) {
@@ -221,7 +225,7 @@ export function TransactionList({
         <ReclassifyDialog
           transaction={detailTransaction}
           entities={entities}
-          categories={categories}
+          categoriesByEntity={categoriesByEntity}
           month={month}
           entitySlug={entitySlug}
           onClose={() => setDetailTransaction(null)}
@@ -232,7 +236,7 @@ export function TransactionList({
         <BulkAssignDialog
           transactions={selectedTransactions}
           entities={entities}
-          categories={categories}
+          categoriesByEntity={categoriesByEntity}
           defaultEntityId={defaultEntityId}
           entitySlug={entitySlug}
           onClose={() => setBulkOpen(false)}
@@ -245,7 +249,7 @@ export function TransactionList({
 
 type ClassificationFormProps = {
   entities: Pick<Entity, "id" | "name" | "slug">[];
-  categories: Pick<Category, "id" | "full_path">[];
+  categoriesByEntity: Record<string, EntityCategory[]>;
   entityId: string;
   categoryId: string | null;
   onEntityChange: (entityId: string) => void;
@@ -256,7 +260,7 @@ type ClassificationFormProps = {
 
 function ClassificationForm({
   entities,
-  categories,
+  categoriesByEntity,
   entityId,
   categoryId,
   onEntityChange,
@@ -265,7 +269,8 @@ function ClassificationForm({
   categoryFieldId = "category",
 }: ClassificationFormProps) {
   const selectedEntity = entities.find((entity) => entity.id === entityId);
-  const showCategories = selectedEntity?.slug === "gbsl";
+  const entityCategories = selectedEntity ? (categoriesByEntity[selectedEntity.slug] ?? []) : [];
+  const showCategories = entityCategories.length > 0;
 
   return (
     <>
@@ -288,14 +293,15 @@ function ClassificationForm({
       {showCategories ? (
         <CategorySearchSelect
           id={categoryFieldId}
-          categories={categories}
+          label={`Category (${selectedEntity?.name ?? "Entity"})`}
+          categories={entityCategories}
           value={categoryId}
           onChange={onCategoryChange}
         />
       ) : (
         <p className="text-sm text-muted-foreground">
-          Category picker for {selectedEntity?.name ?? "this entity"} coming soon. Entity changes save now;
-          category stays unclassified until Hundie-native categories are added.
+          No category chart for {selectedEntity?.name ?? "this entity"} yet. Entity changes save now;
+          category stays unclassified.
         </p>
       )}
     </>
@@ -305,7 +311,7 @@ function ClassificationForm({
 type ReclassifyDialogProps = {
   transaction: TransactionWithDetails;
   entities: Pick<Entity, "id" | "name" | "slug">[];
-  categories: Pick<Category, "id" | "full_path">[];
+  categoriesByEntity: Record<string, EntityCategory[]>;
   month: string;
   entitySlug: string;
   onClose: () => void;
@@ -314,7 +320,7 @@ type ReclassifyDialogProps = {
 function ReclassifyDialog({
   transaction,
   entities,
-  categories,
+  categoriesByEntity,
   month,
   entitySlug,
   onClose,
@@ -330,10 +336,11 @@ function ReclassifyDialog({
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
 
   const selectedEntity = entities.find((entity) => entity.id === entityId);
-  const showCategories = selectedEntity?.slug === "gbsl";
+  const showCategories = (categoriesByEntity[selectedEntity?.slug ?? ""]?.length ?? 0) > 0;
+  const showSuggestions = selectedEntity?.slug === "gbsl";
 
   useEffect(() => {
-    if (!showCategories) {
+    if (!showSuggestions) {
       setSuggestions([]);
       setSuggestionsLoading(false);
       setSuggestionsError(null);
@@ -367,12 +374,13 @@ function ReclassifyDialog({
     return () => {
       cancelled = true;
     };
-  }, [showCategories, transaction.description, transaction.vendor]);
+  }, [showSuggestions, transaction.description, transaction.vendor]);
 
   function handleEntityChange(nextEntityId: string) {
     setEntityId(nextEntityId);
     const nextEntity = entities.find((entity) => entity.id === nextEntityId);
-    if (nextEntity?.slug !== "gbsl") {
+    const nextHasCategories = (categoriesByEntity[nextEntity?.slug ?? ""]?.length ?? 0) > 0;
+    if (!nextHasCategories) {
       setCategoryId(null);
     }
   }
@@ -420,7 +428,7 @@ function ReclassifyDialog({
             </p>
           </div>
 
-          {showCategories ? (
+          {showSuggestions ? (
             <CategorySuggestionChips
               suggestions={suggestions}
               selectedCategoryId={categoryId}
@@ -428,15 +436,11 @@ function ReclassifyDialog({
               error={suggestionsError}
               onSelect={setCategoryId}
             />
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Set entity to <span className="font-medium">GBSL, LLC</span> to see category suggestions from QuickBooks history.
-            </p>
-          )}
+          ) : null}
 
           <ClassificationForm
             entities={entities}
-            categories={categories}
+            categoriesByEntity={categoriesByEntity}
             entityId={entityId}
             categoryId={categoryId}
             onEntityChange={handleEntityChange}
@@ -477,7 +481,7 @@ function ReclassifyDialog({
 type BulkAssignDialogProps = {
   transactions: TransactionWithDetails[];
   entities: Pick<Entity, "id" | "name" | "slug">[];
-  categories: Pick<Category, "id" | "full_path">[];
+  categoriesByEntity: Record<string, EntityCategory[]>;
   defaultEntityId: string;
   entitySlug: string;
   onClose: () => void;
@@ -487,7 +491,7 @@ type BulkAssignDialogProps = {
 function BulkAssignDialog({
   transactions,
   entities,
-  categories,
+  categoriesByEntity,
   defaultEntityId,
   entitySlug,
   onClose,
@@ -503,7 +507,8 @@ function BulkAssignDialog({
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
 
   const selectedEntity = entities.find((entity) => entity.id === entityId);
-  const showCategories = selectedEntity?.slug === "gbsl";
+  const showCategories = (categoriesByEntity[selectedEntity?.slug ?? ""]?.length ?? 0) > 0;
+  const showSuggestions = selectedEntity?.slug === "gbsl";
   const totalAmount = transactions.reduce((sum, tx) => sum + Number(tx.amount), 0);
   const suggestionKey = useMemo(
     () =>
@@ -515,7 +520,7 @@ function BulkAssignDialog({
   );
 
   useEffect(() => {
-    if (!showCategories) {
+    if (!showSuggestions) {
       setSuggestions([]);
       setSuggestionsLoading(false);
       setSuggestionsError(null);
@@ -551,12 +556,13 @@ function BulkAssignDialog({
     return () => {
       cancelled = true;
     };
-  }, [showCategories, suggestionKey]);
+  }, [showSuggestions, suggestionKey, transactions]);
 
   function handleEntityChange(nextEntityId: string) {
     setEntityId(nextEntityId);
     const nextEntity = entities.find((entity) => entity.id === nextEntityId);
-    if (nextEntity?.slug !== "gbsl") {
+    const nextHasCategories = (categoriesByEntity[nextEntity?.slug ?? ""]?.length ?? 0) > 0;
+    if (!nextHasCategories) {
       setCategoryId(null);
     }
   }
@@ -601,7 +607,7 @@ function BulkAssignDialog({
             </p>
           </div>
 
-          {showCategories ? (
+          {showSuggestions ? (
             <CategorySuggestionChips
               suggestions={suggestions}
               selectedCategoryId={categoryId}
@@ -609,15 +615,11 @@ function BulkAssignDialog({
               error={suggestionsError}
               onSelect={setCategoryId}
             />
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Set entity to <span className="font-medium">GBSL, LLC</span> to see category suggestions from QuickBooks history.
-            </p>
-          )}
+          ) : null}
 
           <ClassificationForm
             entities={entities}
-            categories={categories}
+            categoriesByEntity={categoriesByEntity}
             entityId={entityId}
             categoryId={categoryId}
             onEntityChange={handleEntityChange}
