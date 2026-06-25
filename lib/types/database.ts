@@ -456,7 +456,10 @@ export type MonthlyEntityRow = {
   slug: string
   name: string
   months: Record<number, number>
+  monthCounts: Record<number, number>
   ytd: number
+  ytdCount: number
+  isUnclassified?: boolean
 }
 
 export type CategoryGroup = {

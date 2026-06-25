@@ -2,13 +2,16 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppHeader } from "@/components/layout/app-header";
 import { CategoryBreakdown } from "@/components/review/category-breakdown";
+import { MonthlyEntityMatrix } from "@/components/review/monthly-entity-matrix";
 import { MonthPicker } from "@/components/review/month-picker";
+import { ReviewNav } from "@/components/review/review-nav";
 import { TransactionList } from "@/components/review/transaction-list";
 import {
   getCategoriesByEntity,
   getCategoriesForEntity,
   getClassifiableEntities,
   getEntityTransactions,
+  getMonthlyEntityMatrix,
 } from "@/lib/queries/review";
 import { formatCurrency, monthLabel, parseMonthParam } from "@/lib/utils";
 
@@ -26,7 +29,7 @@ export default async function EntityReviewPage({ params, searchParams }: EntityR
   const selectedCategoryId =
     categoryFilter === "unclassified" ? null : categoryFilter;
 
-  const [entities, { groups, transactions }, categories, categoriesByEntity, allGroups] =
+  const [entities, { groups, transactions }, categories, categoriesByEntity, allGroups, monthlyMatrix] =
     await Promise.all([
       getClassifiableEntities(),
       getEntityTransactions(year, month, entitySlug, categoryFilter),
@@ -35,11 +38,12 @@ export default async function EntityReviewPage({ params, searchParams }: EntityR
       categoryFilter
         ? getEntityTransactions(year, month, entitySlug).then((result) => result.groups)
         : Promise.resolve(null),
+      entitySlug === "unclassified" ? getMonthlyEntityMatrix(year) : Promise.resolve(null),
     ]);
 
   const entity =
     entitySlug === "unclassified"
-      ? { name: "Unclassified", slug: "unclassified" }
+      ? { name: "Uncategorized backlog", slug: "unclassified" }
       : entities.find((item) => item.slug === entitySlug);
 
   if (!entity) {
@@ -57,10 +61,14 @@ export default async function EntityReviewPage({ params, searchParams }: EntityR
 
   const total = transactions.filter((tx) => Number(tx.amount) > 0).reduce((sum, tx) => sum + Number(tx.amount), 0);
 
+  const isUnclassifiedView = entitySlug === "unclassified";
+
   return (
     <div className="min-h-screen bg-background">
       <AppHeader title={entity.name} backHref={`/review?month=${monthParam}`} />
       <main className="mx-auto max-w-5xl space-y-6 px-4 py-6">
+        <ReviewNav />
+
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm text-muted-foreground">
@@ -78,10 +86,23 @@ export default async function EntityReviewPage({ params, searchParams }: EntityR
             </h2>
             <p className="text-sm text-muted-foreground">
               {monthLabel(year, month)} · {formatCurrency(total)} · {transactions.length} transactions
+              {isUnclassifiedView ? " · assign a category to clear the backlog" : null}
             </p>
           </div>
           <MonthPicker year={year} month={month} />
         </div>
+
+        {isUnclassifiedView && monthlyMatrix ? (
+          <MonthlyEntityMatrix
+            rows={monthlyMatrix}
+            year={year}
+            currentYear={new Date().getFullYear()}
+            currentMonth={new Date().getMonth() + 1}
+            filterSlugs={["unclassified"]}
+            title={`${year} uncategorized backlog`}
+            subtitle="Expenses still missing a category. Click a month to work through them — goal is $0 and 0 txns each month."
+          />
+        ) : null}
 
         {!categoryFilter ? (
           <CategoryBreakdown

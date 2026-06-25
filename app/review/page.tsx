@@ -2,6 +2,7 @@ import { AppHeader } from "@/components/layout/app-header";
 import { EntitySummaryGrid } from "@/components/review/entity-summary-grid";
 import { MonthlyEntityMatrix } from "@/components/review/monthly-entity-matrix";
 import { MonthPicker } from "@/components/review/month-picker";
+import { ReviewNav } from "@/components/review/review-nav";
 import { getEntitySummaries, getMonthlyEntityMatrix } from "@/lib/queries/review";
 import { formatCurrency, monthLabel, parseMonthParam } from "@/lib/utils";
 
@@ -30,11 +31,14 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
     <div className="min-h-screen bg-background">
       <AppHeader title="Monthly review" />
       <main className="mx-auto max-w-5xl space-y-6 px-4 py-6">
+        <ReviewNav />
+
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-2xl font-semibold">{monthLabel(year, month)}</h2>
             <p className="text-sm text-muted-foreground">
-              Total expenses: {formatCurrency(grandTotal)} · Click an entity to drill down
+              Total expenses: {formatCurrency(grandTotal)} · all assigned transactions (includes items still
+              uncategorized within each entity)
             </p>
           </div>
           <MonthPicker year={year} month={month} />

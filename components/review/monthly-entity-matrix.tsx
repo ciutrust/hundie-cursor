@@ -10,10 +10,23 @@ type MonthlyEntityMatrixProps = {
   year: number;
   currentYear: number;
   currentMonth: number;
+  /** When set, only show these slugs (e.g. unclassified-only view). */
+  filterSlugs?: string[];
+  title?: string;
+  subtitle?: string;
 };
 
-export function MonthlyEntityMatrix({ rows, year, currentYear, currentMonth }: MonthlyEntityMatrixProps) {
-  if (rows.length === 0) return null;
+export function MonthlyEntityMatrix({
+  rows,
+  year,
+  currentYear,
+  currentMonth,
+  filterSlugs,
+  title,
+  subtitle,
+}: MonthlyEntityMatrixProps) {
+  const visibleRows = filterSlugs ? rows.filter((row) => filterSlugs.includes(row.slug)) : rows;
+  if (visibleRows.length === 0) return null;
 
   const visibleMonths = MONTH_LABELS.map((label, index) => ({
     label,
@@ -24,9 +37,10 @@ export function MonthlyEntityMatrix({ rows, year, currentYear, currentMonth }: M
   return (
     <div className="rounded-lg border border-border bg-card">
       <div className="border-b border-border px-4 py-3">
-        <h2 className="text-sm font-medium">{year} by month</h2>
+        <h2 className="text-sm font-medium">{title ?? `${year} by month`}</h2>
         <p className="text-xs text-muted-foreground">
-          ↑ higher · ↓ lower vs prior month. Next-month arrows hidden for future months.
+          {subtitle ??
+            "All expenses assigned to each entity (categorized + uncategorized). ↑/↓ vs prior month; next-month arrows hidden for future months."}
         </p>
       </div>
       <div className="overflow-x-auto">
@@ -43,11 +57,20 @@ export function MonthlyEntityMatrix({ rows, year, currentYear, currentMonth }: M
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {rows.map((row) => (
-              <tr key={row.slug}>
-                <td className="px-4 py-3 font-medium">{row.name}</td>
+            {visibleRows.map((row) => (
+              <tr
+                key={row.slug}
+                className={cn(row.isUnclassified && row.ytdCount > 0 && "bg-destructive/5")}
+              >
+                <td className="px-4 py-3 font-medium">
+                  {row.name}
+                  {row.isUnclassified && row.ytdCount > 0 ? (
+                    <span className="ml-2 text-xs font-normal text-destructive">· goal: $0</span>
+                  ) : null}
+                </td>
                 {visibleMonths.map((item) => {
                   const total = row.months[item.month] ?? 0;
+                  const count = row.monthCounts[item.month] ?? 0;
                   const prev = item.month > 1 ? (row.months[item.month - 1] ?? 0) : null;
                   const nextMonth = item.month + 1;
                   const nextIsFuture =
@@ -62,7 +85,16 @@ export function MonthlyEntityMatrix({ rows, year, currentYear, currentMonth }: M
                         <span className="text-muted-foreground">—</span>
                       ) : (
                         <Link href={href} className="block rounded-sm hover:bg-accent/50">
-                          <div>{formatCurrency(total)}</div>
+                          <div className={cn(row.isUnclassified && count > 0 && "text-destructive")}>
+                            {formatCurrency(total)}
+                          </div>
+                          {count > 0 ? (
+                            <div className="text-xs text-muted-foreground">
+                              {count} txn{count === 1 ? "" : "s"}
+                            </div>
+                          ) : (
+                            <div className="text-xs text-muted-foreground">—</div>
+                          )}
                           <div className="mt-0.5 flex items-center gap-2">
                             <MonthTrendIndicator current={total} compareTo={prev} label="last month" />
                             {next != null ? (
@@ -74,7 +106,14 @@ export function MonthlyEntityMatrix({ rows, year, currentYear, currentMonth }: M
                     </td>
                   );
                 })}
-                <td className="px-4 py-3 font-medium">{formatCurrency(row.ytd)}</td>
+                <td className="px-4 py-3 font-medium">
+                  <div className={cn(row.isUnclassified && row.ytdCount > 0 && "text-destructive")}>
+                    {formatCurrency(row.ytd)}
+                  </div>
+                  <div className="text-xs font-normal text-muted-foreground">
+                    {row.ytdCount} txn{row.ytdCount === 1 ? "" : "s"}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>

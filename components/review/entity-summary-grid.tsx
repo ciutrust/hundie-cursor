@@ -37,9 +37,11 @@ export function EntitySummaryGrid({ summaries, month }: EntitySummaryGridProps) 
                   />
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {summary.transactionCount} transaction{summary.transactionCount === 1 ? "" : "s"}
-                  {summary.unclassifiedCount > 0 && !isUnclassified
-                    ? ` · ${summary.unclassifiedCount} uncategorized`
+                  {isUnclassified
+                    ? `${summary.transactionCount} uncategorized transaction${summary.transactionCount === 1 ? "" : "s"} · goal: $0`
+                    : `${summary.transactionCount} transaction${summary.transactionCount === 1 ? "" : "s"}`}
+                  {!isUnclassified && summary.unclassifiedCount > 0
+                    ? ` · ${summary.unclassifiedCount} still uncategorized`
                     : null}
                 </p>
               </CardContent>
