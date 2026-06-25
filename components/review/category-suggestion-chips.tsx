@@ -8,6 +8,7 @@ type CategorySuggestionChipsProps = {
   suggestions: CategorySuggestion[];
   selectedCategoryId: string | null;
   isLoading: boolean;
+  error?: string | null;
   onSelect: (categoryId: string) => void;
 };
 
@@ -15,14 +16,23 @@ export function CategorySuggestionChips({
   suggestions,
   selectedCategoryId,
   isLoading,
+  error,
   onSelect,
 }: CategorySuggestionChipsProps) {
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading suggestions from QB history…</p>;
   }
 
+  if (error) {
+    return <p className="text-sm text-destructive">Suggestions unavailable: {error}</p>;
+  }
+
   if (suggestions.length === 0) {
-    return null;
+    return (
+      <p className="text-sm text-muted-foreground">
+        No QuickBooks category matches for this vendor — pick manually below.
+      </p>
+    );
   }
 
   return (

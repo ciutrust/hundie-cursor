@@ -8,6 +8,7 @@ export type ReclassifyInput = {
   classificationId: string;
   entityId: string;
   categoryId: string | null;
+  notes: string | null;
   month: string;
   entitySlug: string;
 };
@@ -30,11 +31,14 @@ export async function reclassifyTransaction(input: ReclassifyInput) {
     return { error: "Not authenticated" };
   }
 
+  const notes = input.notes?.trim() || null;
+
   const { error } = await supabase
     .from("classifications")
     .update({
       entity_id: input.entityId,
       category_id: input.categoryId,
+      notes,
       classified_by: user.email ?? user.id,
       classified_at: new Date().toISOString(),
     })

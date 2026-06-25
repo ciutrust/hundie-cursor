@@ -4,28 +4,17 @@ import { createClient } from "@/lib/supabase/server";
 import {
   escapeIlikePattern,
   extractSearchTokens,
+  extractSearchTokensFromTransactions,
   rankCategorySuggestions,
+  shouldSuggestBulkCategories,
   shouldSuggestCategories,
+  type BulkCategorySuggestionInput,
   type CategorySuggestion,
   type CategorySuggestionInput,
 } from "@/lib/suggestions/category-suggestions";
 
-export async function getCategorySuggestions(
-  input: CategorySuggestionInput,
-): Promise<{ suggestions: CategorySuggestion[]; error?: string }> {
-  if (!shouldSuggestCategories(input)) {
-    return { suggestions: [] };
-  }
-
+async function fetchSuggestionsForTokens(tokens: string[]) {
   const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return { suggestions: [], error: "Not authenticated" };
-  }
 
   const { data: entity, error: entityError } = await supabase
     .from("entities")
@@ -37,7 +26,6 @@ export async function getCategorySuggestions(
     return { suggestions: [], error: entityError?.message ?? "GBSL entity not found" };
   }
 
-  const tokens = extractSearchTokens(input.description, input.vendor);
   if (tokens.length === 0) {
     return { suggestions: [] };
   }
@@ -58,4 +46,26 @@ export async function getCategorySuggestions(
   }
 
   return { suggestions: rankCategorySuggestions(data ?? []) };
+}
+
+export async function getCategorySuggestions(
+  input: CategorySuggestionInput,
+): Promise<{ suggestions: CategorySuggestion[]; error?: string }> {
+  if (!shouldSuggestCategories(input)) {
+    return { suggestions: [] };
+  }
+
+  const tokens = extractSearchTokens(input.description, input.vendor);
+  return fetchSuggestionsForTokens(tokens);
+}
+
+export async function getBulkCategorySuggestions(
+  input: BulkCategorySuggestionInput,
+): Promise<{ suggestions: CategorySuggestion[]; error?: string }> {
+  if (!shouldSuggestBulkCategories(input)) {
+    return { suggestions: [] };
+  }
+
+  const tokens = extractSearchTokensFromTransactions(input.transactions);
+  return fetchSuggestionsForTokens(tokens);
 }
