@@ -4,9 +4,46 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "verify:db": "node scripts/verify-connection.mjs"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "verify:db": "node scripts/verify-connection.mjs",
+    "verify:qb-parser": "node scripts/verify-qb-parser.mjs",
+    "verify:card-parsers": "node scripts/verify-card-parsers.mjs",
+    "import:qb-gbsl": "node scripts/import-qb-gbsl.mjs",
+    "import:cards": "node scripts/import-cards.mjs --all",
+    "import:cards:dry-run": "node scripts/import-cards.mjs --dry-run",
+    "import:cards:verify": "node scripts/import-cards.mjs --verify",
+    "import:cards:sql": "node scripts/generate-card-import-sql.mjs && node scripts/combine-card-import-sql.mjs && node scripts/split-card-import-sql.mjs && node scripts/batch-card-import-sql.mjs"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.49.8"
+    "@radix-ui/react-dialog": "^1.1.17",
+    "@radix-ui/react-label": "^2.1.10",
+    "@radix-ui/react-select": "^2.3.1",
+    "@radix-ui/react-slot": "^1.3.0",
+    "@supabase/ssr": "^0.12.0",
+    "@supabase/supabase-js": "^2.108.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.4.0",
+    "lucide-react": "^1.21.0",
+    "next": "^16.2.9",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@tailwindcss/postcss": "^4.3.1",
+    "@types/node": "^26.0.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.9",
+    "pg": "^8.22.0",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^4.3.1",
+    "typescript": "^6.0.3"
   }
 }

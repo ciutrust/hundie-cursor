@@ -1,0 +1,94 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+
+export type ReclassifyInput = {
+  classificationId: string;
+  entityId: string;
+  categoryId: string | null;
+  month: string;
+  entitySlug: string;
+};
+
+export type BulkReclassifyInput = {
+  classificationIds: string[];
+  entityId: string;
+  categoryId: string | null;
+  entitySlug: string;
+};
+
+export async function reclassifyTransaction(input: ReclassifyInput) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Not authenticated" };
+  }
+
+  const { error } = await supabase
+    .from("classifications")
+    .update({
+      entity_id: input.entityId,
+      category_id: input.categoryId,
+      classified_by: user.email ?? user.id,
+      classified_at: new Date().toISOString(),
+    })
+    .eq("id", input.classificationId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath("/review");
+  revalidatePath(`/review/${input.entitySlug}`);
+  revalidatePath("/review/unclassified");
+
+  return { success: true };
+}
+
+export async function bulkReclassifyTransactions(input: BulkReclassifyInput) {
+  if (input.classificationIds.length === 0) {
+    return { error: "No transactions selected" };
+  }
+
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Not authenticated" };
+  }
+
+  const { error } = await supabase
+    .from("classifications")
+    .update({
+      entity_id: input.entityId,
+      category_id: input.categoryId,
+      classified_by: user.email ?? user.id,
+      classified_at: new Date().toISOString(),
+    })
+    .in("id", input.classificationIds);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath("/review");
+  revalidatePath(`/review/${input.entitySlug}`);
+  revalidatePath("/review/unclassified");
+
+  return { success: true, count: input.classificationIds.length };
+}
+
+export async function signOut() {
+  const supabase = await createClient();
+  await supabase.auth.signOut();
+  redirect("/login");
+}

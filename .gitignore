@@ -22,4 +22,6 @@ supabase/.temp/
 
 # Import uploads (local CSVs may contain account details)
 data/imports/
+scripts/.card-import-sql/
+scripts/.qb-import-sql/
 *.csv
