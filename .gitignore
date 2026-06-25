@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Environment (never commit secrets)
+.env
+.env.local
+.env.*.local
+
+# Next.js
+.next/
+out/
+
+# Supabase
+supabase/.temp/
+.branches/
+
+# OS / editor
+.DS_Store
+*.log
+.idea/
+.vscode/
+
+# Import uploads (local CSVs may contain account details)
+data/imports/
+*.csv

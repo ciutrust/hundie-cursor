@@ -1,0 +1,12 @@
+{
+  "name": "hundie-cursor",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "verify:db": "node scripts/verify-connection.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.8"
+  }
+}
