@@ -18,8 +18,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CategorySuggestionChips } from "@/components/review/category-suggestion-chips";
 import { TransactionSearchBar } from "@/components/review/transaction-search-bar";
 import { bulkReclassifyTransactions, reclassifyTransaction } from "@/lib/actions/reclassify";
+import { getCategorySuggestions } from "@/lib/actions/suggestions";
+import type { CategorySuggestion } from "@/lib/suggestions/category-suggestions";
 import type { Category, Entity, TransactionWithDetails } from "@/lib/types/database";
 import {
   EMPTY_TRANSACTION_FILTERS,
@@ -333,9 +336,36 @@ function ReclassifyDialog({
   const [entityId, setEntityId] = useState(transaction.classification.entity_id);
   const [categoryId, setCategoryId] = useState<string | null>(transaction.classification.category_id);
   const [error, setError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<CategorySuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
 
   const selectedEntity = entities.find((entity) => entity.id === entityId);
   const showCategories = selectedEntity?.slug === "gbsl";
+
+  useEffect(() => {
+    if (!showCategories) {
+      setSuggestions([]);
+      setSuggestionsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSuggestionsLoading(true);
+
+    getCategorySuggestions({
+      description: transaction.description,
+      vendor: transaction.vendor,
+      entitySlug: "gbsl",
+    }).then((result) => {
+      if (cancelled) return;
+      setSuggestions(result.suggestions);
+      setSuggestionsLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showCategories, transaction.description, transaction.vendor]);
 
   function handleEntityChange(nextEntityId: string) {
     setEntityId(nextEntityId);
@@ -386,6 +416,15 @@ function ReclassifyDialog({
               <span className="text-muted-foreground">Account:</span> {transaction.account.display_name}
             </p>
           </div>
+
+          {showCategories ? (
+            <CategorySuggestionChips
+              suggestions={suggestions}
+              selectedCategoryId={categoryId}
+              isLoading={suggestionsLoading}
+              onSelect={setCategoryId}
+            />
+          ) : null}
 
           <ClassificationForm
             entities={entities}
