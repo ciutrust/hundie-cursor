@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { estimateCostUsd } from "@/lib/ai/config";
+import { estimateCostUsd, getAiModel } from "@/lib/ai/config";
 import { classifyAllTransactions, estimateTokensForBatch } from "@/lib/ai/preclassify";
 import type { BacklogTransaction } from "@/lib/ai/vendor-groups";
 import { extractVendorSearchKey } from "@/lib/suggestions/category-suggestions";
@@ -18,6 +18,7 @@ export type AiEstimateResult = {
   estimatedOutputTokens: number;
   estimatedCostUsd: number;
   batchCount: number;
+  model: string;
 };
 
 export async function estimateAiRun(transactionIds: string[]): Promise<AiEstimateResult | { error: string }> {
@@ -37,6 +38,7 @@ export async function estimateAiRun(transactionIds: string[]): Promise<AiEstimat
     estimatedOutputTokens: outputTokens,
     estimatedCostUsd: estimateCostUsd(inputTokens, outputTokens),
     batchCount,
+    model: getAiModel(),
   };
 }
 

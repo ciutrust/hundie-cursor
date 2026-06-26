@@ -14,11 +14,11 @@ export const metadata: Metadata = {
   description: "Weekly transaction classifier for multi-entity bookkeeping",
 };
 
-const themeScript = `(function(){try{var t=localStorage.getItem('hundie-theme');document.documentElement.classList.toggle('dark',t!=='light')}catch(e){document.documentElement.classList.add('dark')}})()`;
+const themeScript = `(function(){try{var t=localStorage.getItem('hundie-theme');var d=t!=='light';document.documentElement.classList.toggle('dark',d);document.documentElement.style.colorScheme=d?'dark':'light'}catch(e){document.documentElement.classList.add('dark');document.documentElement.style.colorScheme='dark'}})()`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`dark ${dmSans.variable}`} suppressHydrationWarning>
+    <html lang="en" className={dmSans.variable} suppressHydrationWarning>
       <body className="font-[family-name:var(--font-dm-sans)]">
         <Script id="hundie-theme" strategy="beforeInteractive">
           {themeScript}

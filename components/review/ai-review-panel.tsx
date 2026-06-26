@@ -5,11 +5,19 @@ import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   acceptAiSuggestions,
   estimateAiRun,
   rejectAiSuggestions,
   requestAiSuggestions,
   type AcceptAiItem,
+  type AiEstimateResult,
 } from "@/lib/actions/ai-suggestions";
 import type { BacklogTransaction, VendorGroup } from "@/lib/ai/vendor-groups";
 import { buildVendorGroups } from "@/lib/ai/vendor-groups";
@@ -46,6 +54,10 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
   const [resultSelectedIds, setResultSelectedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [runConfirm, setRunConfirm] = useState<{ ids: string[]; estimate: AiEstimateResult } | null>(
+    null,
+  );
+  const [isEstimating, setIsEstimating] = useState(false);
 
   const groups = useMemo(() => buildVendorGroups(transactions), [transactions]);
   const entityIdBySlug = useMemo(
@@ -94,7 +106,7 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
     return selected > 0 && selected < group.transactions.length;
   }
 
-  function runAi(selectedOnly: boolean) {
+  function beginRunAi(selectedOnly: boolean) {
     const ids = selectedOnly ? [...selectedIds] : transactions.map((tx) => tx.id);
     if (ids.length === 0) {
       setError("Select at least one transaction");
@@ -103,17 +115,32 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
 
     setError(null);
     setStatus(null);
+    setIsEstimating(true);
+    setRunConfirm(null);
 
     startTransition(async () => {
       const estimate = await estimateAiRun(ids);
+      setIsEstimating(false);
       if ("error" in estimate) {
         setError(estimate.error);
         return;
       }
+      setRunConfirm({ ids, estimate });
+    });
+  }
 
-      setStatus(
-        `Running AI on ${estimate.transactionCount} transactions (~$${estimate.estimatedCostUsd.toFixed(2)} est.)…`,
-      );
+  function cancelRunConfirm() {
+    setRunConfirm(null);
+    setIsEstimating(false);
+  }
+
+  function confirmRunAi() {
+    if (!runConfirm) return;
+    const { ids } = runConfirm;
+    setRunConfirm(null);
+
+    startTransition(async () => {
+      setStatus(`Running AI on ${ids.length} transaction(s)…`);
 
       const result = await requestAiSuggestions(ids);
       if ("error" in result) {
@@ -230,12 +257,18 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
             type="button"
             variant="outline"
             size="sm"
-            disabled={isPending || selectedCount === 0}
-            onClick={() => runAi(true)}
+            disabled={isPending || isEstimating || selectedCount === 0}
+            onClick={() => beginRunAi(true)}
           >
             Ask AI ({selectedCount})
           </Button>
-          <Button type="button" variant="ghost" size="sm" disabled={isPending} onClick={() => runAi(false)}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={isPending || isEstimating}
+            onClick={() => beginRunAi(false)}
+          >
             Ask AI (all {transactions.length})
           </Button>
         </div>
@@ -327,6 +360,66 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
           );
         })}
       </div>
+
+      <Dialog
+        open={isEstimating || runConfirm !== null}
+        onOpenChange={(open) => {
+          if (!open) cancelRunConfirm();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Run AI pre-classifier?</DialogTitle>
+            <DialogDescription>
+              Suggestions only — nothing is written to the ledger until you accept in review.
+            </DialogDescription>
+          </DialogHeader>
+
+          {isEstimating ? (
+            <p className="text-sm text-muted-foreground">Calculating cost estimate…</p>
+          ) : runConfirm ? (
+            <div className="space-y-4">
+              <dl className="grid gap-2 text-sm">
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Transactions</dt>
+                  <dd className="font-medium tabular-nums">{runConfirm.estimate.transactionCount}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">API batches</dt>
+                  <dd className="font-medium tabular-nums">{runConfirm.estimate.batchCount}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Est. tokens</dt>
+                  <dd className="font-medium tabular-nums">
+                    ~{(runConfirm.estimate.estimatedInputTokens + runConfirm.estimate.estimatedOutputTokens).toLocaleString()}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Model</dt>
+                  <dd className="font-medium">{runConfirm.estimate.model}</dd>
+                </div>
+                <div className="flex justify-between gap-4 border-t border-border pt-2">
+                  <dt className="font-medium">Estimated cost</dt>
+                  <dd className="text-lg font-semibold tabular-nums">
+                    ~${runConfirm.estimate.estimatedCostUsd.toFixed(2)}
+                  </dd>
+                </div>
+              </dl>
+              <p className="text-xs text-muted-foreground">
+                Actual cost may differ slightly. Final charge appears when the run completes.
+              </p>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button type="button" variant="outline" onClick={cancelRunConfirm}>
+                  Cancel
+                </Button>
+                <Button type="button" disabled={isPending} onClick={confirmRunAi}>
+                  Run AI (~${runConfirm.estimate.estimatedCostUsd.toFixed(2)})
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       {pendingResult ? (
         <div className="space-y-4 rounded-xl border border-violet-500/40 bg-violet-500/5 p-4">

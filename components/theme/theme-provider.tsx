@@ -15,17 +15,21 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 const STORAGE_KEY = "hundie-theme";
 
 function applyTheme(theme: Theme) {
-  document.documentElement.classList.toggle("dark", theme === "dark");
+  const root = document.documentElement;
+  root.classList.toggle("dark", theme === "dark");
+  root.style.colorScheme = theme;
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>("dark");
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
     const initial = stored === "light" ? "light" : "dark";
     setThemeState(initial);
     applyTheme(initial);
+    setReady(true);
   }, []);
 
   function setTheme(next: Theme) {
@@ -35,11 +39,18 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }
 
   function toggleTheme() {
-    setTheme(theme === "dark" ? "light" : "dark");
+    setThemeState((current) => {
+      const next = current === "dark" ? "light" : "dark";
+      localStorage.setItem(STORAGE_KEY, next);
+      applyTheme(next);
+      return next;
+    });
   }
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>{children}</ThemeContext.Provider>
+    <ThemeContext.Provider value={{ theme: ready ? theme : "dark", setTheme, toggleTheme }}>
+      {children}
+    </ThemeContext.Provider>
   );
 }
 

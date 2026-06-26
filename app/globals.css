@@ -2,7 +2,7 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-@theme inline {
+@theme {
   --color-background: oklch(0.985 0.004 265);
   --color-foreground: oklch(0.18 0.02 265);
   --color-card: oklch(1 0 0);
@@ -48,6 +48,11 @@
 
   html {
     @apply scroll-smooth;
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
   }
 
   body {
