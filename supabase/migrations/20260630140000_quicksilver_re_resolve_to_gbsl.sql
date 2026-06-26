@@ -11,19 +11,22 @@ where slug = 'cap-one-quicksilver-claudia';
 
 -- Re-assign entity on mis-booked window; clear category when it belongs to Personal chart.
 update classifications c
-set entity_id = gbsl.id,
-    category_id = case
-      when cat.entity_id = gbsl.id then c.category_id
-      else null
-    end,
+set entity_id = (select id from entities where slug = 'gbsl'),
+    category_id = (
+      select c.category_id
+      from categories cat
+      where cat.id = c.category_id
+        and cat.entity_id = (select id from entities where slug = 'gbsl')
+    ),
     classified_by = coalesce(nullif(c.classified_by, ''), 'quicksilver-date-rule-fix'),
     classified_at = now()
-from transactions t
-join accounts a on a.id = t.account_id and a.slug = 'cap-one-quicksilver-claudia'
-join entities personal on personal.slug = 'personal'
-join entities gbsl on gbsl.slug = 'gbsl'
-left join categories cat on cat.id = c.category_id
-where c.transaction_id = t.id
-  and c.entity_id = personal.id
-  and t.transaction_date >= '2025-07-01'
-  and t.transaction_date < '2026-07-01';
+where exists (
+  select 1
+  from transactions t
+  join accounts a on a.id = t.account_id and a.slug = 'cap-one-quicksilver-claudia'
+  join entities personal on personal.slug = 'personal'
+  where c.transaction_id = t.id
+    and c.entity_id = personal.id
+    and t.transaction_date >= '2025-07-01'
+    and t.transaction_date < '2026-07-01'
+);
