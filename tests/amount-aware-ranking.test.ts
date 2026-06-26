@@ -1,0 +1,48 @@
+import { describe, expect, test } from "vitest";
+import {
+  rankAmountAwareMatches,
+  representativeBulkAmount,
+  roundAmount,
+} from "../lib/suggestions/amount-aware-ranking";
+
+const row = (amount: number, id: string, path: string) => ({
+  amount,
+  category_id: id,
+  category: { id, full_path: path },
+});
+
+describe("rankAmountAwareMatches", () => {
+  test("exact bucket with >=2 occurrences returns an exact match", () => {
+    const rows = [row(850, "fr", "Franchise Fees"), row(850, "fr", "Franchise Fees"), row(125, "sw", "Software")];
+    const m = rankAmountAwareMatches(850, rows);
+    expect(m[0]?.matchType).toBe("exact");
+    expect(m[0]?.fullPath).toBe("Franchise Fees");
+  });
+
+  test("a single occurrence at the target is below the >=2 threshold -> no match", () => {
+    expect(rankAmountAwareMatches(125, [row(125, "sw", "Software")])).toEqual([]);
+  });
+
+  test("no exact bucket falls back to the nearest eligible (>=2) bucket", () => {
+    const rows = [row(850, "fr", "Franchise Fees"), row(850, "fr", "Franchise Fees")];
+    const m = rankAmountAwareMatches(900, rows);
+    expect(m[0]?.matchType).toBe("nearest");
+    expect(m[0]?.bucketAmount).toBe(850);
+  });
+});
+
+describe("representativeBulkAmount", () => {
+  test("returns the majority amount", () => {
+    expect(representativeBulkAmount([20, 20, 20, 35])).toBe(20);
+  });
+  test("no strict majority -> undefined", () => {
+    expect(representativeBulkAmount([10, 20, 30])).toBeUndefined();
+  });
+});
+
+describe("roundAmount", () => {
+  test("uses absolute value to 2dp so refunds bucket with their charges", () => {
+    expect(roundAmount(-850)).toBe(850);
+    expect(roundAmount(12.5)).toBe(12.5);
+  });
+});

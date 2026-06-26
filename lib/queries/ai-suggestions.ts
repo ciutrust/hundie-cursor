@@ -1,6 +1,7 @@
 import { AI_BACKLOG_END, AI_BACKLOG_START, AI_ENTITY_SLUG } from "@/lib/ai/config";
 import type { BacklogTransaction } from "@/lib/ai/vendor-groups";
 import { createClient } from "@/lib/supabase/server";
+import { acceptanceBySource, type AcceptanceBySource } from "@/lib/suggestions/acceptance";
 
 function isMissingAiSuggestionsTable(error: { message?: string } | null) {
   const message = error?.message?.toLowerCase() ?? "";
@@ -349,5 +350,21 @@ export async function getAiSuggestionCoverage() {
       return { total: 0, withAi: 0, withoutAi: 0 };
     }
     throw error;
+  }
+}
+
+export async function getSuggestionAcceptanceBySource(): Promise<AcceptanceBySource[]> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("suggestion_events")
+      .select("event_type, suggestion_source");
+    if (error) throw error;
+    return acceptanceBySource(
+      (data ?? []) as { event_type: string; suggestion_source: string | null }[],
+    );
+  } catch (error) {
+    console.error("getSuggestionAcceptanceBySource failed:", error);
+    return [];
   }
 }
