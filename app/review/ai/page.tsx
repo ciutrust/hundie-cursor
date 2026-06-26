@@ -1,15 +1,16 @@
 import { Suspense } from "react";
 import { Sparkles } from "lucide-react";
 import { AiReviewPanel } from "@/components/review/ai-review-panel";
-import { getClassifiableEntities } from "@/lib/queries/review";
+import { getCategoriesByEntity, getClassifiableEntities } from "@/lib/queries/review";
 import { getPersonalAiBacklog } from "@/lib/queries/ai-suggestions";
 
 export const maxDuration = 300;
 
 export default async function AiReviewPage() {
-  const [transactions, entities] = await Promise.all([
+  const [transactions, entities, categoriesByEntity] = await Promise.all([
     getPersonalAiBacklog(),
     getClassifiableEntities(),
+    getCategoriesByEntity(),
   ]);
 
   const withAi = transactions.filter((tx) => tx.ai_suggestion).length;
@@ -30,7 +31,11 @@ export default async function AiReviewPage() {
         </p>
       </div>
 
-      <AiReviewPanel transactions={transactions} entities={entities} />
+      <AiReviewPanel
+        transactions={transactions}
+        entities={entities}
+        categoriesByEntity={categoriesByEntity}
+      />
     </div>
   );
 }

@@ -95,11 +95,24 @@ export function mergeWeightedSuggestions(
       entry.matchCount += 1;
     }
 
-    if (row.event_type === "reject" && row.suggested_category_id) {
-      const entry = entries.get(row.suggested_category_id);
-      if (entry) {
-        entry.eventScore -= 0.5 * weight;
-        entry.score -= 0.5 * weight;
+    if (row.event_type === "reject") {
+      // Override: the operator chose chosen_category_id instead of the suggestion.
+      // Credit their choice so an override reinforces the engine via events too —
+      // not only via confirmed history. This is what makes an override "count".
+      if (row.chosen_category_id) {
+        const fullPath = row.chosen?.full_path ?? row.category?.full_path ?? "Unknown";
+        const entry = ensure(row.chosen_category_id, fullPath);
+        entry.eventScore += 2.5 * weight;
+        entry.score += 2.5 * weight;
+        entry.matchCount += 1;
+      }
+      // Small negative signal for the suggestion the operator did not keep.
+      if (row.suggested_category_id) {
+        const entry = entries.get(row.suggested_category_id);
+        if (entry) {
+          entry.eventScore -= 0.5 * weight;
+          entry.score -= 0.5 * weight;
+        }
       }
     }
   }

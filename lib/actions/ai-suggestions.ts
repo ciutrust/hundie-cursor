@@ -193,7 +193,11 @@ export type AcceptAiItem = {
   classificationId: string;
   transactionId: string;
   entityId: string;
+  /** The category being assigned (the AI's pick, or the operator's override). */
   categoryId: string | null;
+  /** What the AI originally suggested — logged as the "shown" suggestion so keeping it
+   *  records an accept and overriding it records a reject (honest accept-rate-by-source). */
+  aiSuggestedCategoryId: string | null;
   description: string;
   vendor: string | null;
 };
@@ -234,8 +238,11 @@ export async function acceptAiSuggestions(
       description: item.description,
       vendor: item.vendor,
       chosenCategoryId: item.categoryId,
-      suggestionsShown: item.categoryId
-        ? [{ categoryId: item.categoryId, source: "ai_llm" }]
+      // Log the AI's ORIGINAL suggestion as what was shown — so keeping it logs an
+      // accept and overriding it logs a reject (which still trains the engine on the
+      // chosen category via confirmed history + the reject-credits-chosen rule).
+      suggestionsShown: item.aiSuggestedCategoryId
+        ? [{ categoryId: item.aiSuggestedCategoryId, source: "ai_llm" }]
         : [],
     };
     await logSuggestionEvent(outcome, createdBy);

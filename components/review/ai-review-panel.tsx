@@ -29,16 +29,21 @@ import { formatCurrency } from "@/lib/utils";
 type AiReviewPanelProps = {
   transactions: BacklogTransaction[];
   entities: Pick<Entity, "id" | "name" | "slug">[];
+  categoriesByEntity: Record<string, { id: string; full_path: string }[]>;
 };
 
 type HasAiFilter = "all" | "yes" | "no";
 
-export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
+export function AiReviewPanel({ transactions, entities, categoriesByEntity }: AiReviewPanelProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [askSelectedIds, setAskSelectedIds] = useState<Set<string>>(() => new Set());
-  const [acceptIncludedIds, setAcceptIncludedIds] = useState<Set<string>>(() => new Set());
+  // Which transactions get the assignment when you click Assign on a group. Default: all.
+  const [assignSelectedIds, setAssignSelectedIds] = useState<Set<string>>(() => new Set());
+  // Per-group entity/category overrides (undefined = use the AI-derived default).
+  const [assignEntity, setAssignEntity] = useState<Record<string, string>>({});
+  const [assignCategory, setAssignCategory] = useState<Record<string, string | null>>({});
   const [vendorSearch, setVendorSearch] = useState("");
   const [hasAiFilter, setHasAiFilter] = useState<HasAiFilter>("all");
   const [accountFilter, setAccountFilter] = useState("all");
@@ -73,9 +78,7 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
         if (!group.transactions.some((tx) => tx.account_display_name === accountFilter)) return false;
       }
       if (confidenceFilter !== "all") {
-        if (
-          !group.transactions.some((tx) => tx.ai_suggestion?.confidence === confidenceFilter)
-        ) {
+        if (!group.transactions.some((tx) => tx.ai_suggestion?.confidence === confidenceFilter)) {
           return false;
         }
       }
@@ -86,10 +89,9 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
   const withAiCount = transactions.filter((tx) => tx.ai_suggestion).length;
   const askSelectedCount = askSelectedIds.size;
 
+  // Default: every backlog transaction is selected for assignment.
   useEffect(() => {
-    setAcceptIncludedIds(
-      new Set(transactions.filter((tx) => tx.ai_suggestion).map((tx) => tx.id)),
-    );
+    setAssignSelectedIds(new Set(transactions.map((tx) => tx.id)));
   }, [transactions]);
 
   function toggleGroupExpand(key: string) {
@@ -121,15 +123,6 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
     });
   }
 
-  function toggleAcceptInclusion(id: string) {
-    setAcceptIncludedIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
   function isAskGroupFullySelected(group: VendorGroup) {
     return group.transactions.every((tx) => askSelectedIds.has(tx.id));
   }
@@ -137,6 +130,104 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
   function isAskGroupPartiallySelected(group: VendorGroup) {
     const n = group.transactions.filter((tx) => askSelectedIds.has(tx.id)).length;
     return n > 0 && n < group.transactions.length;
+  }
+
+  function toggleAssignSelection(id: string) {
+    setAssignSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function setGroupAssignSelection(group: VendorGroup, checked: boolean) {
+    setAssignSelectedIds((current) => {
+      const next = new Set(current);
+      for (const tx of group.transactions) {
+        if (checked) next.add(tx.id);
+        else next.delete(tx.id);
+      }
+      return next;
+    });
+  }
+
+  function isAssignGroupFullySelected(group: VendorGroup) {
+    return group.transactions.every((tx) => assignSelectedIds.has(tx.id));
+  }
+
+  function isAssignGroupPartiallySelected(group: VendorGroup) {
+    const n = group.transactions.filter((tx) => assignSelectedIds.has(tx.id)).length;
+    return n > 0 && n < group.transactions.length;
+  }
+
+  function groupAiSample(group: VendorGroup) {
+    return group.transactions.find((tx) => tx.ai_suggestion)?.ai_suggestion ?? null;
+  }
+
+  function defaultEntitySlug(group: VendorGroup) {
+    return groupAiSample(group)?.entity_slug ?? "personal";
+  }
+
+  function defaultCategoryId(group: VendorGroup, entitySlug: string): string | null {
+    const aiCategoryId = groupAiSample(group)?.suggested_category_id ?? null;
+    const valid = (categoriesByEntity[entitySlug] ?? []).some((c) => c.id === aiCategoryId);
+    return valid ? aiCategoryId : null;
+  }
+
+  function currentEntitySlug(group: VendorGroup) {
+    return assignEntity[group.vendorKey] ?? defaultEntitySlug(group);
+  }
+
+  function currentCategoryId(group: VendorGroup): string | null {
+    if (group.vendorKey in assignCategory) return assignCategory[group.vendorKey];
+    return defaultCategoryId(group, currentEntitySlug(group));
+  }
+
+  function onEntityChange(group: VendorGroup, slug: string) {
+    setAssignEntity((current) => ({ ...current, [group.vendorKey]: slug }));
+    // Re-derive the category default for the new entity (the old one may not exist there).
+    setAssignCategory((current) => ({ ...current, [group.vendorKey]: defaultCategoryId(group, slug) }));
+  }
+
+  function onCategoryChange(group: VendorGroup, categoryId: string | null) {
+    setAssignCategory((current) => ({ ...current, [group.vendorKey]: categoryId }));
+  }
+
+  function assignGroup(group: VendorGroup) {
+    const entitySlug = currentEntitySlug(group);
+    const entityId = entityIdBySlug.get(entitySlug);
+    if (!entityId) {
+      setError(`No entity resolved for ${group.label}`);
+      return;
+    }
+    const categoryId = currentCategoryId(group);
+    const selected = group.transactions.filter((tx) => assignSelectedIds.has(tx.id));
+    if (selected.length === 0) {
+      setError(`No transactions selected in ${group.label}`);
+      return;
+    }
+
+    const items: AcceptAiItem[] = selected.map((tx) => ({
+      classificationId: tx.classification_id,
+      transactionId: tx.id,
+      entityId,
+      categoryId,
+      aiSuggestedCategoryId: tx.ai_suggestion?.suggested_category_id ?? null,
+      description: tx.description,
+      vendor: tx.vendor,
+    }));
+
+    setError(null);
+    startTransition(async () => {
+      const result = await acceptAiSuggestions(items);
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
+      setStatus(`Assigned ${result.count} transaction(s) in ${group.label}`);
+      router.refresh();
+    });
   }
 
   function beginRunAi(selectedOnly: boolean) {
@@ -219,45 +310,6 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
     });
   }
 
-  function acceptGroupAi(group: VendorGroup) {
-    const acceptItems: AcceptAiItem[] = group.transactions
-      .filter(
-        (tx) =>
-          acceptIncludedIds.has(tx.id) &&
-          tx.ai_suggestion?.suggested_category_id &&
-          tx.ai_suggestion.entity_slug,
-      )
-      .map((tx) => {
-        const ai = tx.ai_suggestion!;
-        const entityId =
-          entityIdBySlug.get(ai.entity_slug) ?? entityIdBySlug.get("personal") ?? "";
-        return {
-          classificationId: tx.classification_id,
-          transactionId: tx.id,
-          entityId,
-          categoryId: ai.suggested_category_id,
-          description: tx.description,
-          vendor: tx.vendor,
-        };
-      });
-
-    if (acceptItems.length === 0) {
-      setError("No checked transactions with a valid AI category in this group");
-      return;
-    }
-
-    setError(null);
-    startTransition(async () => {
-      const result = await acceptAiSuggestions(acceptItems);
-      if ("error" in result) {
-        setError(result.error);
-        return;
-      }
-      setStatus(`Accepted AI for ${result.count} transaction(s) in ${group.label}`);
-      router.refresh();
-    });
-  }
-
   if (transactions.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">No Personal uncategorized transactions in the AI backlog.</p>
@@ -273,7 +325,8 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
             <h2 className="text-lg font-semibold">Vendor groups</h2>
           </div>
           <p className="text-sm text-muted-foreground">
-            {transactions.length} transactions · {withAiCount} with AI suggestions · classified by vendor group
+            {transactions.length} transactions · {withAiCount} with AI suggestions · pick entity +
+            category, then Assign the selected rows
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -347,11 +400,11 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
         ) : (
           filteredGroups.map((group) => {
             const expanded = expandedGroups.has(group.vendorKey);
-            const hasAi = group.transactions.some((tx) => tx.ai_suggestion);
-            const aiSample = group.transactions.find((tx) => tx.ai_suggestion)?.ai_suggestion;
-            const acceptCount = group.transactions.filter(
-              (tx) => acceptIncludedIds.has(tx.id) && tx.ai_suggestion?.suggested_category_id,
-            ).length;
+            const aiSample = groupAiSample(group);
+            const entitySlug = currentEntitySlug(group);
+            const categoryId = currentCategoryId(group);
+            const entityCategories = categoriesByEntity[entitySlug] ?? [];
+            const selectedCount = group.transactions.filter((tx) => assignSelectedIds.has(tx.id)).length;
 
             return (
               <div key={group.vendorKey} className="rounded-lg border border-border bg-card">
@@ -359,7 +412,7 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
                   <input
                     type="checkbox"
                     className="h-4 w-4 rounded border-border"
-                    title="Select for Ask AI"
+                    title="Select group for Ask AI"
                     checked={isAskGroupFullySelected(group)}
                     ref={(el) => {
                       if (el) el.indeterminate = isAskGroupPartiallySelected(group);
@@ -382,25 +435,64 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
                       {group.transactions.length} txns · {formatCurrency(group.total)}
                     </span>
                   </button>
-                  {hasAi && aiSample ? (
-                    <span className="hidden text-xs text-violet-600 dark:text-violet-400 lg:inline">
+
+                  {aiSample ? (
+                    <span className="hidden text-xs text-violet-600 dark:text-violet-400 xl:inline">
                       AI: {aiSample.entity_slug}
-                      {aiSample.suggested_category_path
-                        ? ` → ${aiSample.suggested_category_path}`
-                        : ""}{" "}
-                      · {aiSample.confidence}
+                      {aiSample.suggested_category_path ? ` → ${aiSample.suggested_category_path}` : ""}
+                      {aiSample.confidence ? ` · ${aiSample.confidence}` : ""}
                     </span>
                   ) : null}
-                  {hasAi ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={isPending || acceptCount === 0}
-                      onClick={() => acceptGroupAi(group)}
-                    >
-                      Accept AI ({acceptCount})
-                    </Button>
-                  ) : null}
+
+                  <label className="flex items-center gap-1 text-xs text-muted-foreground" title="Assign all rows in this group">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-border accent-violet-500"
+                      checked={isAssignGroupFullySelected(group)}
+                      ref={(el) => {
+                        if (el) el.indeterminate = isAssignGroupPartiallySelected(group);
+                      }}
+                      onChange={(event) => setGroupAssignSelection(group, event.target.checked)}
+                      aria-label={`Select all rows in ${group.label} for Assign`}
+                    />
+                    all
+                  </label>
+
+                  <select
+                    className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+                    value={entitySlug}
+                    onChange={(event) => onEntityChange(group, event.target.value)}
+                    aria-label="Entity"
+                  >
+                    {entities.map((entity) => (
+                      <option key={entity.slug} value={entity.slug}>
+                        {entity.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    className="h-9 max-w-[220px] rounded-md border border-border bg-background px-2 text-sm"
+                    value={categoryId ?? ""}
+                    onChange={(event) => onCategoryChange(group, event.target.value || null)}
+                    aria-label="Category"
+                  >
+                    <option value="">Unclassified</option>
+                    {entityCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.full_path}
+                      </option>
+                    ))}
+                  </select>
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={isPending || selectedCount === 0}
+                    onClick={() => assignGroup(group)}
+                  >
+                    Assign ({selectedCount})
+                  </Button>
                 </div>
 
                 {expanded ? (
@@ -414,17 +506,13 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
                           checked={askSelectedIds.has(tx.id)}
                           onChange={() => toggleAskSelection(tx.id)}
                         />
-                        {tx.ai_suggestion ? (
-                          <input
-                            type="checkbox"
-                            className="mt-0.5 h-4 w-4 rounded border-border accent-violet-500"
-                            title="Include in Accept AI"
-                            checked={acceptIncludedIds.has(tx.id)}
-                            onChange={() => toggleAcceptInclusion(tx.id)}
-                          />
-                        ) : (
-                          <span className="mt-0.5 w-4" />
-                        )}
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 h-4 w-4 rounded border-border accent-violet-500"
+                          title="Include this row in Assign"
+                          checked={assignSelectedIds.has(tx.id)}
+                          onChange={() => toggleAssignSelection(tx.id)}
+                        />
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{tx.description}</p>
                           <p className="text-xs text-muted-foreground">
@@ -462,7 +550,7 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
             <DialogTitle>Run AI pre-classifier?</DialogTitle>
             <DialogDescription>
               Vendor groups are summarized (not sent row-by-row). Nothing writes to the ledger until you
-              Accept AI.
+              Assign.
             </DialogDescription>
           </DialogHeader>
 
