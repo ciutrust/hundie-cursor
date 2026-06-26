@@ -30,3 +30,6 @@ scripts/.qb-import-batches.json
 scripts/.*-qb-*.mjs
 scripts/archive/
 *.csv
+
+# TypeScript incremental build cache
+*.tsbuildinfo
