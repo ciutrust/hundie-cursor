@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { parsePeriodParams, periodQueryString, type PeriodRange } from "@/lib/period";
+import { periodQueryString, type PeriodRange } from "@/lib/period";
 
 type ReportFiltersProps = {
   period: PeriodRange;
@@ -78,16 +78,4 @@ export function ReportFilters(props: ReportFiltersProps) {
       <ReportFiltersInner {...props} />
     </Suspense>
   );
-}
-
-export function parseReportPeriod(
-  searchParams: { period?: string; at?: string; month?: string },
-  defaultPeriod?: PeriodRange,
-) {
-  return parsePeriodParams(searchParams, defaultPeriod);
-}
-
-export function parseReportEntitySlug(searchParams: { entity?: string }) {
-  const slug = searchParams.entity?.trim();
-  return slug && slug !== "all" ? slug : undefined;
 }

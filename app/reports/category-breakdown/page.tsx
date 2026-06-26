@@ -1,7 +1,8 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { CategoryBreakdown } from "@/components/review/category-breakdown";
-import { ReportFilters, parseReportEntitySlug, parseReportPeriod } from "@/components/reports/report-filters";
+import { ReportFilters } from "@/components/reports/report-filters";
+import { parseReportEntitySlug, parseReportPeriod } from "@/lib/reports/report-params";
 import { getClassifiableEntities, getEntityTransactions } from "@/lib/queries/review";
 import { activeMonthPeriod, periodQueryString } from "@/lib/period";
 

@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { MonthlyEntityMatrix } from "@/components/review/monthly-entity-matrix";
-import { ReportFilters, parseReportEntitySlug, parseReportPeriod } from "@/components/reports/report-filters";
+import { ReportFilters } from "@/components/reports/report-filters";
+import { parseReportEntitySlug, parseReportPeriod } from "@/lib/reports/report-params";
 import { getClassifiableEntities, getMonthlyEntityMatrix } from "@/lib/queries/review";
 import { activeMonthPeriod } from "@/lib/period";
 

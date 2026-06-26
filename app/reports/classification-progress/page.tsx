@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { ReportFilters, parseReportPeriod } from "@/components/reports/report-filters";
+import { ReportFilters } from "@/components/reports/report-filters";
+import { parseReportPeriod } from "@/lib/reports/report-params";
 import { getClassificationProgress } from "@/lib/queries/report-analytics";
 import { getClassifiableEntities } from "@/lib/queries/review";
 import { activeMonthPeriod } from "@/lib/period";

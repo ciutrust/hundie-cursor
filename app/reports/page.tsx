@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { ReportFilters, parseReportEntitySlug, parseReportPeriod } from "@/components/reports/report-filters";
+import { ReportFilters } from "@/components/reports/report-filters";
+import { parseReportEntitySlug, parseReportPeriod } from "@/lib/reports/report-params";
 import { getClassifiableEntities } from "@/lib/queries/review";
 import { activeMonthPeriod } from "@/lib/period";
 
