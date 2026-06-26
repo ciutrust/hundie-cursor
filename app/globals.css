@@ -43,3 +43,32 @@
     @apply tracking-tight;
   }
 }
+
+@media print {
+  @page {
+    margin: 1.2cm;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  header,
+  nav,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  .print\:block {
+    display: block !important;
+  }
+
+  table {
+    font-size: 10pt;
+  }
+
+  tr {
+    break-inside: avoid;
+  }
+}

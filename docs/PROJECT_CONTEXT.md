@@ -194,6 +194,8 @@ category_mappings — Hundie category ↔ QB account per company
 - Unified Hundie category tree in UI with mappings to each QB company where names differ
 - Personal / rental entities get Hundie-native categories mapping to Schedule E lines
 - Keep nested QB names (`Cost of Goods Sold:School Wear`, `Legal & Professional Fees:Accounting Fees`)
+- **Non-expense categories** — transfers, refunds, reclassify staging; excluded from expense totals via `lib/category-expense.ts` (see [CLASSIFICATION.md](./CLASSIFICATION.md))
+- **GBSL Hundie-only non-expense:** `Credit card payment`, `Refund / credit` (checking-side payments are not QB expense categories)
 
 ---
 

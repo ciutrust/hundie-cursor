@@ -1,4 +1,6 @@
 import type { PeriodRange } from "@/lib/period";
+import { needsCategoryReview } from "@/lib/category-review";
+import { isOperatingExpense } from "@/lib/category-expense";
 import { createClient } from "@/lib/supabase/server";
 
 export type ReportEntityRow = {
@@ -26,38 +28,25 @@ export async function getReportByEntity(period: PeriodRange): Promise<ReportEnti
   const supabase = await createClient();
   const { start, end } = period;
 
-  const [entitiesResult, transactionsResult] = await Promise.all([
+  const [entitiesResult, transactions] = await Promise.all([
     supabase.from("entities").select("id, name, slug, display_order").eq("is_classifiable", true).order("display_order"),
-    supabase
-      .from("transactions")
-      .select(
-        `
-        amount,
-        classification:classifications!inner(
-          entity_id,
-          category_id,
-          entity:entities!inner(name, slug)
-        )
-      `,
-      )
-      .gte("transaction_date", start)
-      .lt("transaction_date", end),
+    fetchPeriodSummaryTransactionsForReports(supabase, start, end),
   ]);
 
   if (entitiesResult.error) throw entitiesResult.error;
-  if (transactionsResult.error) throw transactionsResult.error;
 
   const entities = entitiesResult.data ?? [];
-  const transactions = transactionsResult.data ?? [];
 
   return entities.map((entity) => {
     const entityTransactions = transactions.filter((tx) => tx.classification.entity_id === entity.id);
-    const unclassified = entityTransactions.filter((tx) => !tx.classification.category_id);
+    const unclassified = entityTransactions.filter((tx) =>
+      needsCategoryReview(tx.classification.category?.full_path),
+    );
     return {
       slug: entity.slug,
       name: entity.name,
       total: entityTransactions
-        .filter((tx) => Number(tx.amount) > 0)
+        .filter((tx) => isOperatingExpense(tx.amount, tx.classification.category?.full_path))
         .reduce((sum, tx) => sum + Number(tx.amount), 0),
       transactionCount: entityTransactions.length,
       unclassifiedCount: unclassified.length,
@@ -66,6 +55,53 @@ export async function getReportByEntity(period: PeriodRange): Promise<ReportEnti
         .reduce((sum, tx) => sum + Number(tx.amount), 0),
     };
   });
+}
+
+async function fetchPeriodSummaryTransactionsForReports(
+  supabase: Awaited<ReturnType<typeof import("@/lib/supabase/server").createClient>>,
+  start: string,
+  end: string,
+) {
+  const pageSize = 1000;
+  const all: Array<{
+    amount: number;
+    classification: {
+      entity_id: string;
+      category_id: string | null;
+      entity: { name: string; slug: string };
+      category: { full_path: string } | null;
+    };
+  }> = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select(
+        `
+        amount,
+        classification:classifications!inner(
+          entity_id,
+          category_id,
+          entity:entities!inner(name, slug),
+          category:categories(full_path)
+        )
+      `,
+      )
+      .gte("transaction_date", start)
+      .lt("transaction_date", end)
+      .order("transaction_date", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+    const page = data ?? [];
+    all.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return all;
 }
 
 export async function getReportTransactions(period: PeriodRange): Promise<ReportTransactionRow[]> {

@@ -111,42 +111,82 @@ if (entityError || !entity) {
   process.exit(1);
 }
 
-const [{ data: cardRows, error: cardError }, { data: qbRows, error: qbError }] = await Promise.all([
-  supabase
-    .from("transactions")
-    .select(
-      `
-      id,
-      transaction_date,
-      amount,
-      description,
-      vendor,
-      classification:classifications!inner(
-        id,
-        category_id
-      )
-    `,
-    )
-    .eq("classification.entity_id", entity.id)
-    .is("classification.category_id", null)
-    .gte("transaction_date", fromDate)
-    .lt("transaction_date", toDate),
-  supabase
-    .from("qb_training_expenses")
-    .select("transaction_date, amount, vendor_name, description, category_id, category_name")
-    .eq("entity_id", entity.id)
-    .gte("transaction_date", fromDate)
-    .lt("transaction_date", toDate)
-    .not("category_id", "is", null),
-]);
+async function fetchAllUncategorizedCardRows() {
+  const pageSize = 1000;
+  const all = [];
+  let from = 0;
 
-if (cardError || qbError) {
-  console.error(cardError?.message ?? qbError?.message);
+  while (true) {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select(
+        `
+        id,
+        transaction_date,
+        amount,
+        description,
+        vendor,
+        classification:classifications!inner(
+          id,
+          category_id
+        )
+      `,
+      )
+      .eq("classification.entity_id", entity.id)
+      .is("classification.category_id", null)
+      .gte("transaction_date", fromDate)
+      .lt("transaction_date", toDate)
+      .order("transaction_date")
+      .order("id")
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+    if (!data?.length) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return all;
+}
+
+async function fetchAllQbRows() {
+  const pageSize = 1000;
+  const all = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("qb_training_expenses")
+      .select("transaction_date, amount, vendor_name, description, category_id, category_name")
+      .eq("entity_id", entity.id)
+      .gte("transaction_date", fromDate)
+      .lt("transaction_date", toDate)
+      .not("category_id", "is", null)
+      .order("transaction_date")
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+    if (!data?.length) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return all;
+}
+
+let cardRows;
+let qbRows;
+try {
+  [cardRows, qbRows] = await Promise.all([fetchAllUncategorizedCardRows(), fetchAllQbRows()]);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 }
 
 const qbByDateAmount = new Map();
-for (const row of qbRows ?? []) {
+for (const row of qbRows) {
   const key = `${row.transaction_date}|${Math.abs(Number(row.amount)).toFixed(2)}`;
   if (!qbByDateAmount.has(key)) qbByDateAmount.set(key, []);
   qbByDateAmount.get(key).push(row);
@@ -155,7 +195,7 @@ for (const row of qbRows ?? []) {
 const results = { matched: 0, skipped: 0, cpaReview: 0, byCategory: new Map() };
 const updates = [];
 
-for (const card of cardRows ?? []) {
+for (const card of cardRows) {
   const key = `${card.transaction_date}|${Math.abs(Number(card.amount)).toFixed(2)}`;
   const candidates = qbByDateAmount.get(key) ?? [];
   const qb = pickBestMatch(card, candidates);
@@ -180,8 +220,8 @@ for (const card of cardRows ?? []) {
 
 console.log(`GBSL QB category backfill (${fromDate} → ${toDate})`);
 console.log(`  Mode: ${dryRun ? "DRY RUN" : "APPLY"}`);
-console.log(`  Uncategorized card txs: ${cardRows?.length ?? 0}`);
-console.log(`  QB training rows: ${qbRows?.length ?? 0}`);
+console.log(`  Uncategorized card txs: ${cardRows.length}`);
+console.log(`  QB training rows: ${qbRows.length}`);
 console.log(`  Matched to apply: ${results.matched}`);
 console.log(`  Skipped (no confident match): ${results.skipped}`);
 console.log(`  Includes Ask My Accountant (CPA review): ${results.cpaReview}`);
@@ -198,7 +238,7 @@ if (!dryRun && updates.length > 0) {
         category_id: item.categoryId,
         classified_by: "qb_backfill",
         classified_at: new Date().toISOString(),
-        notes: "Auto-matched from QBO export (2026)",
+        notes: "Auto-matched from QBO export",
       })
       .eq("id", item.classificationId);
 

@@ -46,6 +46,12 @@ node scripts/import-cards.mjs --account wf-keller-services-cc \
 
 Keller CC: use **child** CSV; parent file is auto-merged (no duplicate charges).
 
+## Docs for agents
+
+- **Classification (categories, transfers, patterns):** [docs/CLASSIFICATION.md](docs/CLASSIFICATION.md)
+- **Phase 3 plan + amount-aware rules scope:** [docs/PHASE3_PLAN.md](docs/PHASE3_PLAN.md)
+- **Backlog:** [docs/Backlog.md](docs/Backlog.md)
+
 ## What's next
 
-Phase 2 — AI category suggestions: [docs/PHASE2_PLAN.md](docs/PHASE2_PLAN.md)
+Phase 3 — learning loop + Alex classifying backlog: [docs/PHASE3_PLAN.md](docs/PHASE3_PLAN.md)

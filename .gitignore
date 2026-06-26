@@ -24,4 +24,5 @@ supabase/.temp/
 data/imports/
 scripts/.card-import-sql/
 scripts/.qb-import-sql/
+scripts/.sheet-import-review.json
 *.csv

@@ -154,7 +154,11 @@ function isTransactionRow(row) {
 function isPaymentAccount(name) {
   if (!name || name.startsWith("Total for")) return false;
   if (PAYMENT_ACCOUNT_NAMES.has(name)) return true;
-  return PAYMENT_KEYWORDS.some((keyword) => name.includes(keyword));
+  if (PAYMENT_KEYWORDS.some((keyword) => name.includes(keyword))) return true;
+  // Keller / WF account sections e.g. "Keller Services LLC (7142) - 1"
+  if (/\(\d{4}\)\s*-\s*\d/.test(name)) return true;
+  if (/^MasterCard/i.test(name)) return true;
+  return false;
 }
 
 function isPaymentTransfer(split, paymentAccounts) {

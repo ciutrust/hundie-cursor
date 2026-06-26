@@ -1,3 +1,4 @@
+import { isCpaReviewCategory } from "@/lib/category-review";
 import type { TransactionWithDetails } from "@/lib/types/database";
 
 export const UNCLASSIFIED_CATEGORY_ID = "__unclassified__";
@@ -18,6 +19,7 @@ export type TransactionFilterState = {
   amountValue: string;
   categoryIds: string[];
   accountIds: string[];
+  reviewBacklogOnly: boolean;
 };
 
 export const EMPTY_TRANSACTION_FILTERS: TransactionFilterState = {
@@ -26,6 +28,7 @@ export const EMPTY_TRANSACTION_FILTERS: TransactionFilterState = {
   amountValue: "",
   categoryIds: [],
   accountIds: [],
+  reviewBacklogOnly: false,
 };
 
 const ACCOUNT_TYPE_LABELS: Record<string, string> = {
@@ -77,6 +80,11 @@ function matchesAmountFilter(amount: number, operator: AmountOperator, target: n
 
 function transactionCategoryFilterId(tx: TransactionWithDetails): string {
   return tx.classification.category_id ?? UNCLASSIFIED_CATEGORY_ID;
+}
+
+export function isReviewBacklogTransaction(tx: TransactionWithDetails): boolean {
+  const fullPath = tx.classification.category?.full_path;
+  return !fullPath || isCpaReviewCategory(fullPath);
 }
 
 export function getCategoryFilterOptions(
@@ -138,6 +146,10 @@ export function filterTransactions(
   const accountSet = new Set(filters.accountIds);
 
   return transactions.filter((tx) => {
+    if (filters.reviewBacklogOnly && !isReviewBacklogTransaction(tx)) {
+      return false;
+    }
+
     if (search && !transactionSearchHaystack(tx).includes(search)) {
       return false;
     }
@@ -165,7 +177,8 @@ export function hasActiveTransactionFilters(filters: TransactionFilterState): bo
     filters.searchText.trim().length > 0 ||
     (filters.amountOperator !== "any" && filters.amountValue.trim().length > 0) ||
     filters.categoryIds.length > 0 ||
-    filters.accountIds.length > 0
+    filters.accountIds.length > 0 ||
+    filters.reviewBacklogOnly
   );
 }
 

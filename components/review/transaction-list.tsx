@@ -31,6 +31,7 @@ import {
   filterTransactions,
   getAccountFilterOptions,
   getCategoryFilterOptions,
+  isReviewBacklogTransaction,
   type TransactionFilterState,
 } from "@/lib/transaction-filters";
 import { cn, formatCurrency } from "@/lib/utils";
@@ -97,6 +98,11 @@ export function TransactionList({
   const allSelected =
     filteredTransactions.length > 0 && selectedIds.size === filteredTransactions.length;
   const someSelected = selectedIds.size > 0 && !allSelected;
+  const reviewBacklogCount = useMemo(
+    () => transactions.filter(isReviewBacklogTransaction).length,
+    [transactions],
+  );
+  const reviewBacklogFilterActive = filters.reviewBacklogOnly;
 
   function toggleOne(id: string) {
     setSelectedIds((current) => {
@@ -158,19 +164,37 @@ export function TransactionList({
         <p className="text-sm text-muted-foreground">No transactions match your search.</p>
       ) : (
         <>
-      <div className="flex items-center justify-between gap-3">
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={allSelected}
-            ref={(input) => {
-              if (input) input.indeterminate = someSelected;
-            }}
-            onChange={toggleAll}
-            className="h-4 w-4 rounded border-border accent-primary"
-          />
-          Select all
-        </label>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              ref={(input) => {
+                if (input) input.indeterminate = someSelected;
+              }}
+              onChange={toggleAll}
+              className="h-4 w-4 rounded border-border accent-primary"
+            />
+            Select all
+          </label>
+          {reviewBacklogCount > 0 ? (
+            <Button
+              type="button"
+              variant={reviewBacklogFilterActive ? "default" : "outline"}
+              size="sm"
+              onClick={() =>
+                setFilters((current) => ({
+                  ...current,
+                  reviewBacklogOnly: !current.reviewBacklogOnly,
+                }))
+              }
+            >
+              Unclassified & AMA
+              {!reviewBacklogFilterActive ? ` (${reviewBacklogCount})` : null}
+            </Button>
+          ) : null}
+        </div>
         {selectedIds.size > 0 ? (
           <span className="text-sm text-muted-foreground">{selectedIds.size} selected</span>
         ) : null}

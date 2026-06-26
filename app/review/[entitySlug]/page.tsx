@@ -14,6 +14,7 @@ import {
   getMonthlyCategoryMatrix,
   getMonthlyEntityMatrix,
 } from "@/lib/queries/review";
+import { isOperatingExpense } from "@/lib/category-expense";
 import { formatCurrency } from "@/lib/utils";
 
 type EntityReviewPageProps = {
@@ -62,7 +63,9 @@ export default async function EntityReviewPage({ params, searchParams }: EntityR
       )?.categoryName ?? "Category"
     : null;
 
-  const total = transactions.filter((tx) => Number(tx.amount) > 0).reduce((sum, tx) => sum + Number(tx.amount), 0);
+  const total = transactions
+    .filter((tx) => isOperatingExpense(tx.amount, tx.classification.category?.full_path))
+    .reduce((sum, tx) => sum + Number(tx.amount), 0);
   const isUnclassifiedView = entitySlug === "unclassified";
 
   return (

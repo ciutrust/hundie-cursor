@@ -17,6 +17,14 @@
     "import:cards": "node scripts/import-cards.mjs --all",
     "import:cards:dry-run": "node scripts/import-cards.mjs --dry-run",
     "import:cards:verify": "node scripts/import-cards.mjs --verify",
+    "import:2025:dry-run": "node scripts/import-2025-batch.mjs --dry-run",
+    "import:2025": "node scripts/import-2025-batch.mjs --apply",
+    "import:sheet:dry-run": "node scripts/import-business-sheet.mjs --dry-run",
+    "import:sheet": "node scripts/import-business-sheet.mjs --apply",
+    "import:qb-keller:dry-run": "node scripts/import-qb-keller.mjs --dry-run",
+    "import:qb-keller": "node scripts/import-qb-keller.mjs --apply",
+    "import:qb-2025": "node scripts/apply-qb-categories-to-ledger.mjs --apply --from 2025-01-01 --to 2026-01-01",
+    "import:qb-2025:dry-run": "node scripts/apply-qb-categories-to-ledger.mjs --dry-run --from 2025-01-01 --to 2026-01-01",
     "import:cards:sql": "node scripts/generate-card-import-sql.mjs && node scripts/combine-card-import-sql.mjs && node scripts/split-card-import-sql.mjs && node scripts/batch-card-import-sql.mjs"
   },
   "dependencies": {

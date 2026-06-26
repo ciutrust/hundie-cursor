@@ -6,6 +6,8 @@ Prioritized work items. Check off when done in repo or remote Supabase.
 
 **Current focus:** Phase 3 — learning loop + category trends (see [PHASE3_PLAN.md](./PHASE3_PLAN.md))
 
+**Agent reference:** [CLASSIFICATION.md](./CLASSIFICATION.md) — category charts, non-expense rules, common patterns.
+
 ---
 
 ## Done — Phase 2
@@ -21,31 +23,56 @@ AI suggestions + reporting foundation.
 
 ---
 
-## Now — Phase 3
+## Done — Phase 3 (partial)
 
-Learning loop + category trends.
+Classification UX + category gaps closed while Alex works backlog.
 
 - [x] Personal suggestions from confirmed ledger history
 - [x] Category × month matrix on entity drill-down
-- [ ] Track accept/reject for progressive learning
-- [ ] Reports page + CSV export (CPA handoff)
+- [x] `suggestion_events` table + accept/reject logging
+- [x] Unclassified & AMA filter on transaction list
+- [x] GBSL non-expense: `Credit card payment`, `Refund / credit`
+- [x] Rental: Bank fees, CC interest, tenant meals (ACAA + Pflugerville)
+- [x] Personal: `Credit card interest (non-deductible)`
+- [x] `lib/category-expense.ts` — exclude transfers/refunds from expense totals
+- [x] [CLASSIFICATION.md](./CLASSIFICATION.md) operator + agent guide
+
+---
+
+## Now — Phase 3
+
+- [ ] Alex classifies Jan–Jun backlog (operator work)
+- [ ] Reports page + CSV export polish (CPA handoff)
+- [ ] Progressive learning weights tuned from `suggestion_events` volume
 
 **Blocked / later within Phase 3:**
 
 - [ ] Keller QBO read — waiting on Alex access
 - [ ] `category_mappings` table (Hundie ↔ QB per company)
-- [ ] Progressive month-over-month learning (confirmed ledger weights)
 - [ ] Claudia auth + shared review
+
+---
+
+## Next — Phase 3.3 (scoped, not started)
+
+**Amount-aware suggestion rules** — same vendor, different category by amount.
+
+- [ ] `rankAmountAwareSuggestions(vendorKey, amount, confirmedRows)`
+- [ ] Blend into `mergeWeightedSuggestions` (re-rank only; never auto-apply)
+- [ ] Tests: Gracie Barra $125 → Software, $850 → Franchise Fees
+- [ ] UI: "amount match" source on suggestion chips
+
+**Full spec:** [PHASE3_PLAN.md § Amount-aware rules](./PHASE3_PLAN.md#amount-aware-rules-phase-33--scoped-not-built)  
+**Estimate:** ~1.5–2 days after Phase 3 v0 backlog closed.
+
+**Known case:** Gracie Barra Franc — $125 = Software (CRM), $850–900 = Franchise Fees. Google Ads vs Workspace already splits by description tokens (no amount rule needed).
 
 ---
 
 ## Next — Phase 1 leftovers
 
-Small gaps before Phase 2 is merged-quality.
-
 - [ ] Manual intercompany flag (GBSL → Austin ACAA lease) — v1 manual
 - [ ] Seed remaining card accounts (Home Depot, Best Buy, etc.)
-- [ ] Hundie-native categories for Personal / Pflugerville / Keller (beyond GBSL QB chart)
 
 ---
 

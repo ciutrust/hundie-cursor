@@ -48,16 +48,19 @@ See [RUN.md](../RUN.md) for start instructions.
 
 ## Phase 3 — Learning loop + category trends ← **current**
 
-**Goal:** Personal suggestions from confirmed history, category × month trends, path to CPA export.
+**Goal:** Personal suggestions from confirmed history, category × month trends, path to CPA export, complete category charts for classification backlog.
 
 | Milestone | Status |
 |-----------|--------|
-| Personal vendor suggestions (confirmed history) | In progress |
-| Category × month matrix on entity page | In progress |
-| Suggestion accept/reject log | Planned |
-| Reports + CSV export | Planned |
+| Personal vendor suggestions (confirmed history) | Done |
+| Category × month matrix on entity page | Done |
+| Suggestion accept/reject log (`suggestion_events`) | Done |
+| Unclassified & AMA filter + non-expense totals | Done |
+| GBSL/rental/Personal category gaps (transfers, fees, interest) | Done |
+| Reports + CSV export | Partial |
+| Amount-aware rules (Gracie Barra amount bands) | Scoped — Phase 3.3 |
 
-**Plan:** [PHASE3_PLAN.md](./PHASE3_PLAN.md)
+**Plans:** [PHASE3_PLAN.md](./PHASE3_PLAN.md) · [CLASSIFICATION.md](./CLASSIFICATION.md)
 
 ---
 
