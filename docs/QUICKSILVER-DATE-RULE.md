@@ -1,25 +1,31 @@
-# Quicksilver entity date rule — operator decision needed
+# Quicksilver entity date rule — confirmed
 
-The Cap One Quicksilver card (`cap-one-quicksilver-alex`) has seed `date_rules`:
+**Account:** `cap-one-quicksilver-claudia` (Cap One Claudia Quicksilver)
+
+**Rule (operator confirmed 2026-06-26):** GBSL through **2026-06-30**, Personal from **2026-07-01**.
 
 ```json
 [
-  { "until": "2025-06-30", "entity_slug": "gbsl" },
-  { "from": "2025-07-01", "entity_slug": "personal" }
+  { "until": "2026-06-30", "entity_slug": "gbsl" },
+  { "from": "2026-07-01", "entity_slug": "personal" }
 ]
 ```
 
-**Question:** Did the GBSL → Personal switch happen **July 1, 2025** or **July 1, 2026**?
+## What was wrong
 
-| If switch was… | Effect on 2026 charges |
-|----------------|------------------------|
-| **July 1, 2025** | Rule is correct — 2026 charges go to Personal |
-| **July 1, 2026** | **Bug** — Jan–Jun 2026 charges are mis-booked to Personal instead of GBSL |
+The original seed used **2025** boundaries, so every charge from July 2025 onward resolved to Personal — including all of Jan–Jun 2026 that should have stayed GBSL.
 
-## If 2026 is correct
+## Fixes applied
 
-1. New migration: change boundaries to `2026-06-30` / `2026-07-01`
-2. Re-resolve classifications for Quicksilver txns in the affected window
-3. Run `npm test` — update `tests/entity-resolver.test.ts` with the new boundary
+| Layer | Change |
+|-------|--------|
+| Migration `20260627120000` | Account `date_rules` updated to 2026 |
+| Migration `20260630140000` | Re-resolve classifications Jul 2025–Jun 2026 from Personal → GBSL; clear Personal-only categories |
+| `scripts/lib/seed-accounts.mjs` | Local import dry-runs use 2026 boundaries |
+| `tests/entity-resolver.test.ts` | Boundary tests pinned |
+
+## After applying migration
+
+Re-classify any Quicksilver rows that landed back in the review backlog (category cleared because they had a Personal chart tag).
 
 See [REVIEW-2026-06-26.md](./REVIEW-2026-06-26.md) §C1.

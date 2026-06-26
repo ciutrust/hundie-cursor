@@ -57,8 +57,8 @@ export const SEED_ACCOUNTS = [
     account_type: "credit_card",
     issuer_parser: "capital_one",
     date_rules: [
-      { until: "2025-06-30", entity_slug: "gbsl" },
-      { from: "2025-07-01", entity_slug: "personal" },
+      { until: "2026-06-30", entity_slug: "gbsl" },
+      { from: "2026-07-01", entity_slug: "personal" },
     ],
     default_entity: { slug: "personal" },
     defaultPath: "Downloads/CapitalOne-Quicksilver-Claudia.csv",

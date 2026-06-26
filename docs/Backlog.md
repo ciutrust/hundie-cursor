@@ -50,7 +50,7 @@ From [REVIEW-2026-06-26.md](./REVIEW-2026-06-26.md):
 - [x] Suggestion chip count shows real match count, not blended score
 - [x] Review dashboard entity totals exclude backlog overlap (C8)
 - [x] Personal card report `grandTotal` uses `isOperatingExpense`
-- [ ] **Quicksilver switch year** — confirm with operator ([QUICKSILVER-DATE-RULE.md](./QUICKSILVER-DATE-RULE.md))
+- [x] **Quicksilver switch year** — GBSL through Jun 2026, Personal from Jul 2026 ([QUICKSILVER-DATE-RULE.md](./QUICKSILVER-DATE-RULE.md))
 - [ ] Refund import policy (C2)
 - [ ] AI pre-classifier backlog (PROMPT-3)
 - [ ] Remove `.qb-import-batches.json` from git history (S4)
