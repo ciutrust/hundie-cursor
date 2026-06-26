@@ -2,6 +2,87 @@ import { AI_BACKLOG_END, AI_BACKLOG_START, AI_ENTITY_SLUG } from "@/lib/ai/confi
 import type { BacklogTransaction } from "@/lib/ai/vendor-groups";
 import { createClient } from "@/lib/supabase/server";
 
+function isMissingAiSuggestionsTable(error: { message?: string } | null) {
+  const message = error?.message?.toLowerCase() ?? "";
+  return message.includes("ai_suggestions") && (message.includes("does not exist") || message.includes("schema cache"));
+}
+
+async function getPersonalEntityId(supabase: Awaited<ReturnType<typeof createClient>>) {
+  const { data } = await supabase.from("entities").select("id").eq("slug", AI_ENTITY_SLUG).single();
+  return data?.id ?? null;
+}
+
+async function countPersonalUncategorizedBacklog(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  personalId: string,
+) {
+  const { count, error } = await supabase
+    .from("transactions")
+    .select("id, classification:classifications!inner(category_id)", { count: "exact", head: true })
+    .eq("classification.entity_id", personalId)
+    .is("classification.category_id", null)
+    .gte("transaction_date", AI_BACKLOG_START)
+    .lt("transaction_date", AI_BACKLOG_END);
+
+  if (error) throw error;
+  return count ?? 0;
+}
+
+async function listCurrentAiSuggestionTransactionIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<string[]> {
+  const ids: string[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("ai_suggestions")
+      .select("transaction_id")
+      .eq("is_current", true)
+      .range(from, from + 999);
+
+    if (error) {
+      if (isMissingAiSuggestionsTable(error)) return [];
+      throw error;
+    }
+    if (!data?.length) break;
+
+    ids.push(...data.map((row) => row.transaction_id));
+    if (data.length < 1000) break;
+    from += 1000;
+  }
+
+  return ids;
+}
+
+async function countBacklogMatches(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  personalId: string,
+  transactionIds: string[],
+) {
+  let total = 0;
+
+  for (let i = 0; i < transactionIds.length; i += 200) {
+    const chunk = transactionIds.slice(i, i + 200);
+    const { count, error } = await supabase
+      .from("transactions")
+      .select("id, classification:classifications!inner(category_id, entity_id)", {
+        count: "exact",
+        head: true,
+      })
+      .in("id", chunk)
+      .eq("classification.entity_id", personalId)
+      .is("classification.category_id", null)
+      .gte("transaction_date", AI_BACKLOG_START)
+      .lt("transaction_date", AI_BACKLOG_END);
+
+    if (error) throw error;
+    total += count ?? 0;
+  }
+
+  return total;
+}
+
 const BACKLOG_SELECT = `
   id,
   transaction_date,
@@ -80,7 +161,10 @@ export async function getPersonalAiBacklog(): Promise<BacklogTransaction[]> {
         .in("transaction_id", chunk)
         .eq("is_current", true);
 
-      if (aiError) throw aiError;
+      if (aiError) {
+        if (isMissingAiSuggestionsTable(aiError)) break;
+        throw aiError;
+      }
       for (const row of aiRows ?? []) {
         aiByTx.set(row.transaction_id, row);
       }
@@ -230,12 +314,40 @@ export async function getAiAcceptanceStats(): Promise<AiAcceptanceRow[]> {
 
 /** Personal uncategorized backlog rows with a current AI suggestion awaiting confirm. */
 export async function getAiPreclassifiedCount(): Promise<number> {
-  const backlog = await getPersonalAiBacklog();
-  return backlog.filter((tx) => tx.ai_suggestion).length;
+  try {
+    const supabase = await createClient();
+    const personalId = await getPersonalEntityId(supabase);
+    if (!personalId) return 0;
+
+    const txIds = await listCurrentAiSuggestionTransactionIds(supabase);
+    if (txIds.length === 0) return 0;
+
+    return countBacklogMatches(supabase, personalId, txIds);
+  } catch (error) {
+    if (isMissingAiSuggestionsTable(error as { message?: string })) return 0;
+    console.error("getAiPreclassifiedCount failed:", error);
+    return 0;
+  }
 }
 
 export async function getAiSuggestionCoverage() {
-  const backlog = await getPersonalAiBacklog();
-  const withAi = backlog.filter((tx) => tx.ai_suggestion).length;
-  return { total: backlog.length, withAi, withoutAi: backlog.length - withAi };
+  try {
+    const supabase = await createClient();
+    const personalId = await getPersonalEntityId(supabase);
+    if (!personalId) return { total: 0, withAi: 0, withoutAi: 0 };
+
+    const [total, txIds] = await Promise.all([
+      countPersonalUncategorizedBacklog(supabase, personalId),
+      listCurrentAiSuggestionTransactionIds(supabase),
+    ]);
+    const withAi =
+      txIds.length === 0 ? 0 : await countBacklogMatches(supabase, personalId, txIds);
+
+    return { total, withAi, withoutAi: total - withAi };
+  } catch (error) {
+    if (isMissingAiSuggestionsTable(error as { message?: string })) {
+      return { total: 0, withAi: 0, withoutAi: 0 };
+    }
+    throw error;
+  }
 }

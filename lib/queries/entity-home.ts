@@ -161,3 +161,50 @@ export async function getAllEntityHomeStats(period: PeriodRange): Promise<Entity
     (a, b) => b.unclassifiedCount - a.unclassifiedCount || b.expenseTotal - a.expenseTotal,
   );
 }
+
+export type SidebarEntityNavItem = {
+  slug: string;
+  name: string;
+  unclassifiedCount: number;
+};
+
+/** Lightweight entity list + review-backlog counts for the sidebar (no full transaction scan). */
+export async function getSidebarEntityNav(period: PeriodRange): Promise<SidebarEntityNavItem[]> {
+  const supabase = await createClient();
+  const { data: entities, error } = await supabase
+    .from("entities")
+    .select("id, name, slug")
+    .eq("is_classifiable", true)
+    .order("display_order");
+
+  if (error) throw error;
+
+  const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
+  const cpaList = [...cpaReviewIds];
+  const reviewOr =
+    cpaList.length === 0
+      ? "classification.category_id.is.null"
+      : `classification.category_id.is.null,classification.category_id.in.(${cpaList.join(",")})`;
+
+  const counts = await Promise.all(
+    (entities ?? []).map(async (entity) => {
+      const { count, error: countError } = await supabase
+        .from("transactions")
+        .select("id, classification:classifications!inner(category_id)", { count: "exact", head: true })
+        .eq("classification.entity_id", entity.id)
+        .gte("transaction_date", period.start)
+        .lt("transaction_date", period.end)
+        .or(reviewOr);
+
+      if (countError) throw countError;
+
+      return {
+        slug: entity.slug,
+        name: entity.name,
+        unclassifiedCount: count ?? 0,
+      };
+    }),
+  );
+
+  return counts.sort((a, b) => b.unclassifiedCount - a.unclassifiedCount);
+}
