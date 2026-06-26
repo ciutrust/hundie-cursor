@@ -15,6 +15,24 @@ All notable changes to the Hundie project. Format based on [Keep a Changelog](ht
 
 ---
 
+## [0.2.1] — 2026-06-26
+
+Reports section restructure, two `/reports` crash fixes, and error-boundary diagnostics (post-0.2.0, on `main` through `dd07baa`).
+
+### Added
+
+- **Reports IA** — dedicated report pages (transaction detail; spending-by-entity / spending-by-category matrices; category breakdown; top vendors; uncategorized aging; classification progress; account summary; year-over-year; GBSL reconcile; business-expenses-on-personal-cards; funding; AI-suggestion stats), entity-nav sidebar, AI review page, vendor-group AI
+- **AI review panel** — select / unselect-all controls; large runs chunked into batched server actions to avoid timeouts; run cost-confirmation dialog
+- **Error-boundary diagnostics** — `app/error.tsx` gains a collapsible **"Log entry"** that surfaces the error digest, name, message, and stack with a copy button (full trace in dev; digest → server logs in prod, by Next.js design)
+
+### Fixed
+
+- **`/reports` crash (server/client boundary)** — `parseReportPeriod` / `parseReportEntitySlug` were exported from the `"use client"` `report-filters` module but called from Server Components, throwing *"Attempted to call X from the server but X is on the client"* on every report page. Moved both pure helpers to a server-safe `lib/reports/report-params.ts`; repointed all 10 report pages (`fd2d291`)
+- **`/reports` shell queries** — lightweight shell queries on the reports hub to avoid timeout/crash (`5e9f3cc`)
+- **Theme hydration** flash on first paint
+
+---
+
 ## [0.2.0] — 2026-06-26
 
 **Shipped on `main`** (merge `Phase-1-review-2026-06-26`, commit `1baf5c1`). Migrations below are in the repo **and applied** to Supabase project `ihciuqpiavxhbulfkwod` unless noted.
@@ -94,7 +112,8 @@ Phase 3 classification UX and learning (already on `main` before 0.2.0).
 
 Initial repository setup — GitHub repo, Supabase project, entities migration, verify scripts.
 
-[Unreleased]: https://github.com/ciutrust/hundie-cursor/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ciutrust/hundie-cursor/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/ciutrust/hundie-cursor/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ciutrust/hundie-cursor/compare/v0.1.0...v0.2.0
 [0.1.1]: https://github.com/ciutrust/hundie-cursor/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ciutrust/hundie-cursor/compare/v0.0.1...v0.1.0
