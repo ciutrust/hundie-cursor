@@ -24,13 +24,20 @@ export function parseChaseCsv(csvText) {
 
     if (!transactionDate || !description || rawAmount == null) continue;
     if (type === "Payment") continue;
-    if (type === "Return") continue;
-    if (rawAmount >= 0) continue;
+
+    let amount;
+    if (type === "Return") {
+      amount = -Math.abs(rawAmount); // refund -> negative (C2)
+    } else if (rawAmount < 0) {
+      amount = Math.abs(rawAmount); // charge -> positive
+    } else {
+      continue; // non-charge positive that is not a Return
+    }
 
     transactions.push({
       transactionDate,
       postedDate,
-      amount: Math.abs(rawAmount),
+      amount,
       description,
       vendor: description,
       rawCategory: category || null,

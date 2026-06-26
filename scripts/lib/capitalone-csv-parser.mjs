@@ -23,13 +23,21 @@ export function parseCapitalOneCsv(csvText) {
     const credit = parseAmount(row.Credit);
 
     if (!transactionDate || !description) continue;
-    if (category === "Payment/Credit" || credit != null) continue;
-    if (debit == null || debit <= 0) continue;
+    if (category === "Payment/Credit") continue; // card payment
+
+    let amount;
+    if (debit != null && debit > 0) {
+      amount = debit; // charge
+    } else if (credit != null && credit > 0) {
+      amount = -credit; // refund -> negative (C2)
+    } else {
+      continue;
+    }
 
     transactions.push({
       transactionDate,
       postedDate,
-      amount: debit,
+      amount,
       description,
       vendor: description,
       rawCategory: category || null,

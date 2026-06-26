@@ -24,7 +24,8 @@ export function parseAmexCsv(csvText) {
 
     if (!transactionDate || !description || amount == null) continue;
     if (PAYMENT_PATTERN.test(description)) continue;
-    if (amount <= 0) continue;
+    if (amount === 0) continue;
+    // Charge posts positive; refund/credit posts negative -> keep sign as-is (C2).
 
     transactions.push({
       transactionDate,

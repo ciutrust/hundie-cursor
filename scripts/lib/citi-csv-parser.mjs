@@ -24,13 +24,20 @@ export function parseCitiCsv(csvText) {
 
     if (!transactionDate || !description) continue;
     if (PAYMENT_PATTERN.test(description)) continue;
-    if (credit != null) continue;
-    if (debit == null || debit <= 0) continue;
+
+    let amount;
+    if (debit != null && debit > 0) {
+      amount = debit; // charge
+    } else if (credit != null && credit > 0) {
+      amount = -credit; // refund -> negative (C2)
+    } else {
+      continue;
+    }
 
     transactions.push({
       transactionDate,
       postedDate: transactionDate,
-      amount: debit,
+      amount,
       description,
       vendor: description,
       rawCategory: null,

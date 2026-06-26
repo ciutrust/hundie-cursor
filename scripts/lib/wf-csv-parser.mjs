@@ -27,9 +27,10 @@ export function parseWellsFargoCsv(csvText, { accountType = "credit_card" } = {}
     let amount = null;
 
     if (accountType === "credit_card") {
-      if (rawAmount >= 0) continue;
-      amount = Math.abs(rawAmount);
+      // Charge posts negative; refund/credit posts positive -> store negative (C2).
+      amount = rawAmount < 0 ? Math.abs(rawAmount) : -rawAmount;
     } else {
+      // Checking: outflows only; deposits/income are out of scope (not refunds).
       if (rawAmount >= 0) continue;
       amount = Math.abs(rawAmount);
     }
