@@ -28,6 +28,8 @@
     "import:qb-keller": "node scripts/import-qb-keller.mjs --apply",
     "import:qb-2025": "node scripts/apply-qb-categories-to-ledger.mjs --apply --from 2025-01-01 --to 2026-01-01",
     "import:qb-2025:dry-run": "node scripts/apply-qb-categories-to-ledger.mjs --dry-run --from 2025-01-01 --to 2026-01-01",
+    "import:qb-quicksilver": "node scripts/apply-qb-categories-to-ledger.mjs --apply --account cap-one-quicksilver-claudia --qb-source \"Capital One\" --from 2025-07-01 --to 2026-07-01",
+    "import:qb-quicksilver:dry-run": "node scripts/apply-qb-categories-to-ledger.mjs --dry-run --account cap-one-quicksilver-claudia --qb-source \"Capital One\" --from 2025-07-01 --to 2026-07-01",
     "import:cards:sql": "node scripts/generate-card-import-sql.mjs && node scripts/combine-card-import-sql.mjs && node scripts/split-card-import-sql.mjs && node scripts/batch-card-import-sql.mjs"
   },
   "dependencies": {

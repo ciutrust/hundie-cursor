@@ -28,4 +28,11 @@ The original seed used **2025** boundaries, so every charge from July 2025 onwar
 
 Re-classify any Quicksilver rows in the GBSL review backlog (category cleared when they had a Personal chart tag).
 
+**QBO category backfill:** match all Quicksilver ledger rows to QBO `Capital One` lines (categorized rows reserve QBO matches first), then apply categories to remaining uncategorized only:
+
+```bash
+npm run import:qb-quicksilver:dry-run
+npm run import:qb-quicksilver
+```
+
 See [REVIEW-2026-06-26.md](./REVIEW-2026-06-26.md) §C1.

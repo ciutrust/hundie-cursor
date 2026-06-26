@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 /**
- * Match GBSL card ledger transactions to qb_training_expenses (2026 QBO export)
+ * Match GBSL card ledger transactions to qb_training_expenses (QBO export)
  * and apply QB categories where confidence is high enough.
+ *
+ * When --account is set, ALL ledger rows for that account are matched first
+ * (categorized rows reserve their QBO line so duplicates aren't reused).
+ * Only uncategorized ledger rows get category updates — manual work is preserved.
  *
  * Usage:
  *   node scripts/apply-qb-categories-to-ledger.mjs --dry-run
  *   node scripts/apply-qb-categories-to-ledger.mjs --apply
  *   node scripts/apply-qb-categories-to-ledger.mjs --apply --from 2026-01-01 --to 2026-07-01
+ *   node scripts/apply-qb-categories-to-ledger.mjs --dry-run --account cap-one-quicksilver-claudia --qb-source "Capital One" --from 2025-07-01 --to 2026-07-01
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync, existsSync } from "node:fs";
@@ -30,6 +35,11 @@ function loadEnv() {
   return env;
 }
 
+function argValue(flag) {
+  const index = args.indexOf(flag);
+  return index === -1 ? undefined : args[index + 1];
+}
+
 function normalizeText(text) {
   return (text ?? "")
     .toLowerCase()
@@ -45,16 +55,52 @@ function significantWords(text) {
     .filter((word) => word.length >= 3 && !stop.has(word));
 }
 
-function matchScore(card, qb) {
+function dateAmountKey(row) {
+  return `${row.transaction_date}|${Math.abs(Number(row.amount)).toFixed(2)}`;
+}
+
+function stripQboCardSuffix(text) {
+  return (text ?? "").replace(/\s*-\s*\d{4}\s*$/, "").trim();
+}
+
+function addDaysIso(isoDate, days) {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() + days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function dateAmountKeys(row, slackDays = 0) {
+  const amount = Math.abs(Number(row.amount)).toFixed(2);
+  const keys = [`${row.transaction_date}|${amount}`];
+  if (slackDays > 0) {
+    for (let delta = 1; delta <= slackDays; delta += 1) {
+      keys.push(`${addDaysIso(row.transaction_date, delta)}|${amount}`);
+      keys.push(`${addDaysIso(row.transaction_date, -delta)}|${amount}`);
+    }
+  }
+  return keys;
+}
+
+function matchScore(card, qb, maxDateSlack = 0) {
   const cardAmount = Math.abs(Number(card.amount));
   const qbAmount = Math.abs(Number(qb.amount));
-  if (card.transaction_date !== qb.transaction_date || cardAmount !== qbAmount) {
+  if (cardAmount !== qbAmount) {
     return 0;
   }
 
+  const cardDate = card.transaction_date;
+  const qbDate = qb.transaction_date;
   let score = 10;
+  if (cardDate !== qbDate) {
+    const cardTime = new Date(`${cardDate}T12:00:00`).getTime();
+    const qbTime = new Date(`${qbDate}T12:00:00`).getTime();
+    const dayDiff = Math.round(Math.abs(cardTime - qbTime) / (1000 * 60 * 60 * 24));
+    if (dayDiff > maxDateSlack) return 0;
+    score = 8;
+  }
   const cardText = normalizeText(`${card.vendor ?? ""} ${card.description ?? ""}`);
-  const qbText = normalizeText(`${qb.vendor_name ?? ""} ${qb.description ?? ""}`);
+  const qbText = normalizeText(`${stripQboCardSuffix(qb.vendor_name ?? "")} ${stripQboCardSuffix(qb.description ?? "")}`);
   const cardWords = new Set(significantWords(cardText));
 
   for (const word of significantWords(qbText)) {
@@ -68,11 +114,11 @@ function matchScore(card, qb) {
   return score;
 }
 
-function pickBestMatch(card, candidates) {
-  const scored = candidates
-    .map((qb) => ({ qb, score: matchScore(card, qb) }))
+function pickBestMatch(card, indexedCandidates, maxDateSlack = 0) {
+  const scored = indexedCandidates
+    .map(({ qb, index }) => ({ qb, index, score: matchScore(card, qb, maxDateSlack) }))
     .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => b.score - a.score || a.qb.transaction_date.localeCompare(b.qb.transaction_date));
 
   if (scored.length === 0) return null;
 
@@ -80,14 +126,19 @@ function pickBestMatch(card, candidates) {
   const tied = scored.filter((item) => item.score === best.score);
   if (tied.length > 1) return null;
 
-  const minScore = candidates.length === 1 ? 10 : 13;
-  return best.score >= minScore ? best.qb : null;
+  const hasExactDate = best.qb.transaction_date === card.transaction_date;
+  const minScore =
+    indexedCandidates.length === 1 ? (hasExactDate ? 10 : 12) : hasExactDate ? 13 : 15;
+  return best.score >= minScore ? best : null;
 }
 
 const args = process.argv.slice(2);
 const dryRun = !args.includes("--apply");
-const fromDate = args.includes("--from") ? args[args.indexOf("--from") + 1] : "2026-01-01";
-const toDate = args.includes("--to") ? args[args.indexOf("--to") + 1] : "2026-07-01";
+const fromDate = argValue("--from") ?? "2026-01-01";
+const toDate = argValue("--to") ?? "2026-07-01";
+const accountSlug = argValue("--account");
+const qbSource = argValue("--qb-source");
+const dateSlackDays = Number(argValue("--date-slack") ?? (accountSlug === "cap-one-quicksilver-claudia" ? "5" : "0"));
 
 const env = loadEnv();
 const url = env.NEXT_PUBLIC_SUPABASE_URL;
@@ -111,13 +162,28 @@ if (entityError || !entity) {
   process.exit(1);
 }
 
-async function fetchAllUncategorizedCardRows() {
+let accountId = null;
+if (accountSlug) {
+  const { data: account, error: accountError } = await supabase
+    .from("accounts")
+    .select("id, display_name")
+    .eq("slug", accountSlug)
+    .single();
+
+  if (accountError || !account) {
+    console.error(`Account not found: ${accountSlug}`, accountError?.message);
+    process.exit(1);
+  }
+  accountId = account.id;
+}
+
+async function fetchAllLedgerRows() {
   const pageSize = 1000;
   const all = [];
   let from = 0;
 
   while (true) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("transactions")
       .select(
         `
@@ -128,18 +194,25 @@ async function fetchAllUncategorizedCardRows() {
         vendor,
         classification:classifications!inner(
           id,
-          category_id
+          category_id,
+          category:categories(full_path)
         )
       `,
       )
       .eq("classification.entity_id", entity.id)
-      .is("classification.category_id", null)
       .gte("transaction_date", fromDate)
       .lt("transaction_date", toDate)
       .order("transaction_date")
       .order("id")
       .range(from, from + pageSize - 1);
 
+    if (accountId) {
+      query = query.eq("account_id", accountId);
+    } else {
+      query = query.is("classification.category_id", null);
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
     if (!data?.length) break;
     all.push(...data);
@@ -156,9 +229,9 @@ async function fetchAllQbRows() {
   let from = 0;
 
   while (true) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("qb_training_expenses")
-      .select("transaction_date, amount, vendor_name, description, category_id, category_name")
+      .select("transaction_date, amount, vendor_name, description, category_id, category_name, source_account")
       .eq("entity_id", entity.id)
       .gte("transaction_date", fromDate)
       .lt("transaction_date", toDate)
@@ -166,6 +239,11 @@ async function fetchAllQbRows() {
       .order("transaction_date")
       .range(from, from + pageSize - 1);
 
+    if (qbSource) {
+      query = query.eq("source_account", qbSource);
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
     if (!data?.length) break;
     all.push(...data);
@@ -179,58 +257,102 @@ async function fetchAllQbRows() {
 let cardRows;
 let qbRows;
 try {
-  [cardRows, qbRows] = await Promise.all([fetchAllUncategorizedCardRows(), fetchAllQbRows()]);
+  [cardRows, qbRows] = await Promise.all([fetchAllLedgerRows(), fetchAllQbRows()]);
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 }
 
 const qbByDateAmount = new Map();
-for (const row of qbRows) {
-  const key = `${row.transaction_date}|${Math.abs(Number(row.amount)).toFixed(2)}`;
-  if (!qbByDateAmount.has(key)) qbByDateAmount.set(key, []);
-  qbByDateAmount.get(key).push(row);
+for (let index = 0; index < qbRows.length; index++) {
+  const row = qbRows[index];
+  for (const key of dateAmountKeys(row, dateSlackDays)) {
+    if (!qbByDateAmount.has(key)) qbByDateAmount.set(key, []);
+    qbByDateAmount.get(key).push({ qb: row, index });
+  }
 }
 
-const results = { matched: 0, skipped: 0, cpaReview: 0, byCategory: new Map() };
+const usedQbIndices = new Set();
+
+function consumeMatch(card) {
+  const candidates = [];
+  const seen = new Set();
+  for (const key of dateAmountKeys(card, dateSlackDays)) {
+    for (const item of qbByDateAmount.get(key) ?? []) {
+      if (usedQbIndices.has(item.index) || seen.has(item.index)) continue;
+      seen.add(item.index);
+      candidates.push(item);
+    }
+  }
+
+  const best = pickBestMatch(card, candidates, dateSlackDays);
+  if (best) usedQbIndices.add(best.index);
+  return best;
+}
+
+const categorizedRows = cardRows.filter((row) => row.classification.category_id != null);
+const uncategorizedRows = cardRows.filter((row) => row.classification.category_id == null);
+
+const results = {
+  ledgerTotal: cardRows.length,
+  alreadyCategorized: categorizedRows.length,
+  uncategorized: uncategorizedRows.length,
+  reservedQbo: 0,
+  matchedToApply: 0,
+  skipped: 0,
+  cpaReview: 0,
+  byCategory: new Map(),
+};
 const updates = [];
 
-for (const card of cardRows) {
-  const key = `${card.transaction_date}|${Math.abs(Number(card.amount)).toFixed(2)}`;
-  const candidates = qbByDateAmount.get(key) ?? [];
-  const qb = pickBestMatch(card, candidates);
-  if (!qb?.category_id) {
+for (const card of categorizedRows) {
+  if (consumeMatch(card)) results.reservedQbo += 1;
+}
+
+for (const card of uncategorizedRows) {
+  const best = consumeMatch(card);
+  if (!best?.qb.category_id) {
     results.skipped += 1;
     continue;
   }
 
-  results.matched += 1;
-  if (qb.category_name === "Ask My Accountant") results.cpaReview += 1;
-  results.byCategory.set(qb.category_name, (results.byCategory.get(qb.category_name) ?? 0) + 1);
+  results.matchedToApply += 1;
+  if (best.qb.category_name === "Ask My Accountant") results.cpaReview += 1;
+  results.byCategory.set(best.qb.category_name, (results.byCategory.get(best.qb.category_name) ?? 0) + 1);
 
   updates.push({
     classificationId: card.classification.id,
-    categoryId: qb.category_id,
-    categoryName: qb.category_name,
+    categoryId: best.qb.category_id,
+    categoryName: best.qb.category_name,
     description: card.description,
     date: card.transaction_date,
     amount: card.amount,
   });
 }
 
+const scopeLabel = accountSlug
+  ? `${accountSlug}${qbSource ? ` ↔ QBO ${qbSource}` : ""}`
+  : "all GBSL uncategorized cards";
+
 console.log(`GBSL QB category backfill (${fromDate} → ${toDate})`);
+console.log(`  Scope: ${scopeLabel}`);
+console.log(`  Date slack: ±${dateSlackDays} days`);
 console.log(`  Mode: ${dryRun ? "DRY RUN" : "APPLY"}`);
-console.log(`  Uncategorized card txs: ${cardRows.length}`);
+console.log(`  Ledger rows (all): ${results.ledgerTotal}`);
+console.log(`  Already categorized (manual/QB): ${results.alreadyCategorized}`);
+console.log(`  QBO lines reserved by categorized matches: ${results.reservedQbo}`);
+console.log(`  Still uncategorized: ${results.uncategorized}`);
 console.log(`  QB training rows: ${qbRows.length}`);
-console.log(`  Matched to apply: ${results.matched}`);
+console.log(`  Matched to apply: ${results.matchedToApply}`);
 console.log(`  Skipped (no confident match): ${results.skipped}`);
 console.log(`  Includes Ask My Accountant (CPA review): ${results.cpaReview}`);
-console.log("\n  By category:");
+console.log("\n  By category (new applies only):");
 for (const [name, count] of [...results.byCategory.entries()].sort((a, b) => b[1] - a[1])) {
   console.log(`    ${name}: ${count}`);
 }
 
 if (!dryRun && updates.length > 0) {
+  let applied = 0;
   for (const item of updates) {
     const { error } = await supabase
       .from("classifications")
@@ -238,18 +360,23 @@ if (!dryRun && updates.length > 0) {
         category_id: item.categoryId,
         classified_by: "qb_backfill",
         classified_at: new Date().toISOString(),
-        notes: "Auto-matched from QBO export",
+        notes: accountSlug
+          ? `Auto-matched from QBO export (${accountSlug})`
+          : "Auto-matched from QBO export",
       })
-      .eq("id", item.classificationId);
+      .eq("id", item.classificationId)
+      .is("category_id", null);
 
     if (error) {
       console.error("Update failed:", item.description, error.message);
+    } else {
+      applied += 1;
     }
   }
-  console.log(`\nApplied ${updates.length} category updates.`);
+  console.log(`\nApplied ${applied} category updates (${updates.length - applied} skipped — already categorized).`);
 } else if (dryRun && updates.length > 0) {
   console.log("\n  Sample matches:");
-  for (const item of updates.slice(0, 8)) {
+  for (const item of updates.slice(0, 12)) {
     console.log(`    ${item.date} ${item.amount} → ${item.categoryName} · ${item.description.slice(0, 50)}`);
   }
   console.log("\n  Re-run with --apply to write updates.");
