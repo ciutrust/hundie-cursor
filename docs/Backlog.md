@@ -10,6 +10,16 @@ Prioritized work items. Check off when done in repo or remote Supabase.
 
 ---
 
+## Done — Month / Tax close (2026-06-26)
+
+Auto zero-backlog readiness views (no manual lock).
+
+- [x] **Month Close** (`/month-close`) — per-entity readiness for one month; closed when every active entity is at 0 backlog (unclassified + AMA); month picker; drill into an entity-month’s backlog
+- [x] **Tax Close** (`/tax-close`) — year grid (entities × months) rolling month-close status up to a tax-close-ready year; click an open cell to clear it
+- [x] Pure roll-ups in `lib/month-close.ts` (9 tests); `getMonthCloseMatrix(year)` reuses year-matrix + CPA-review-set helpers (no new tables); both behind auth middleware
+
+---
+
 ## Done — Phase 2
 
 - [x] AI suggestion v0 — top 3 from `qb_training_expenses` (GBSL)

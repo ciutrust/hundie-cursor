@@ -16,6 +16,18 @@ All notable changes to the Hundie project. Format based on [Keep a Changelog](ht
 
 ---
 
+## [0.4.0] — 2026-06-26
+
+### Added
+
+- **Month Close** (`/month-close`) — per-entity readiness for a single month. A month is *closed* when every entity with activity is at zero backlog (0 unclassified + 0 “Ask My Accountant”). Month picker; click an entity’s “N left” to drill into that entity-month’s backlog. Activates the previously-disabled “Month close” nav item.
+- **Tax Close** (`/tax-close`) — year grid (entities × months) rolling each month’s close status up to a tax-close-ready year. Green ✓ = closed, amber count = rows still needing a category (click to clear), · = no activity. Year picker. New “Tax close” nav item under Tax readiness.
+- Both routes are auto-computed from existing data (no new tables), share one `getMonthCloseMatrix(year)` query, and sit behind the auth middleware. Pure roll-up logic in `lib/month-close.ts` with 9 unit tests (48 total).
+
+Readiness means “is this period fully categorized for hand-off” — an expense-control milestone, not a tax calculation (the split stays in QBO).
+
+---
+
 ## [0.3.0] — 2026-06-26
 
 Productivity + expense-control features (commits `37ee55f`..`4e1b60e`). Suite: 39 tests / 12 files green; adversarially QA'd before push (no regressions).
