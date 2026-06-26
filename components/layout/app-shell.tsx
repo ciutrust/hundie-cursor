@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Brain,
+  CalendarCheck,
   CheckCircle2,
   FileSpreadsheet,
   LayoutGrid,
@@ -54,11 +55,16 @@ const CLASSIFY_ITEMS: NavItem[] = [
 
 const REPORT_ITEMS: NavItem[] = [
   {
-    href: "#",
+    href: "/month-close",
     label: "Month close",
     icon: CheckCircle2,
-    match: () => false,
-    disabled: true,
+    match: (path) => path.startsWith("/month-close"),
+  },
+  {
+    href: "/tax-close",
+    label: "Tax close",
+    icon: CalendarCheck,
+    match: (path) => path.startsWith("/tax-close"),
   },
   {
     href: "/reports",
