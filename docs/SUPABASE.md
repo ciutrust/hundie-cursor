@@ -70,6 +70,8 @@ SQL migrations live in `supabase/migrations/`. Apply with Supabase CLI (`supabas
 | `20260629140000_lock_anon_select_to_authenticated` | **Security:** authenticated-only SELECT on all ledger tables |
 | `20260630120000_create_ai_suggestions` | AI pre-classifier staging table + RLS |
 | `20260630140000_quicksilver_re_resolve_to_gbsl` | Quicksilver date_rules 2026 + re-resolve mis-booked entity |
+| `20260701120000_mortgage_heloc_payment_categories` | Counted `Mortgage payment` + `HELOC payment` on Pflugerville, Austin ACAA, Personal |
+| `20260701130000_perf_indexes` | Indexes on `transactions(transaction_date)` + `classifications(entity_id, category_id)` |
 
 ## Card CSV import
 
