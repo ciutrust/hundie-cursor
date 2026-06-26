@@ -185,9 +185,9 @@ export async function getClassifiableEntities() {
 export async function getEntitySummaries(period: PeriodRange): Promise<EntitySummary[]> {
   const supabase = await createClient();
   const { start, end, compareStart, compareEnd } = period;
-  const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
 
-  const [entitiesResult, transactions, previousTransactions] = await Promise.all([
+  const [cpaReviewIds, entitiesResult, transactions, previousTransactions] = await Promise.all([
+    getCpaReviewCategoryIdSet(supabase),
     supabase.from("entities").select("id, name, slug, display_order").eq("is_classifiable", true).order("display_order"),
     fetchPeriodSummaryTransactions(supabase, start, end),
     fetchPeriodSummaryTransactions(supabase, compareStart, compareEnd),
@@ -259,16 +259,21 @@ export async function getEntitySummaries(period: PeriodRange): Promise<EntitySum
   return summaries;
 }
 
-export async function getReviewDashboardStats(period: PeriodRange): Promise<ReviewDashboardStats> {
+export async function getReviewDashboardStats(
+  period: PeriodRange,
+): Promise<ReviewDashboardStats & { summaries: EntitySummary[] }> {
   const supabase = await createClient();
   const { start, end } = period;
-  const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
-  const [summaries, transactions, aiPreclassifiedCount] = await Promise.all([
+  const [cpaReviewIds, summaries, transactions, aiPreclassifiedCount] = await Promise.all([
+    getCpaReviewCategoryIdSet(supabase),
     getEntitySummaries(period),
     fetchPeriodSummaryTransactions(supabase, start, end),
     getAiPreclassifiedCount(),
   ]);
-  return buildReviewDashboardStats(summaries, transactions, cpaReviewIds, aiPreclassifiedCount);
+  return {
+    ...buildReviewDashboardStats(summaries, transactions, cpaReviewIds, aiPreclassifiedCount),
+    summaries,
+  };
 }
 
 export async function getTotalBacklogCount(): Promise<number> {

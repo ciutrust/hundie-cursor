@@ -3,7 +3,7 @@ import Link from "next/link";
 import { DormantEntitiesCard } from "@/components/review/dormant-entities-card";
 import { PeriodPicker } from "@/components/review/period-picker";
 import { ReviewKpiStrip } from "@/components/review/review-kpi-strip";
-import { getDormantEntities, getEntitySummaries, getReviewDashboardStats } from "@/lib/queries/review";
+import { getDormantEntities, getReviewDashboardStats } from "@/lib/queries/review";
 import { activeMonthPeriod, parsePeriodParams } from "@/lib/period";
 import { formatCurrency } from "@/lib/utils";
 
@@ -15,12 +15,12 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
   const params = await searchParams;
   const period = parsePeriodParams(params, activeMonthPeriod());
 
-  const [summaries, stats, dormantEntities] = await Promise.all([
-    getEntitySummaries(period),
+  const [stats, dormantEntities] = await Promise.all([
     getReviewDashboardStats(period),
     getDormantEntities(),
   ]);
 
+  const summaries = stats.summaries;
   const entities = summaries.filter((s) => s.slug !== "unclassified");
 
   return (
