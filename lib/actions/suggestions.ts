@@ -6,6 +6,7 @@ import {
   extractSearchTokens,
   extractSearchTokensFromTransactions,
   rankCategorySuggestions,
+  rankConfirmedHistorySuggestions,
   shouldSuggestBulkCategories,
   shouldSuggestCategories,
   type BulkCategorySuggestionInput,
@@ -13,7 +14,7 @@ import {
   type CategorySuggestionInput,
 } from "@/lib/suggestions/category-suggestions";
 
-async function fetchSuggestionsForTokens(tokens: string[]) {
+async function fetchQbTrainingSuggestions(tokens: string[]) {
   const supabase = await createClient();
 
   const { data: entity, error: entityError } = await supabase
@@ -45,7 +46,57 @@ async function fetchSuggestionsForTokens(tokens: string[]) {
     return { suggestions: [], error: error.message };
   }
 
-  return { suggestions: rankCategorySuggestions(data ?? []) };
+  return { suggestions: rankCategorySuggestions(data ?? [], "qb_training") };
+}
+
+async function fetchConfirmedHistorySuggestions(entitySlug: string, tokens: string[]) {
+  const supabase = await createClient();
+
+  const { data: entity, error: entityError } = await supabase
+    .from("entities")
+    .select("id")
+    .eq("slug", entitySlug)
+    .single();
+
+  if (entityError || !entity) {
+    return { suggestions: [], error: entityError?.message ?? `${entitySlug} entity not found` };
+  }
+
+  if (tokens.length === 0) {
+    return { suggestions: [] };
+  }
+
+  const orFilters = tokens.flatMap((token) => {
+    const pattern = escapeIlikePattern(token);
+    return [`vendor.ilike.%${pattern}%`, `description.ilike.%${pattern}%`];
+  });
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .select(
+      `
+      classification:classifications!inner(
+        category_id,
+        entity_id,
+        category:categories(id, full_path)
+      )
+    `,
+    )
+    .eq("classification.entity_id", entity.id)
+    .not("classification.category_id", "is", null)
+    .or(orFilters.join(","));
+
+  if (error) {
+    return { suggestions: [], error: error.message };
+  }
+
+  const rows =
+    data?.map((row) => ({
+      category_id: row.classification.category_id,
+      category: row.classification.category,
+    })) ?? [];
+
+  return { suggestions: rankConfirmedHistorySuggestions(rows) };
 }
 
 export async function getCategorySuggestions(
@@ -56,7 +107,16 @@ export async function getCategorySuggestions(
   }
 
   const tokens = extractSearchTokens(input.description, input.vendor);
-  return fetchSuggestionsForTokens(tokens);
+
+  if (input.entitySlug === "gbsl") {
+    return fetchQbTrainingSuggestions(tokens);
+  }
+
+  if (input.entitySlug === "personal") {
+    return fetchConfirmedHistorySuggestions("personal", tokens);
+  }
+
+  return { suggestions: [] };
 }
 
 export async function getBulkCategorySuggestions(
@@ -67,5 +127,14 @@ export async function getBulkCategorySuggestions(
   }
 
   const tokens = extractSearchTokensFromTransactions(input.transactions);
-  return fetchSuggestionsForTokens(tokens);
+
+  if (input.entitySlug === "gbsl") {
+    return fetchQbTrainingSuggestions(tokens);
+  }
+
+  if (input.entitySlug === "personal") {
+    return fetchConfirmedHistorySuggestions("personal", tokens);
+  }
+
+  return { suggestions: [] };
 }

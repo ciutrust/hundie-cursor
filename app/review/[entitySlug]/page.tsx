@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppHeader } from "@/components/layout/app-header";
 import { CategoryBreakdown } from "@/components/review/category-breakdown";
+import { MonthlyCategoryMatrix } from "@/components/review/monthly-category-matrix";
 import { MonthlyEntityMatrix } from "@/components/review/monthly-entity-matrix";
 import { MonthPicker } from "@/components/review/month-picker";
 import { ReviewNav } from "@/components/review/review-nav";
@@ -11,6 +12,7 @@ import {
   getCategoriesForEntity,
   getClassifiableEntities,
   getEntityTransactions,
+  getMonthlyCategoryMatrix,
   getMonthlyEntityMatrix,
 } from "@/lib/queries/review";
 import { formatCurrency, monthLabel, parseMonthParam } from "@/lib/utils";
@@ -29,7 +31,7 @@ export default async function EntityReviewPage({ params, searchParams }: EntityR
   const selectedCategoryId =
     categoryFilter === "unclassified" ? null : categoryFilter;
 
-  const [entities, { groups, transactions }, categories, categoriesByEntity, allGroups, monthlyMatrix] =
+  const [entities, { groups, transactions }, categories, categoriesByEntity, allGroups, monthlyMatrix, categoryMatrix] =
     await Promise.all([
       getClassifiableEntities(),
       getEntityTransactions(year, month, entitySlug, categoryFilter),
@@ -39,6 +41,9 @@ export default async function EntityReviewPage({ params, searchParams }: EntityR
         ? getEntityTransactions(year, month, entitySlug).then((result) => result.groups)
         : Promise.resolve(null),
       entitySlug === "unclassified" ? getMonthlyEntityMatrix(year) : Promise.resolve(null),
+      !categoryFilter && entitySlug !== "unclassified"
+        ? getMonthlyCategoryMatrix(entitySlug, year)
+        : Promise.resolve(null),
     ]);
 
   const entity =
@@ -101,6 +106,16 @@ export default async function EntityReviewPage({ params, searchParams }: EntityR
             filterSlugs={["unclassified"]}
             title={`${year} uncategorized backlog`}
             subtitle="Expenses still missing a category. Click a month to work through them — goal is $0 and 0 txns each month."
+          />
+        ) : null}
+
+        {!categoryFilter && categoryMatrix && categoryMatrix.length > 0 ? (
+          <MonthlyCategoryMatrix
+            rows={categoryMatrix}
+            entitySlug={entitySlug}
+            year={year}
+            currentYear={new Date().getFullYear()}
+            currentMonth={new Date().getMonth() + 1}
           />
         ) : null}
 

@@ -462,6 +462,16 @@ export type MonthlyEntityRow = {
   isUnclassified?: boolean
 }
 
+export type MonthlyCategoryRow = {
+  categoryId: string | null
+  categoryName: string
+  months: Record<number, number>
+  monthCounts: Record<number, number>
+  ytd: number
+  ytdCount: number
+  isUnclassified?: boolean
+}
+
 export type CategoryGroup = {
   categoryId: string | null
   categoryName: string

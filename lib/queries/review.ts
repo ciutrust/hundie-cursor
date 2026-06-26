@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import type { CategoryGroup, EntitySummary, MonthlyEntityRow, TransactionWithDetails } from "@/lib/types/database";
+import type { CategoryGroup, EntitySummary, MonthlyCategoryRow, MonthlyEntityRow, TransactionWithDetails } from "@/lib/types/database";
 import { monthBounds } from "@/lib/utils";
 
 const TRANSACTION_SELECT = `
@@ -134,14 +134,14 @@ export async function getEntitySummaries(year: number, month: number): Promise<E
 type MatrixTransaction = {
   amount: number;
   transaction_date: string;
-  classification: { entity_id: string; category_id: string | null };
+  classification: { entity_id: string; category_id: string | null; category?: { id: string; full_path: string } | null };
 };
 
 function monthFromDate(date: string) {
   return Number(date.slice(5, 7));
 }
 
-async function fetchYearMatrixTransactions(year: number): Promise<MatrixTransaction[]> {
+async function fetchYearMatrixTransactions(year: number, entityId?: string): Promise<MatrixTransaction[]> {
   const supabase = await createClient();
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year + 1}-01-01`;
@@ -150,7 +150,7 @@ async function fetchYearMatrixTransactions(year: number): Promise<MatrixTransact
   let from = 0;
 
   while (true) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("transactions")
       .select(
         `
@@ -158,7 +158,8 @@ async function fetchYearMatrixTransactions(year: number): Promise<MatrixTransact
         transaction_date,
         classification:classifications!inner(
           entity_id,
-          category_id
+          category_id,
+          category:categories(id, full_path)
         )
       `,
       )
@@ -167,6 +168,12 @@ async function fetchYearMatrixTransactions(year: number): Promise<MatrixTransact
       .order("transaction_date", { ascending: true })
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
+
+    if (entityId) {
+      query = query.eq("classification.entity_id", entityId);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
     const page = (data ?? []) as MatrixTransaction[];
@@ -232,6 +239,87 @@ export async function getMonthlyEntityMatrix(year: number): Promise<MonthlyEntit
   });
 
   return [...entityRows, unclassifiedRow];
+}
+
+function buildMonthlyCategoryRow(
+  categoryId: string | null,
+  categoryName: string,
+  transactions: MatrixTransaction[],
+  options?: { isUnclassified?: boolean },
+): MonthlyCategoryRow {
+  const months: Record<number, number> = {};
+  const monthCounts: Record<number, number> = {};
+  let ytd = 0;
+  let ytdCount = 0;
+
+  for (const tx of transactions) {
+    if (Number(tx.amount) <= 0) continue;
+    const month = monthFromDate(tx.transaction_date);
+    months[month] = (months[month] ?? 0) + Number(tx.amount);
+    monthCounts[month] = (monthCounts[month] ?? 0) + 1;
+    ytd += Number(tx.amount);
+    ytdCount += 1;
+  }
+
+  return {
+    categoryId,
+    categoryName,
+    months,
+    monthCounts,
+    ytd,
+    ytdCount,
+    isUnclassified: options?.isUnclassified,
+  };
+}
+
+export async function getMonthlyCategoryMatrix(entitySlug: string, year: number): Promise<MonthlyCategoryRow[]> {
+  if (entitySlug === "unclassified") {
+    return [];
+  }
+
+  const supabase = await createClient();
+  const { data: entity, error: entityError } = await supabase
+    .from("entities")
+    .select("id")
+    .eq("slug", entitySlug)
+    .single();
+
+  if (entityError || !entity) {
+    return [];
+  }
+
+  const transactions = await fetchYearMatrixTransactions(year, entity.id);
+  const byCategory = new Map<string, MatrixTransaction[]>();
+  const unclassified: MatrixTransaction[] = [];
+
+  for (const tx of transactions) {
+    const categoryId = tx.classification.category_id;
+    if (!categoryId) {
+      unclassified.push(tx);
+      continue;
+    }
+    const bucket = byCategory.get(categoryId) ?? [];
+    bucket.push(tx);
+    byCategory.set(categoryId, bucket);
+  }
+
+  const categoryRows: MonthlyCategoryRow[] = [];
+
+  for (const [categoryId, categoryTransactions] of byCategory.entries()) {
+    const name =
+      categoryTransactions[0]?.classification.category?.full_path ?? "Unknown category";
+    categoryRows.push(buildMonthlyCategoryRow(categoryId, name, categoryTransactions));
+  }
+
+  categoryRows.sort((a, b) => b.ytd - a.ytd);
+
+  if (unclassified.length > 0) {
+    categoryRows.push(
+      buildMonthlyCategoryRow(null, "Uncategorized", unclassified, { isUnclassified: true }),
+    );
+  }
+
+  return categoryRows;
 }
 
 export async function getCategoriesForEntity(entitySlug: string) {

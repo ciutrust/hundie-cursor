@@ -2,7 +2,7 @@ export type CategorySuggestion = {
   categoryId: string;
   fullPath: string;
   count: number;
-  source: "qb_training";
+  source: "qb_training" | "confirmed_history";
 };
 
 export type CategorySuggestionInput = {
@@ -212,7 +212,10 @@ export function escapeIlikePattern(token: string): string {
   return token.replace(/[%_\\]/g, "");
 }
 
-export function rankCategorySuggestions(rows: TrainingRow[]): CategorySuggestion[] {
+export function rankCategorySuggestions(
+  rows: TrainingRow[],
+  source: CategorySuggestion["source"] = "qb_training",
+): CategorySuggestion[] {
   const counts = new Map<
     string,
     { categoryId: string; fullPath: string; count: number }
@@ -241,14 +244,49 @@ export function rankCategorySuggestions(rows: TrainingRow[]): CategorySuggestion
       categoryId: entry.categoryId,
       fullPath: entry.fullPath,
       count: entry.count,
-      source: "qb_training" as const,
+      source,
     }));
 }
 
+type ConfirmedHistoryRow = {
+  category_id: string | null;
+  category: { id: string; full_path: string } | null;
+};
+
+export function rankConfirmedHistorySuggestions(rows: ConfirmedHistoryRow[]): CategorySuggestion[] {
+  const counts = new Map<string, { categoryId: string; fullPath: string; count: number }>();
+
+  for (const row of rows) {
+    const categoryId = row.category_id ?? row.category?.id;
+    const fullPath = row.category?.full_path;
+    if (!categoryId || !fullPath) continue;
+
+    const existing = counts.get(categoryId);
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+
+    counts.set(categoryId, { categoryId, fullPath, count: 1 });
+  }
+
+  return [...counts.values()]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3)
+    .map((entry) => ({
+      categoryId: entry.categoryId,
+      fullPath: entry.fullPath,
+      count: entry.count,
+      source: "confirmed_history" as const,
+    }));
+}
+
+const SUGGESTION_ENTITIES = new Set(["gbsl", "personal"]);
+
 export function shouldSuggestCategories(input: CategorySuggestionInput): boolean {
-  return input.entitySlug === "gbsl" && extractSearchTokens(input.description, input.vendor).length > 0;
+  return SUGGESTION_ENTITIES.has(input.entitySlug) && extractSearchTokens(input.description, input.vendor).length > 0;
 }
 
 export function shouldSuggestBulkCategories(input: BulkCategorySuggestionInput): boolean {
-  return input.entitySlug === "gbsl" && extractSearchTokensFromTransactions(input.transactions).length > 0;
+  return SUGGESTION_ENTITIES.has(input.entitySlug) && extractSearchTokensFromTransactions(input.transactions).length > 0;
 }

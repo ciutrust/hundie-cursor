@@ -4,40 +4,33 @@ Prioritized work items. Check off when done in repo or remote Supabase.
 
 **Principles:** Ledger-first (CSV is input only) · Human-in-the-loop always · Works with QuickBooks, not a budgeting app · Alex classifies now, Claudia later.
 
-**Current focus:** Phase 2 — AI suggestions (see [PHASE2_PLAN.md](./PHASE2_PLAN.md))
+**Current focus:** Phase 3 — learning loop + category trends (see [PHASE3_PLAN.md](./PHASE3_PLAN.md))
 
 ---
 
-## Done — Phase 1
+## Done — Phase 2
 
-Data foundation, backfill, and review UI.
+AI suggestions + reporting foundation.
 
-- [x] GitHub repo + Supabase project connected
-- [x] Entity registry, ledger schema, QB categories + training schema
-- [x] Card CSV parsers + import CLI (`import:cards`, dry-run, verify)
-- [x] Initial card/checking backfill — 1,730 tx (13 accounts, Jan–Jun 2026)
-- [x] QB GBSL import — 3,577 training expenses, 50 categories
-- [x] Keller + GBSL Claudia WF accounts (4) + import — 152 tx, parent/child CC dedupe
-- [x] `classification_history` + RLS write policies
-- [x] Next.js monthly review UI + Supabase Auth
-- [x] Entity summary → drill-down → reclassify (single + bulk)
-- [x] Search: text, amount operators, category + account multiselect
-- [x] GBSL category picker; personal/rental categories stubbed in UI
-
-**Ledger snapshot:** ~1,882 transactions · 17 accounts · Keller entity live (130 tx)
+- [x] AI suggestion v0 — top 3 categories from `qb_training_expenses` (GBSL)
+- [x] Show suggestions on transaction detail / bulk assign dialog
+- [x] Personal category chart (28 tax-aware categories)
+- [x] Category drill-down + monthly entity matrix + MoM arrows
+- [x] Uncategorized backlog view + nav tabs
+- [x] Fix matrix pagination (Supabase 1000-row limit)
 
 ---
 
-## Now — Phase 2
+## Now — Phase 3
 
-AI suggestions + training loop (human confirms always).
+Learning loop + category trends.
 
-- [ ] AI suggestion v0 — top 3 categories from `qb_training_expenses` vendor/description match (GBSL first)
-- [ ] Show suggestions on transaction detail / bulk assign dialog
-- [ ] Track accept/reject for future progressive learning
-- [ ] Document suggestion accuracy + open questions (see PHASE2_PLAN.md)
+- [x] Personal suggestions from confirmed ledger history
+- [x] Category × month matrix on entity drill-down
+- [ ] Track accept/reject for progressive learning
+- [ ] Reports page + CSV export (CPA handoff)
 
-**Blocked / later within Phase 2:**
+**Blocked / later within Phase 3:**
 
 - [ ] Keller QBO read — waiting on Alex access
 - [ ] `category_mappings` table (Hundie ↔ QB per company)
@@ -56,7 +49,7 @@ Small gaps before Phase 2 is merged-quality.
 
 ---
 
-## Later — Phase 3
+## Later — Phase 4
 
 - [ ] Bank account CSV import (full coverage, not just outflows)
 - [ ] Time views: weekly, quarterly, yearly

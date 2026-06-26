@@ -337,10 +337,11 @@ function ReclassifyDialog({
 
   const selectedEntity = entities.find((entity) => entity.id === entityId);
   const showCategories = (categoriesByEntity[selectedEntity?.slug ?? ""]?.length ?? 0) > 0;
-  const showSuggestions = selectedEntity?.slug === "gbsl";
+  const suggestionEntitySlug = selectedEntity?.slug;
+  const showSuggestions = suggestionEntitySlug === "gbsl" || suggestionEntitySlug === "personal";
 
   useEffect(() => {
-    if (!showSuggestions) {
+    if (!showSuggestions || !suggestionEntitySlug) {
       setSuggestions([]);
       setSuggestionsLoading(false);
       setSuggestionsError(null);
@@ -354,7 +355,7 @@ function ReclassifyDialog({
     getCategorySuggestions({
       description: transaction.description,
       vendor: transaction.vendor,
-      entitySlug: "gbsl",
+      entitySlug: suggestionEntitySlug,
     })
       .then((result) => {
         if (cancelled) return;
@@ -374,7 +375,7 @@ function ReclassifyDialog({
     return () => {
       cancelled = true;
     };
-  }, [showSuggestions, transaction.description, transaction.vendor]);
+  }, [showSuggestions, suggestionEntitySlug, transaction.description, transaction.vendor]);
 
   function handleEntityChange(nextEntityId: string) {
     setEntityId(nextEntityId);
@@ -434,6 +435,7 @@ function ReclassifyDialog({
               selectedCategoryId={categoryId}
               isLoading={suggestionsLoading}
               error={suggestionsError}
+              entitySlug={suggestionEntitySlug}
               onSelect={setCategoryId}
             />
           ) : null}
@@ -508,7 +510,8 @@ function BulkAssignDialog({
 
   const selectedEntity = entities.find((entity) => entity.id === entityId);
   const showCategories = (categoriesByEntity[selectedEntity?.slug ?? ""]?.length ?? 0) > 0;
-  const showSuggestions = selectedEntity?.slug === "gbsl";
+  const suggestionEntitySlug = selectedEntity?.slug;
+  const showSuggestions = suggestionEntitySlug === "gbsl" || suggestionEntitySlug === "personal";
   const totalAmount = transactions.reduce((sum, tx) => sum + Number(tx.amount), 0);
   const suggestionKey = useMemo(
     () =>
@@ -520,7 +523,7 @@ function BulkAssignDialog({
   );
 
   useEffect(() => {
-    if (!showSuggestions) {
+    if (!showSuggestions || !suggestionEntitySlug) {
       setSuggestions([]);
       setSuggestionsLoading(false);
       setSuggestionsError(null);
@@ -532,7 +535,7 @@ function BulkAssignDialog({
     setSuggestionsError(null);
 
     getBulkCategorySuggestions({
-      entitySlug: "gbsl",
+      entitySlug: suggestionEntitySlug,
       transactions: transactions.map((tx) => ({
         description: tx.description,
         vendor: tx.vendor,
@@ -556,7 +559,7 @@ function BulkAssignDialog({
     return () => {
       cancelled = true;
     };
-  }, [showSuggestions, suggestionKey, transactions]);
+  }, [showSuggestions, suggestionEntitySlug, suggestionKey, transactions]);
 
   function handleEntityChange(nextEntityId: string) {
     setEntityId(nextEntityId);
@@ -613,6 +616,7 @@ function BulkAssignDialog({
               selectedCategoryId={categoryId}
               isLoading={suggestionsLoading}
               error={suggestionsError}
+              entitySlug={suggestionEntitySlug}
               onSelect={setCategoryId}
             />
           ) : null}

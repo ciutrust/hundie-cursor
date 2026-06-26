@@ -27,7 +27,7 @@ See [RUN.md](../RUN.md) for start instructions.
 
 ---
 
-## Phase 2 — Training · AI suggestions ← **current**
+## Phase 2 — Training · AI suggestions ✅ (shipped)
 
 **Goal:** Suggest entity + category on new charges using GBSL QB history and Alex's confirmed classifications.
 
@@ -35,19 +35,33 @@ See [RUN.md](../RUN.md) for start instructions.
 |-----------|--------|------------|
 | QB training data loaded | Done | — |
 | Classified card ledger (Jan–Jun) | In progress (Alex classifying) | UI |
-| AI suggestion v0 (vendor match, top 3) | **Next** | training + ledger |
-| Suggestion UI on transaction detail | Not started | suggestion v0 |
-| Progressive learning from confirmations | Not started | suggestion v0 |
+| AI suggestion v0 (vendor match, top 3) | Done | training + ledger |
+| Suggestion UI on transaction detail + bulk | Done | suggestion v0 |
+| Personal categories + monthly matrix + backlog nav | Done | UI |
+| Progressive learning from confirmations | **Next (Phase 3)** | suggestion v0 |
 | Keller QBO read | Blocked (no access yet) | — |
 | Claudia auth | Not started | UI stable |
 
-**Success criteria:** Recurring vendors auto-suggest correct GBSL category; Alex confirms or corrects. Ledger remains source of truth.
-
-**Plan:** [PHASE2_PLAN.md](./PHASE2_PLAN.md)
+**Plan:** [PHASE2_PLAN.md](./PHASE2_PLAN.md) · [PHASE3_PLAN.md](./PHASE3_PLAN.md)
 
 ---
 
-## Phase 3 — Later · Banks, automation, CPA-ready
+## Phase 3 — Learning loop + category trends ← **current**
+
+**Goal:** Personal suggestions from confirmed history, category × month trends, path to CPA export.
+
+| Milestone | Status |
+|-----------|--------|
+| Personal vendor suggestions (confirmed history) | In progress |
+| Category × month matrix on entity page | In progress |
+| Suggestion accept/reject log | Planned |
+| Reports + CSV export | Planned |
+
+**Plan:** [PHASE3_PLAN.md](./PHASE3_PLAN.md)
+
+---
+
+## Phase 4 — Later · Banks, automation, CPA-ready
 
 Bank import, QBO API, write-back, splits, CPA packet — after Phase 2 is reliable.
 
