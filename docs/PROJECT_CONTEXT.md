@@ -291,6 +291,7 @@ Time view (Week / Month / Quarter / Year)
 | Repo | GitHub `ciutrust/hundie-cursor` |
 | Database | Supabase (Postgres) — project ref `ihciuqpiavxhbulfkwod` |
 | Auth | Supabase Auth (Alex now, Claudia later) |
+| RLS | All ledger tables: **authenticated-only SELECT** (anon locked out since `20260629140000`) — see [SUPABASE.md](./SUPABASE.md) |
 | App | Next.js (shipped — `/review`, `/reports`) |
 | Bank sync (later) | Plaid |
 | AI suggestions | QB training + confirmed ledger + amount buckets; pgvector possible later |

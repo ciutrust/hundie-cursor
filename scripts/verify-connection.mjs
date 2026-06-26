@@ -26,11 +26,19 @@ function loadEnv() {
 
 const env = loadEnv();
 const url = env.NEXT_PUBLIC_SUPABASE_URL;
-const key = env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+const key = env.SUPABASE_SERVICE_ROLE_KEY ?? env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
 if (!url || !key) {
-  console.error("Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in .env.local");
+  console.error(
+    "Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) in .env.local",
+  );
   process.exit(1);
+}
+
+if (!env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.warn(
+    "Warning: SUPABASE_SERVICE_ROLE_KEY not set — using publishable key. After RLS lockdown, anon returns no rows.",
+  );
 }
 
 const supabase = createClient(url, key);

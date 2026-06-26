@@ -16,9 +16,42 @@ Copy `.env.local.example` to `.env.local` and set:
 
 - `NEXT_PUBLIC_SUPABASE_URL` — project URL
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — publishable key (`sb_publishable_...`) from **Project Settings → API**
-- `SUPABASE_SERVICE_ROLE_KEY` — service role key from **Project Settings → API** (required for `npm run import:cards` write mode; never commit)
+- `SUPABASE_SERVICE_ROLE_KEY` — service role key from **Project Settings → API** (required for `npm run import:cards` write mode and `npm run verify:db`; never commit)
 
 Never commit `.env.local` or the service role key.
+
+## Security — RLS (Row Level Security)
+
+Hundie is deployed on Vercel. The **publishable (anon) key** is in the browser bundle and is public.
+
+| Role | Ledger SELECT | Writes |
+|------|---------------|--------|
+| `anon` (no session) | **Denied** — returns `[]` | Denied |
+| `authenticated` (signed-in Alex/Claudia) | Allowed (`USING (true)`) | UPDATE classifications/accounts; INSERT suggestion_events |
+| `service_role` (import scripts only) | Bypasses RLS | Full access for imports |
+
+**Migration:** `20260629140000_lock_anon_select_to_authenticated.sql` — replaced all `"Anyone can read …"` policies with `"Authenticated users can read …"`.
+
+**Single-tenant today:** any authenticated user sees the full ledger. Per-user row isolation is a future step if the app becomes multi-tenant (no `user_id` columns yet).
+
+**Middleware gap:** `/reports` and `/settings` are not in `middleware.ts` auth redirect, but anon cannot read data after RLS lockdown — they show empty UI only.
+
+### Verify anon is locked out
+
+```bash
+source .env.local
+
+# Expect [] (empty array) — NOT transaction rows
+curl -s "${NEXT_PUBLIC_SUPABASE_URL}/rest/v1/transactions?select=id,description,amount&limit=3" \
+  -H "apikey: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" \
+  -H "Authorization: Bearer ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}"
+```
+
+Signed-in app smoke test: log in → `/review` → entity drill-down → `/reports`.
+
+### Key rotation
+
+RLS closes the read hole regardless, but consider rotating the publishable key since it was public in the bundle.
 
 ## Migrations
 
@@ -28,16 +61,22 @@ SQL migrations live in `supabase/migrations/`. Apply with Supabase CLI (`supabas
 
 | Migration | Description |
 |-----------|-------------|
-| `create_entities` | Entity registry table + seed data (10 entities) |
-| `create_categories_and_qb_training` | QB-aligned categories, import_batches, qb_training_expenses |
-| `create_accounts_and_transactions` | accounts, transactions, classifications, raw_import_rows + 10 card/checking account seeds |
+| `20260625000000_create_entities` | Entity registry + seed |
+| `20260625120000_create_categories_and_qb_training` | categories, import_batches, qb_training_expenses |
+| `20260625140000_create_accounts_and_transactions` | accounts, transactions, classifications, raw_import_rows |
+| `20260625160000_classification_history_and_rls_writes` | classification_history + authenticated UPDATE on classifications |
+| `20260626120000_seed_personal_categories` | Personal category chart |
+| `20260627120000_rental_categories_and_account_settings` | Rental categories + account UPDATE policy |
+| `20260628120000_create_suggestion_events` | suggestion_events + authenticated INSERT |
+| `20260629120000_add_transfer_and_rental_categories` | GBSL transfers, rental fees, Personal CC interest |
+| `20260629140000_lock_anon_select_to_authenticated` | **Security:** authenticated-only SELECT on all ledger tables |
 
 ## Card CSV import
 
 Issuer parsers: Wells Fargo, Chase, Amex, Citi, Capital One (`scripts/lib/*-csv-parser.mjs`).
 
 ```bash
-# Parse all 10 CSVs locally (no DB, no secrets)
+# Parse all CSVs locally (no DB, no secrets)
 npm run import:cards:dry-run
 npm run verify:card-parsers
 
@@ -63,4 +102,4 @@ npm run import:cards:sql
 npm run verify:db
 ```
 
-Expected output: lists 10 entities from the `entities` table.
+Uses `SUPABASE_SERVICE_ROLE_KEY` (bypasses RLS). Lists entities from the `entities` table. Falls back to publishable key with a warning if service role is unset — that path returns empty after the RLS migration.
