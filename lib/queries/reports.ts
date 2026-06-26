@@ -90,12 +90,15 @@ async function fetchPeriodSummaryTransactionsForReports(
   });
 }
 
-export async function getReportTransactions(period: PeriodRange): Promise<ReportTransactionRow[]> {
+export async function getReportTransactions(
+  period: PeriodRange,
+  entitySlug?: string,
+): Promise<ReportTransactionRow[]> {
   const supabase = await createClient();
   const { start, end } = period;
 
   const rows = await paginateAll(async (from, pageSize) => {
-    const { data, error } = await supabase
+    let query = supabase
       .from("transactions")
       .select(
         `
@@ -117,6 +120,11 @@ export async function getReportTransactions(period: PeriodRange): Promise<Report
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
 
+    if (entitySlug) {
+      query = query.eq("classification.entity.slug", entitySlug);
+    }
+
+    const { data, error } = await query;
     return { data: data ?? [], error };
   });
 

@@ -1,111 +1,61 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { PeriodPicker } from "@/components/review/period-picker";
-import { ReportExportButton } from "@/components/reports/report-export-button";
-import { parsePeriodParams, periodQueryString } from "@/lib/period";
-import { getReportByEntity, getReportTransactions } from "@/lib/queries/reports";
-import { formatCurrency } from "@/lib/utils";
+import { ReportFilters, parseReportEntitySlug, parseReportPeriod } from "@/components/reports/report-filters";
+import { getClassifiableEntities } from "@/lib/queries/review";
+import { activeMonthPeriod } from "@/lib/period";
 
-type ReportsPageProps = {
-  searchParams: Promise<{ month?: string; period?: string; at?: string }>;
+const REPORT_LINKS = [
+  { href: "/reports/transactions", label: "Transaction detail" },
+  { href: "/reports/spending-by-entity", label: "Spending by entity (monthly matrix)" },
+  { href: "/reports/spending-by-category", label: "Spending by category (monthly matrix)" },
+  { href: "/reports/category-breakdown", label: "Category breakdown" },
+  { href: "/reports/top-vendors", label: "Top vendors" },
+  { href: "/reports/uncategorized-aging", label: "Uncategorized aging" },
+  { href: "/reports/classification-progress", label: "Classification progress" },
+  { href: "/reports/account-summary", label: "Account summary" },
+  { href: "/reports/yoy-comparison", label: "Year-over-year comparison" },
+  { href: "/reports/reconcile", label: "GBSL checking reconciliation" },
+  { href: "/reports/business-expenses-personal-cards", label: "Business expenses on personal cards" },
+  { href: "/reports/funding", label: "Funding" },
+  { href: "/reports/ai-suggestions", label: "AI suggestions stats" },
+] as const;
+
+type ReportsHubProps = {
+  searchParams: Promise<{ month?: string; period?: string; at?: string; entity?: string }>;
 };
 
-export default async function ReportsPage({ searchParams }: ReportsPageProps) {
+export default async function ReportsHubPage({ searchParams }: ReportsHubProps) {
   const params = await searchParams;
-  const period = parsePeriodParams(params);
-  const periodQuery = periodQueryString(period);
-  const backlogHref = `/review/unclassified?${periodQueryString(period)}`;
-  const [rows, transactions] = await Promise.all([getReportByEntity(period), getReportTransactions(period)]);
-  const grandTotal = rows.reduce((sum, row) => sum + row.total, 0);
-  const unclassifiedTotal = rows.reduce((sum, row) => sum + row.unclassifiedTotal, 0);
+  const period = parseReportPeriod(params, activeMonthPeriod());
+  const entitySlug = parseReportEntitySlug(params);
+  const entities = await getClassifiableEntities();
+  const querySuffix = entitySlug ? `entity=${entitySlug}&period=${period.type}&at=${period.at}` : `period=${period.type}&at=${period.at}`;
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="space-y-1">
           <p className="text-sm font-medium text-primary">Reports</p>
-          <h1 className="text-3xl font-semibold tracking-tight">{period.label}</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">Reports & export</h1>
           <p className="text-sm text-muted-foreground">
-            {formatCurrency(grandTotal)} total ·{" "}
-            {unclassifiedTotal > 0 ? (
-              <Link href={backlogHref} className="font-medium text-destructive hover:underline">
-                {formatCurrency(unclassifiedTotal)} still uncategorized
-              </Link>
-            ) : (
-              <span>{formatCurrency(unclassifiedTotal)} still uncategorized</span>
-            )}
+            Transaction detail and analytics · pick entity and period on each report
           </p>
         </div>
-        <div className="flex flex-col gap-3 sm:items-end">
-          <Suspense fallback={null}>
-            <PeriodPicker period={period} />
-          </Suspense>
-          <ReportExportButton
-            period={{ type: period.type, at: period.at }}
-            rowCount={transactions.length}
-            periodLabel={period.label}
-          />
-        </div>
+        <Suspense fallback={null}>
+          <ReportFilters period={period} entities={entities} selectedEntitySlug={entitySlug} />
+        </Suspense>
       </div>
 
-      <div className="flex flex-wrap gap-4 text-sm">
-        <Link href="/reports/reconcile" className="font-medium text-primary hover:underline">
-          GBSL checking reconciliation
-        </Link>
-        <Link href="/reports/business-expenses-personal-cards" className="font-medium text-primary hover:underline">
-          Business expenses on personal cards
-        </Link>
-        <Link href="/reports/ai-suggestions" className="font-medium text-violet-600 hover:underline dark:text-violet-400">
-          AI suggestions
-        </Link>
-      </div>
-
-      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/40 text-left text-muted-foreground">
-              <th className="px-4 py-3 font-medium">Entity</th>
-              <th className="px-4 py-3 font-medium">Expenses</th>
-              <th className="px-4 py-3 font-medium">Transactions</th>
-              <th className="px-4 py-3 font-medium">Uncategorized</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {rows.map((row) => {
-              const entityHref = `/review/${row.slug}?${periodQuery}`;
-              const uncategorizedHref = `/review/${row.slug}?${periodQueryString(period, { category: "unclassified" })}`;
-
-              return (
-              <tr key={row.slug} className="hover:bg-muted/20">
-                <td className="px-4 py-3 font-medium">
-                  <Link href={entityHref} className="hover:text-primary">
-                    {row.name}
-                  </Link>
-                </td>
-                <td className="px-4 py-3 tabular-nums">{formatCurrency(row.total)}</td>
-                <td className="px-4 py-3 tabular-nums">
-                  <Link href={entityHref} className="hover:text-primary hover:underline">
-                    {row.transactionCount}
-                  </Link>
-                </td>
-                <td className="px-4 py-3 tabular-nums">
-                  {row.unclassifiedCount > 0 ? (
-                    <Link
-                      href={uncategorizedHref}
-                      className="font-medium text-destructive hover:underline"
-                      title="Review and categorize these transactions"
-                    >
-                      {row.unclassifiedCount} · {formatCurrency(row.unclassifiedTotal)}
-                    </Link>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </td>
-              </tr>
-            );
-            })}
-          </tbody>
-        </table>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {REPORT_LINKS.map((link) => (
+          <Link
+            key={link.href}
+            href={`${link.href}?${querySuffix}`}
+            className="rounded-lg border border-border bg-card px-4 py-3 text-sm font-medium transition-colors hover:bg-muted/30"
+          >
+            {link.label}
+          </Link>
+        ))}
       </div>
     </div>
   );

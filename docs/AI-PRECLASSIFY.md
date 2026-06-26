@@ -8,7 +8,7 @@ Add to `.env.local` (and Vercel env for production):
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
-AI_MODEL=claude-sonnet-4-20250514
+AI_MODEL=claude-sonnet-4-6
 ```
 
 Apply migration (already applied to remote Supabase `ihciuqpiavxhbulfkwod`; file in repo):
@@ -19,11 +19,10 @@ supabase db push   # fresh environments only — or apply 20260630120000_create_
 
 ## In-app workflow
 
-1. Open **Review → Personal → Uncategorized**  
-   `/review/personal?category=unclassified`  
-   (2025–2026 backlog loads automatically in the AI panel)
+1. Open **AI review** at `/review/ai`  
+   Personal · uncategorized · 2025–2026 (no period picker)
 
-2. Transactions are **grouped by vendor**. Each group and each transaction has a checkbox — **uncheck anything that looks wrong** before sending to AI or accepting.
+2. Transactions are **grouped by vendor** and sent to the model as **summarized packages** (not row-by-row).
 
 3. Click **Ask AI (N)** for selected transactions, or **Ask AI (all)** for the full backlog.
 

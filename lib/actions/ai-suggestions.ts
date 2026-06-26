@@ -2,9 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { estimateCostUsd, getAiModel } from "@/lib/ai/config";
-import { classifyAllTransactions, estimateTokensForBatch } from "@/lib/ai/preclassify";
+import { packagesForTransactionIds } from "@/lib/ai/vendor-group-packages";
+import {
+  classifyAllVendorGroups,
+  estimateTokensForVendorGroups,
+} from "@/lib/ai/vendor-group-classify";
 import type { BacklogTransaction } from "@/lib/ai/vendor-groups";
-import { extractVendorSearchKey } from "@/lib/suggestions/category-suggestions";
 import { logSuggestionEvent, type SuggestionOutcome } from "@/lib/actions/suggestion-events";
 import {
   getEntityChartsForAi,
@@ -14,6 +17,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export type AiEstimateResult = {
   transactionCount: number;
+  vendorGroupCount: number;
   estimatedInputTokens: number;
   estimatedOutputTokens: number;
   estimatedCostUsd: number;
@@ -24,16 +28,19 @@ export type AiEstimateResult = {
 export async function estimateAiRun(transactionIds: string[]): Promise<AiEstimateResult | { error: string }> {
   const backlog = await getPersonalAiBacklog();
   const allowed = new Set(backlog.map((tx) => tx.id));
-  const count = transactionIds.filter((id) => allowed.has(id)).length;
-  if (count === 0) return { error: "No eligible transactions selected" };
+  const eligibleIds = transactionIds.filter((id) => allowed.has(id));
+  const eligible = backlog.filter((tx) => eligibleIds.includes(tx.id));
+  if (eligible.length === 0) return { error: "No eligible transactions selected" };
 
+  const packages = packagesForTransactionIds(backlog, eligible.map((tx) => tx.id));
   const charts = await getEntityChartsForAi();
   const categoryCount = charts.reduce((sum, chart) => sum + chart.categoryPaths.length, 0);
-  const { inputTokens, outputTokens } = estimateTokensForBatch(count, categoryCount);
-  const batchCount = Math.ceil(count / 25);
+  const { inputTokens, outputTokens } = estimateTokensForVendorGroups(packages.length, categoryCount);
+  const batchCount = Math.ceil(packages.length / 25);
 
   return {
-    transactionCount: count,
+    transactionCount: eligible.length,
+    vendorGroupCount: packages.length,
     estimatedInputTokens: inputTokens,
     estimatedOutputTokens: outputTokens,
     estimatedCostUsd: estimateCostUsd(inputTokens, outputTokens),
@@ -99,43 +106,65 @@ export async function requestAiSuggestions(
       return { error: "No eligible Personal uncategorized transactions in 2025–2026" };
     }
 
+    const packages = packagesForTransactionIds(
+      [...backlogMap.values()],
+      transactions.map((tx) => tx.id),
+    );
+
+    if (packages.length === 0) {
+      return { error: "No vendor groups to classify" };
+    }
+
     const entityCharts = await getEntityChartsForAi();
     const { data: entities } = await supabase.from("entities").select("id, slug");
     const entityIdBySlug = new Map((entities ?? []).map((entity) => [entity.slug, entity.id]));
 
-    const { items, inputTokens, outputTokens, model } = await classifyAllTransactions({
-      transactions,
+    const { items, inputTokens, outputTokens, model } = await classifyAllVendorGroups(
+      packages,
       entityCharts,
-    });
+    );
 
     const staleIds = transactions.map((tx) => tx.id);
     if (staleIds.length > 0) {
       await supabase.from("ai_suggestions").update({ is_current: false }).in("transaction_id", staleIds);
     }
 
+    const packageByKey = new Map(packages.map((pkg) => [pkg.vendor_key, pkg]));
     const categoryLookup = await loadCategoryLookup();
     const rows = [];
+
     for (const item of items) {
-      const tx = backlogMap.get(item.transaction_id);
-      if (!tx) continue;
+      const pkg = packageByKey.get(item.vendor_key);
+      if (!pkg) continue;
       const entityId = entityIdBySlug.get(item.entity_slug);
       if (!entityId) continue;
       const categoryId = resolveCategoryIdFromLookup(categoryLookup, entityId, item.category_path);
 
-      rows.push({
-        transaction_id: item.transaction_id,
-        vendor_group_key: extractVendorSearchKey(tx.description, tx.vendor),
-        entity_id: entityId,
-        entity_slug: item.entity_slug,
-        suggested_category_id: categoryId,
-        suggested_category_path: item.category_path,
-        confidence: item.confidence,
-        rationale: item.rationale,
-        model,
-        input_tokens: Math.round(inputTokens / items.length),
-        output_tokens: Math.round(outputTokens / items.length),
-        is_current: true,
-      });
+      for (const txId of pkg.transaction_ids) {
+        const tx = backlogMap.get(txId);
+        if (!tx) continue;
+        rows.push({
+          transaction_id: txId,
+          vendor_group_key: item.vendor_key,
+          entity_id: entityId,
+          entity_slug: item.entity_slug,
+          suggested_category_id: categoryId,
+          suggested_category_path: item.category_path,
+          confidence: item.confidence,
+          rationale: item.rationale,
+          model,
+          input_tokens: 0,
+          output_tokens: 0,
+          is_current: true,
+        });
+      }
+    }
+
+    const perRowIn = rows.length > 0 ? Math.round(inputTokens / rows.length) : 0;
+    const perRowOut = rows.length > 0 ? Math.round(outputTokens / rows.length) : 0;
+    for (const row of rows) {
+      row.input_tokens = perRowIn;
+      row.output_tokens = perRowOut;
     }
 
     if (rows.length > 0) {
@@ -143,6 +172,7 @@ export async function requestAiSuggestions(
       if (error) return { error: error.message };
     }
 
+    revalidatePath("/review/ai");
     revalidatePath("/review/personal");
     revalidatePath("/reports/ai-suggestions");
 
@@ -180,6 +210,8 @@ export async function acceptAiSuggestions(
 
   const createdBy = user.email ?? user.id;
 
+  const acceptedTxIds: string[] = [];
+
   for (const item of items) {
     const { error } = await supabase
       .from("classifications")
@@ -192,6 +224,8 @@ export async function acceptAiSuggestions(
       .eq("id", item.classificationId);
 
     if (error) return { error: error.message };
+
+    acceptedTxIds.push(item.transactionId);
 
     const outcome: SuggestionOutcome = {
       transactionId: item.transactionId,
@@ -207,7 +241,16 @@ export async function acceptAiSuggestions(
     await logSuggestionEvent(outcome, createdBy);
   }
 
+  if (acceptedTxIds.length > 0) {
+    await supabase
+      .from("ai_suggestions")
+      .update({ is_current: false })
+      .in("transaction_id", acceptedTxIds)
+      .eq("is_current", true);
+  }
+
   revalidatePath("/review");
+  revalidatePath("/review/ai");
   revalidatePath("/review/personal");
   revalidatePath("/reports/ai-suggestions");
 

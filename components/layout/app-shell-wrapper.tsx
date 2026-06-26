@@ -1,7 +1,8 @@
 import { Suspense } from "react";
 import { AppShell } from "@/components/layout/app-shell";
-import { getTotalBacklogCount } from "@/lib/queries/review";
-import { getPersonalAiBacklog } from "@/lib/queries/ai-suggestions";
+import { getAiPreclassifiedCount } from "@/lib/queries/ai-suggestions";
+import { getAllEntityHomeStats } from "@/lib/queries/entity-home";
+import { ytdPeriod } from "@/lib/period";
 import { createClient } from "@/lib/supabase/server";
 
 function initialsFromLabel(label: string) {
@@ -23,10 +24,10 @@ function labelFromEmail(email: string) {
 
 export async function AppShellWrapper({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
-  const [{ data: { user } }, backlogCount, aiBacklog] = await Promise.all([
+  const [{ data: { user } }, entityStats, aiAwaitingCount] = await Promise.all([
     supabase.auth.getUser(),
-    getTotalBacklogCount(),
-    getPersonalAiBacklog(),
+    getAllEntityHomeStats(ytdPeriod()),
+    getAiPreclassifiedCount(),
   ]);
 
   const metadataName =
@@ -34,11 +35,17 @@ export async function AppShellWrapper({ children }: { children: React.ReactNode 
   const userLabel = metadataName ?? (user?.email ? labelFromEmail(user.email) : "Signed in");
   const userInitials = initialsFromLabel(userLabel);
 
+  const entities = entityStats.map((stats) => ({
+    slug: stats.slug,
+    name: stats.name,
+    unclassifiedCount: stats.unclassifiedCount,
+  }));
+
   return (
     <Suspense fallback={<div className="min-h-screen bg-background lg:pl-60">{children}</div>}>
       <AppShell
-        backlogCount={backlogCount}
-        aiReviewCount={aiBacklog.length}
+        entities={entities}
+        aiAwaitingCount={aiAwaitingCount}
         userLabel={userLabel}
         userInitials={userInitials}
       >

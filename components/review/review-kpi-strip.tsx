@@ -41,7 +41,7 @@ export function ReviewKpiStrip({ stats }: ReviewKpiStripProps) {
     aiPreclassified: (
       <div>
         <Link
-          href="/review/personal?category=unclassified&period=year&at=2025"
+          href="/review/ai"
           className="group block rounded-lg -m-1 p-1 transition-colors hover:bg-violet-500/5"
         >
           <span className="text-2xl font-semibold tabular-nums tracking-tight text-violet-600 group-hover:underline dark:text-violet-400">

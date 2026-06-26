@@ -119,13 +119,49 @@ export function periodRangeFor(type: PeriodType, at: string): PeriodRange {
   return periodRangeFor("month", `${new Date().getFullYear()}-${pad2(new Date().getMonth() + 1)}`);
 }
 
-export function parsePeriodParams(searchParams: {
-  period?: string;
-  at?: string;
-  month?: string;
-}): PeriodRange {
+function currentMonthAt() {
+  const now = new Date();
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
+}
+
+/** Calendar month containing today — default for dashboard & reports. */
+export function activeMonthPeriod(): PeriodRange {
+  return periodRangeFor("month", currentMonthAt());
+}
+
+/** Jan 1 through end of today — default for entity views. */
+export function ytdPeriod(): PeriodRange {
+  const now = new Date();
+  const year = now.getFullYear();
+  const end = toIsoDate(addDays(now, 1));
+  return {
+    type: "year",
+    start: `${year}-01-01`,
+    end,
+    label: `${year} YTD`,
+    at: String(year),
+    compareStart: `${year - 1}-01-01`,
+    compareEnd: `${year}-01-01`,
+  };
+}
+
+export function parsePeriodParams(
+  searchParams: {
+    period?: string;
+    at?: string;
+    month?: string;
+  },
+  defaultPeriod?: PeriodRange,
+): PeriodRange {
+  const hasExplicit =
+    searchParams.period != null || searchParams.at != null || searchParams.month != null;
+
+  if (!hasExplicit) {
+    return defaultPeriod ?? activeMonthPeriod();
+  }
+
   const type = (searchParams.period ?? "month") as PeriodType;
-  const at = searchParams.at ?? searchParams.month ?? "2026-06";
+  const at = searchParams.at ?? searchParams.month ?? currentMonthAt();
 
   if (type === "month" && !searchParams.at && searchParams.month) {
     return periodRangeFor("month", searchParams.month);

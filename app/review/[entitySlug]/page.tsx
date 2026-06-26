@@ -1,168 +1,98 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { AiReviewPanel } from "@/components/review/ai-review-panel";
-import { CategoryBreakdown } from "@/components/review/category-breakdown";
-import { MonthlyCategoryMatrix } from "@/components/review/monthly-category-matrix";
-import { MonthlyEntityMatrix } from "@/components/review/monthly-entity-matrix";
+import { notFound, redirect } from "next/navigation";
+import { Suspense } from "react";
 import { PeriodPicker } from "@/components/review/period-picker";
-import { TransactionList } from "@/components/review/transaction-list";
-import { periodQueryString, parsePeriodParams } from "@/lib/period";
-import {
-  getCategoriesByEntity,
-  getCategoriesForEntity,
-  getClassifiableEntities,
-  getEntityTransactions,
-  getMonthlyCategoryMatrix,
-  getMonthlyEntityMatrix,
-} from "@/lib/queries/review";
-import { getPersonalAiBacklog } from "@/lib/queries/ai-suggestions";
-import { isOperatingExpense } from "@/lib/category-expense";
-import { formatCurrency } from "@/lib/utils";
+import { EntityHomeCards } from "@/components/review/entity-home-cards";
+import { getEntityHomeStats } from "@/lib/queries/entity-home";
+import { getClassifiableEntities } from "@/lib/queries/review";
+import { parsePeriodParams, periodQueryString, ytdPeriod } from "@/lib/period";
 
-/** Large AI runs invoke Anthropic in batches; allow enough time per server action. */
-export const maxDuration = 300;
-
-type EntityReviewPageProps = {
+type EntityHomePageProps = {
   params: Promise<{ entitySlug: string }>;
   searchParams: Promise<{ month?: string; period?: string; at?: string; category?: string }>;
 };
 
-export default async function EntityReviewPage({ params, searchParams }: EntityReviewPageProps) {
+export default async function EntityHomePage({ params, searchParams }: EntityHomePageProps) {
   const { entitySlug } = await params;
   const query = await searchParams;
-  const period = parsePeriodParams(query);
-  const periodQuery = periodQueryString(period);
-  const categoryFilter = query.category ?? null;
-  const matrixYear = Number(period.start.slice(0, 4));
 
-  const [entities, { groups, transactions }, categories, categoriesByEntity, allGroups, monthlyMatrix, categoryMatrix, aiBacklog] =
-    await Promise.all([
-      getClassifiableEntities(),
-      getEntityTransactions(period, entitySlug, categoryFilter),
-      getCategoriesForEntity(entitySlug),
-      getCategoriesByEntity(),
-      categoryFilter
-        ? getEntityTransactions(period, entitySlug).then((result) => result.groups)
-        : Promise.resolve(null),
-      entitySlug === "unclassified" ? getMonthlyEntityMatrix(matrixYear) : Promise.resolve(null),
-      !categoryFilter && entitySlug !== "unclassified"
-        ? getMonthlyCategoryMatrix(entitySlug, matrixYear)
-        : Promise.resolve(null),
-      entitySlug === "personal" && categoryFilter === "unclassified"
-        ? getPersonalAiBacklog()
-        : Promise.resolve([]),
-    ]);
+  if (entitySlug === "unclassified") {
+    redirect("/review/entities");
+  }
 
-  const entity =
-    entitySlug === "unclassified"
-      ? { name: "Review backlog", slug: "unclassified" }
-      : entities.find((item) => item.slug === entitySlug);
-
-  if (!entity) {
+  if (entitySlug === "entities" || entitySlug === "ai") {
     notFound();
   }
 
-  const breakdownGroups = categoryFilter ? (allGroups ?? groups) : groups;
-  const selectedCategoryName = categoryFilter
-    ? breakdownGroups.find((group) =>
-        categoryFilter === "unclassified"
-          ? group.categoryId === null
-          : group.categoryId === categoryFilter,
-      )?.categoryName ?? "Category"
-    : null;
+  if (query.category === "unclassified") {
+    const period = parsePeriodParams(query, ytdPeriod());
+    redirect(`/review/${entitySlug}/uncategorized?${periodQueryString(period)}`);
+  }
 
-  const total = transactions
-    .filter((tx) => isOperatingExpense(tx.amount, tx.classification.category?.full_path))
-    .reduce((sum, tx) => sum + Number(tx.amount), 0);
-  const isUnclassifiedView = entitySlug === "unclassified";
+  const period = parsePeriodParams(query, ytdPeriod());
+  const periodQuery = periodQueryString(period);
 
-  const aiSuggestionTxIds = new Set(
-    aiBacklog.filter((tx) => tx.ai_suggestion).map((tx) => tx.id),
-  );
+  const [entities, stats] = await Promise.all([
+    getClassifiableEntities(),
+    getEntityHomeStats(entitySlug, period),
+  ]);
+
+  const entity = entities.find((item) => item.slug === entitySlug);
+  if (!entity || !stats) {
+    notFound();
+  }
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="space-y-1">
           <p className="text-sm text-muted-foreground">
-            <Link href={`/review?${periodQuery}`} className="hover:text-foreground">
-              Classify
+            <Link href="/review/entities" className="hover:text-foreground">
+              Entities
             </Link>
             {" · "}
-            <Link href={`/review/${entitySlug}?${periodQuery}`} className="hover:text-foreground">
-              {entity.name}
-            </Link>
-            {selectedCategoryName ? ` · ${selectedCategoryName}` : null}
+            {entity.name}
           </p>
-          <h1 className="text-3xl font-semibold tracking-tight">{selectedCategoryName ?? entity.name}</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">{entity.name}</h1>
           <p className="text-sm text-muted-foreground">
-            {period.label} · {formatCurrency(total)} · {transactions.length} transactions
-              {isUnclassifiedView ? " · uncategorized + CPA review items still need your call" : null}
+            {period.label} · classify uncategorized or view details in{" "}
+            <Link href={`/reports/transactions?entity=${entitySlug}&${periodQuery}`} className="text-primary hover:underline">
+              Reports
+            </Link>
           </p>
-          {entitySlug === "personal" && categoryFilter !== "unclassified" ? (
-            <Link
-              href={`/review/personal?${periodQueryString(period, { category: "unclassified" })}`}
-              className="inline-flex text-sm font-medium text-violet-600 hover:underline dark:text-violet-400"
-            >
-              Open AI review for uncategorized →
+          {entitySlug === "personal" ? (
+            <Link href="/review/ai" className="text-sm font-medium text-violet-600 hover:underline dark:text-violet-400">
+              Open AI review →
             </Link>
           ) : null}
         </div>
-        <PeriodPicker period={period} />
+        <Suspense fallback={null}>
+          <PeriodPicker period={period} />
+        </Suspense>
       </div>
 
-      {isUnclassifiedView && monthlyMatrix ? (
-        <MonthlyEntityMatrix
-          rows={monthlyMatrix}
-          year={matrixYear}
-          currentYear={new Date().getFullYear()}
-          currentMonth={new Date().getMonth() + 1}
-          filterSlugs={["unclassified"]}
-          title={`${matrixYear} uncategorized backlog`}
-          subtitle="Expenses still missing a category. Click a month to drill in — goal is $0 each month."
-        />
-      ) : null}
+      <EntityHomeCards stats={stats} period={period} />
 
-      {!categoryFilter && categoryMatrix && categoryMatrix.length > 0 ? (
-        <MonthlyCategoryMatrix
-          rows={categoryMatrix}
-          entitySlug={entitySlug}
-          year={matrixYear}
-          currentYear={new Date().getFullYear()}
-          currentMonth={new Date().getMonth() + 1}
-        />
-      ) : null}
-
-      {!categoryFilter ? (
-        <CategoryBreakdown groups={breakdownGroups} entitySlug={entitySlug} periodQuery={periodQuery} />
-      ) : null}
-
-      {entitySlug === "personal" && categoryFilter === "unclassified" && aiBacklog.length > 0 ? (
-        <AiReviewPanel transactions={aiBacklog} entities={entities} />
-      ) : null}
-
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Transactions</h2>
-          {categoryFilter ? (
-            <Link
-              href={`/review/${entitySlug}?${periodQuery}`}
-              className="text-xs text-muted-foreground hover:text-foreground"
-            >
-              Clear category filter
-            </Link>
-          ) : null}
-        </div>
-        <TransactionList
-          transactions={transactions}
-          entities={entities}
-          categories={categories}
-          categoriesByEntity={categoriesByEntity}
-          month={period.at}
-          entitySlug={entitySlug}
-          aiSuggestionTxIds={aiSuggestionTxIds.size > 0 ? aiSuggestionTxIds : undefined}
-        />
-      </section>
+      <div className="flex flex-wrap gap-4 text-sm">
+        <Link
+          href={`/review/${entitySlug}/uncategorized?${periodQuery}`}
+          className="font-medium text-primary hover:underline"
+        >
+          Classify uncategorized →
+        </Link>
+        <Link
+          href={`/reports/spending-by-category?entity=${entitySlug}&${periodQuery}`}
+          className="text-muted-foreground hover:text-foreground hover:underline"
+        >
+          Category breakdown report
+        </Link>
+        <Link
+          href={`/reports/transactions?entity=${entitySlug}&${periodQuery}`}
+          className="text-muted-foreground hover:text-foreground hover:underline"
+        >
+          Transaction detail report
+        </Link>
+      </div>
     </div>
   );
 }

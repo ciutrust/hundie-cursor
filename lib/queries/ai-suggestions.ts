@@ -228,18 +228,10 @@ export async function getAiAcceptanceStats(): Promise<AiAcceptanceRow[]> {
     .sort((a, b) => b.shown - a.shown);
 }
 
+/** Personal uncategorized backlog rows with a current AI suggestion awaiting confirm. */
 export async function getAiPreclassifiedCount(): Promise<number> {
-  const supabase = await createClient();
-  const { count, error } = await supabase
-    .from("ai_suggestions")
-    .select("id", { count: "exact", head: true })
-    .eq("is_current", true);
-
-  if (error) {
-    if (error.message.includes("ai_suggestions")) return 0;
-    throw error;
-  }
-  return count ?? 0;
+  const backlog = await getPersonalAiBacklog();
+  return backlog.filter((tx) => tx.ai_suggestion).length;
 }
 
 export async function getAiSuggestionCoverage() {

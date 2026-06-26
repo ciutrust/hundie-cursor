@@ -8,7 +8,7 @@ export const AI_INPUT_USD_PER_M = 3;
 export const AI_OUTPUT_USD_PER_M = 15;
 
 export function getAiModel(): string {
-  return process.env.AI_MODEL?.trim() || "claude-sonnet-4-20250514";
+  return process.env.AI_MODEL?.trim() || "claude-sonnet-4-6";
 }
 
 export function getAnthropicApiKey(): string | null {

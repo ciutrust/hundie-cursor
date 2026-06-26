@@ -29,7 +29,10 @@ export function CategoryBreakdown({
     selectedCategoryId !== undefined &&
     (group.categoryId === selectedCategoryId ||
       (group.categoryId === null && selectedCategoryId === null));
-          const href = `/review/${entitySlug}?${periodQuery}&category=${categoryParam}`;
+          const href =
+            categoryParam === "unclassified"
+              ? `/review/${entitySlug}/uncategorized?${periodQuery}`
+              : `/reports/transactions?entity=${entitySlug}&${periodQuery}`;
 
           return (
             <Link

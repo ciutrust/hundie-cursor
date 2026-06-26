@@ -39,7 +39,7 @@ export default async function AiSuggestionsReportPage() {
 
       <p className="text-sm">
         <Link
-          href="/review/personal?category=unclassified&period=year&at=2025"
+          href="/review/ai"
           className="font-medium text-violet-600 hover:underline dark:text-violet-400"
         >
           Open AI review panel →

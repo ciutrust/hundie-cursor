@@ -1,19 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
   Brain,
-  Building2,
   CheckCircle2,
   FileSpreadsheet,
   LayoutGrid,
   Settings2,
-  Sparkles,
 } from "lucide-react";
+import { SidebarEntitiesNav } from "@/components/layout/sidebar-entities-nav";
 import { signOut } from "@/lib/actions/reclassify";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { cn } from "@/lib/utils";
+
+type EntityNavItem = {
+  slug: string;
+  name: string;
+  unclassifiedCount?: number;
+};
 
 type NavItem = {
   href: string;
@@ -24,98 +29,110 @@ type NavItem = {
   disabled?: boolean;
 };
 
-type NavGroup = {
-  label: string;
-  items: NavItem[];
-};
-
 type AppShellProps = {
   children: React.ReactNode;
-  backlogCount: number;
-  aiReviewCount: number;
+  entities: EntityNavItem[];
+  aiAwaitingCount: number;
   userLabel: string;
   userInitials: string;
 };
 
-function buildNav(backlogCount: number, aiReviewCount: number): NavGroup[] {
-  return [
-    {
-      label: "Classify",
-      items: [
-        {
-          href: "/review",
-          label: "Review",
-          icon: LayoutGrid,
-          match: (path) =>
-            path === "/review" || (path.startsWith("/review/") && path !== "/review/unclassified"),
-        },
-        {
-          href: "/review/unclassified",
-          label: "Backlog",
-          icon: Sparkles,
-          match: (path) => path.startsWith("/review/unclassified"),
-          badge: backlogCount > 0 ? backlogCount : undefined,
-        },
-        {
-          href: "/review/personal?category=unclassified",
-          label: "AI review",
-          icon: Brain,
-          match: (path) =>
-            path.startsWith("/review/personal") && path.includes("category=unclassified"),
-          badge: aiReviewCount > 0 ? aiReviewCount : undefined,
-        },
-      ],
-    },
-    {
-      label: "Tax readiness",
-      items: [
-        {
-          href: "#",
-          label: "Month close",
-          icon: CheckCircle2,
-          match: () => false,
-          disabled: true,
-        },
-        {
-          href: "/reports",
-          label: "Reports & export",
-          icon: FileSpreadsheet,
-          match: (path) => path.startsWith("/reports"),
-        },
-      ],
-    },
-    {
-      label: "Setup",
-      items: [
-        {
-          href: "/settings/accounts",
-          label: "Accounts",
-          icon: Settings2,
-          match: (path) => path.startsWith("/settings"),
-        },
-        {
-          href: "#",
-          label: "Entities & rules",
-          icon: Building2,
-          match: () => false,
-          disabled: true,
-        },
-      ],
-    },
-  ];
-}
+const CLASSIFY_ITEMS: NavItem[] = [
+  {
+    href: "/review",
+    label: "Dashboard",
+    icon: LayoutGrid,
+    match: (path) => path === "/review",
+  },
+  {
+    href: "/review/ai",
+    label: "AI review",
+    icon: Brain,
+    match: (path) => path === "/review/ai" || path.startsWith("/review/ai/"),
+  },
+];
 
-export function AppShell({ children, backlogCount, aiReviewCount, userLabel, userInitials }: AppShellProps) {
+const REPORT_ITEMS: NavItem[] = [
+  {
+    href: "#",
+    label: "Month close",
+    icon: CheckCircle2,
+    match: () => false,
+    disabled: true,
+  },
+  {
+    href: "/reports",
+    label: "Reports & export",
+    icon: FileSpreadsheet,
+    match: (path) => path.startsWith("/reports"),
+  },
+];
+
+const SETUP_ITEMS: NavItem[] = [
+  {
+    href: "/settings/accounts",
+    label: "Accounts",
+    icon: Settings2,
+    match: (path) => path.startsWith("/settings"),
+  },
+];
+
+export function AppShell({
+  children,
+  entities,
+  aiAwaitingCount,
+  userLabel,
+  userInitials,
+}: AppShellProps) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const navGroups = buildNav(backlogCount, aiReviewCount);
 
-  function isNavActive(item: NavItem) {
-    if (item.href === "/review/personal?category=unclassified") {
-      return pathname === "/review/personal" && searchParams.get("category") === "unclassified";
+  function renderNavItem(item: NavItem) {
+    const active = item.match(pathname);
+    const Icon = item.icon;
+    const badge = item.href === "/review/ai" && aiAwaitingCount > 0 ? aiAwaitingCount : item.badge;
+
+    if (item.disabled) {
+      return (
+        <li key={item.label}>
+          <span
+            className="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted-foreground/50"
+            title="Coming soon"
+          >
+            <Icon className="h-4 w-4 shrink-0" />
+            <span className="flex-1">{item.label}</span>
+          </span>
+        </li>
+      );
     }
-    return item.match(pathname);
+
+    return (
+      <li key={item.href}>
+        <Link
+          href={item.href}
+          className={cn(
+            "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors",
+            active
+              ? "bg-primary/15 text-primary"
+              : "text-muted-foreground hover:bg-accent hover:text-foreground",
+          )}
+        >
+          <Icon className="h-4 w-4 shrink-0" />
+          <span className="flex-1">{item.label}</span>
+          {badge != null && badge > 0 ? (
+            <span className="rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-violet-600 dark:text-violet-400">
+              {badge}
+            </span>
+          ) : null}
+        </Link>
+      </li>
+    );
   }
+
+  const mobileLinks = [
+    ...CLASSIFY_ITEMS,
+    { href: "/review/entities", label: "Entities" },
+    ...REPORT_ITEMS.filter((i) => !i.disabled),
+  ];
 
   return (
     <div className="min-h-screen bg-background lg:flex">
@@ -134,55 +151,33 @@ export function AppShell({ children, backlogCount, aiReviewCount, userLabel, use
           </div>
 
           <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
-            {navGroups.map((group) => (
-              <div key={group.label}>
-                <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {group.label}
-                </p>
-                <ul className="space-y-0.5">
-                  {group.items.map((item) => {
-                    const active = isNavActive(item);
-                    const Icon = item.icon;
+            <div>
+              <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Classify
+              </p>
+              <ul className="space-y-0.5">{CLASSIFY_ITEMS.map(renderNavItem)}</ul>
+            </div>
 
-                    if (item.disabled) {
-                      return (
-                        <li key={item.label}>
-                          <span
-                            className="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted-foreground/50"
-                            title="Coming soon"
-                          >
-                            <Icon className="h-4 w-4 shrink-0" />
-                            <span className="flex-1">{item.label}</span>
-                          </span>
-                        </li>
-                      );
-                    }
+            <div>
+              <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Entities
+              </p>
+              <SidebarEntitiesNav entities={entities} />
+            </div>
 
-                    return (
-                      <li key={item.href}>
-                        <Link
-                          href={item.href}
-                          className={cn(
-                            "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors",
-                            active
-                              ? "bg-primary/15 text-primary"
-                              : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                          )}
-                        >
-                          <Icon className="h-4 w-4 shrink-0" />
-                          <span className="flex-1">{item.label}</span>
-                          {item.badge != null ? (
-                            <span className="rounded-full bg-destructive/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-destructive">
-                              {item.badge}
-                            </span>
-                          ) : null}
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))}
+            <div>
+              <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Tax readiness
+              </p>
+              <ul className="space-y-0.5">{REPORT_ITEMS.map(renderNavItem)}</ul>
+            </div>
+
+            <div>
+              <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Setup
+              </p>
+              <ul className="space-y-0.5">{SETUP_ITEMS.map(renderNavItem)}</ul>
+            </div>
           </nav>
 
           <div className="border-t border-sidebar-border p-3">
@@ -213,26 +208,20 @@ export function AppShell({ children, backlogCount, aiReviewCount, userLabel, use
             <ThemeToggle />
           </div>
           <nav className="flex gap-1 overflow-x-auto px-4 pb-3">
-            {navGroups.flatMap((group) =>
-              group.items
-                .filter((item) => !item.disabled)
-                .map((item) => {
-                  const active = isNavActive(item);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={cn(
-                        "shrink-0 rounded-md px-3 py-1.5 text-sm font-medium",
-                        active ? "bg-primary/15 text-primary" : "text-muted-foreground",
-                      )}
-                    >
-                      {item.label}
-                      {item.badge != null ? ` (${item.badge})` : ""}
-                    </Link>
-                  );
-                }),
-            )}
+            {mobileLinks.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "shrink-0 rounded-md px-3 py-1.5 text-sm font-medium",
+                  pathname === item.href || pathname.startsWith(`${item.href}/`)
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground",
+                )}
+              >
+                {item.label}
+              </Link>
+            ))}
           </nav>
         </header>
 
