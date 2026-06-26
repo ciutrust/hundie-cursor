@@ -47,9 +47,7 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(transactions.map((tx) => tx.id)),
-  );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [pendingResult, setPendingResult] = useState<PendingResult | null>(null);
   const [resultSelectedIds, setResultSelectedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +65,12 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
 
   const selectedCount = selectedIds.size;
   const withAiCount = transactions.filter((tx) => tx.ai_suggestion).length;
+  const allSelected = transactions.length > 0 && selectedCount === transactions.length;
+  const someSelected = selectedCount > 0 && !allSelected;
+
+  function selectAll(checked: boolean) {
+    setSelectedIds(checked ? new Set(transactions.map((tx) => tx.id)) : new Set());
+  }
 
   function toggleGroupExpand(key: string) {
     setExpandedGroups((current) => {
@@ -249,7 +253,7 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
             {transactions.length} transactions · 2025–2026 · {withAiCount} already have AI suggestions
           </p>
           <p className="text-xs text-muted-foreground">
-            Grouped by vendor. Uncheck any transaction that looks wrong before sending to AI or accepting.
+            Grouped by vendor. Select a few (or use Select all), then Ask AI. Uncheck anything that looks wrong before accepting.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -276,6 +280,40 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
 
       {status ? <p className="text-sm text-muted-foreground">{status}</p> : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
+
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3">
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-border accent-primary"
+            checked={allSelected}
+            ref={(input) => {
+              if (input) input.indeterminate = someSelected;
+            }}
+            onChange={(event) => selectAll(event.target.checked)}
+            aria-label="Select all transactions"
+          />
+          Select all
+        </label>
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          {selectedCount > 0 ? (
+            <span className="text-muted-foreground tabular-nums">
+              {selectedCount} of {transactions.length} selected
+            </span>
+          ) : (
+            <span className="text-muted-foreground">None selected</span>
+          )}
+          {selectedCount > 0 ? (
+            <Button type="button" variant="link" size="sm" className="h-auto px-0" onClick={() => selectAll(false)}>
+              Unselect all
+            </Button>
+          ) : transactions.length > 0 ? (
+            <Button type="button" variant="link" size="sm" className="h-auto px-0" onClick={() => selectAll(true)}>
+              Select all
+            </Button>
+          ) : null}
+        </div>
+      </div>
 
       <div className="max-h-[480px] space-y-2 overflow-y-auto rounded-xl border border-border bg-card/60 p-2">
         {groups.map((group) => {
