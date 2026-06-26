@@ -3,6 +3,7 @@ export type CategorySuggestion = {
   fullPath: string;
   count: number;
   source: "qb_training" | "confirmed_history";
+  confidence: "high" | "medium" | "low";
 };
 
 export type CategorySuggestionInput = {
@@ -212,6 +213,22 @@ export function escapeIlikePattern(token: string): string {
   return token.replace(/[%_\\]/g, "");
 }
 
+export function computeSuggestionConfidence(
+  count: number,
+  totalMatches: number,
+  rank: number,
+): CategorySuggestion["confidence"] {
+  if (rank > 0) {
+    if (count >= 3 && count / Math.max(totalMatches, 1) >= 0.4) return "medium";
+    return "low";
+  }
+
+  const share = count / Math.max(totalMatches, 1);
+  if (count >= 5 && share >= 0.55) return "high";
+  if (count >= 2 && share >= 0.35) return "medium";
+  return "low";
+}
+
 export function rankCategorySuggestions(
   rows: TrainingRow[],
   source: CategorySuggestion["source"] = "qb_training",
@@ -237,15 +254,16 @@ export function rankCategorySuggestions(
     });
   }
 
-  return [...counts.values()]
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 3)
-    .map((entry) => ({
-      categoryId: entry.categoryId,
-      fullPath: entry.fullPath,
-      count: entry.count,
-      source,
-    }));
+  const totalMatches = rows.filter((row) => row.category_id).length;
+  const ranked = [...counts.values()].sort((a, b) => b.count - a.count).slice(0, 3);
+
+  return ranked.map((entry, index) => ({
+    categoryId: entry.categoryId,
+    fullPath: entry.fullPath,
+    count: entry.count,
+    source,
+    confidence: computeSuggestionConfidence(entry.count, totalMatches, index),
+  }));
 }
 
 type ConfirmedHistoryRow = {
@@ -270,18 +288,19 @@ export function rankConfirmedHistorySuggestions(rows: ConfirmedHistoryRow[]): Ca
     counts.set(categoryId, { categoryId, fullPath, count: 1 });
   }
 
-  return [...counts.values()]
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 3)
-    .map((entry) => ({
-      categoryId: entry.categoryId,
-      fullPath: entry.fullPath,
-      count: entry.count,
-      source: "confirmed_history" as const,
-    }));
+  const totalMatches = rows.filter((row) => (row.category_id ?? row.category?.id)).length;
+  const ranked = [...counts.values()].sort((a, b) => b.count - a.count).slice(0, 3);
+
+  return ranked.map((entry, index) => ({
+    categoryId: entry.categoryId,
+    fullPath: entry.fullPath,
+    count: entry.count,
+    source: "confirmed_history" as const,
+    confidence: computeSuggestionConfidence(entry.count, totalMatches, index),
+  }));
 }
 
-const SUGGESTION_ENTITIES = new Set(["gbsl", "personal"]);
+const SUGGESTION_ENTITIES = new Set(["gbsl", "personal", "acaa-austin", "pflugerville", "keller"]);
 
 export function shouldSuggestCategories(input: CategorySuggestionInput): boolean {
   return SUGGESTION_ENTITIES.has(input.entitySlug) && extractSearchTokens(input.description, input.vendor).length > 0;

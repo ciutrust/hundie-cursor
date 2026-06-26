@@ -1,7 +1,7 @@
+import type { PeriodRange } from "@/lib/period";
+import { CPA_REVIEW_CATEGORY_PATHS, isCpaReviewCategory } from "@/lib/category-review";
 import { createClient } from "@/lib/supabase/server";
 import type { CategoryGroup, EntitySummary, MonthlyCategoryRow, MonthlyEntityRow, TransactionWithDetails } from "@/lib/types/database";
-import { monthBounds } from "@/lib/utils";
-
 const TRANSACTION_SELECT = `
   id,
   account_id,
@@ -27,6 +27,15 @@ const TRANSACTION_SELECT = `
   )
 `;
 
+async function getCpaReviewCategoryIdSet(supabase: Awaited<ReturnType<typeof createClient>>) {
+  const { data } = await supabase.from("categories").select("id").in("full_path", [...CPA_REVIEW_CATEGORY_PATHS]);
+  return new Set((data ?? []).map((row) => row.id));
+}
+
+function needsReviewCategory(categoryId: string | null | undefined, cpaReviewIds: Set<string>) {
+  return !categoryId || cpaReviewIds.has(categoryId);
+}
+
 export async function getClassifiableEntities() {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -39,12 +48,10 @@ export async function getClassifiableEntities() {
   return data ?? [];
 }
 
-export async function getEntitySummaries(year: number, month: number): Promise<EntitySummary[]> {
+export async function getEntitySummaries(period: PeriodRange): Promise<EntitySummary[]> {
   const supabase = await createClient();
-  const { start, end } = monthBounds(year, month);
-  const prevMonth = month === 1 ? 12 : month - 1;
-  const prevYear = month === 1 ? year - 1 : year;
-  const { start: prevStart, end: prevEnd } = monthBounds(prevYear, prevMonth);
+  const { start, end, compareStart, compareEnd } = period;
+  const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
 
   const [entitiesResult, transactionsResult, previousTransactionsResult] = await Promise.all([
     supabase.from("entities").select("id, name, slug, display_order").eq("is_classifiable", true).order("display_order"),
@@ -74,8 +81,8 @@ export async function getEntitySummaries(year: number, month: number): Promise<E
         )
       `,
       )
-      .gte("transaction_date", prevStart)
-      .lt("transaction_date", prevEnd),
+      .gte("transaction_date", compareStart)
+      .lt("transaction_date", compareEnd),
   ]);
 
   if (entitiesResult.error) throw entitiesResult.error;
@@ -106,22 +113,31 @@ export async function getEntitySummaries(year: number, month: number): Promise<E
       total: expenseTotal,
       previousMonthTotal: previousEntityTransactions.length > 0 ? previousExpenseTotal : 0,
       transactionCount: entityTransactions.length,
-      unclassifiedCount: entityTransactions.filter((tx) => !tx.classification.category_id).length,
+      unclassifiedCount: entityTransactions.filter((tx) =>
+        needsReviewCategory(tx.classification.category_id, cpaReviewIds),
+      ).length,
     };
   });
 
-  const unclassifiedTotal = transactions
-    .filter((tx) => !tx.classification.category_id && Number(tx.amount) > 0)
+  const reviewTransactions = transactions.filter((tx) =>
+    needsReviewCategory(tx.classification.category_id, cpaReviewIds),
+  );
+  const previousReviewTransactions = previousTransactions.filter((tx) =>
+    needsReviewCategory(tx.classification.category_id, cpaReviewIds),
+  );
+
+  const unclassifiedTotal = reviewTransactions
+    .filter((tx) => Number(tx.amount) > 0)
     .reduce((sum, tx) => sum + Number(tx.amount), 0);
 
-  const unclassifiedCount = transactions.filter((tx) => !tx.classification.category_id).length;
-  const previousUnclassifiedTotal = previousTransactions
-    .filter((tx) => !tx.classification.category_id && Number(tx.amount) > 0)
+  const unclassifiedCount = reviewTransactions.length;
+  const previousUnclassifiedTotal = previousReviewTransactions
+    .filter((tx) => Number(tx.amount) > 0)
     .reduce((sum, tx) => sum + Number(tx.amount), 0);
 
   summaries.push({
     slug: "unclassified",
-    name: "Uncategorized backlog",
+    name: "Review backlog",
     total: unclassifiedTotal,
     previousMonthTotal: previousUnclassifiedTotal,
     transactionCount: unclassifiedCount,
@@ -227,14 +243,17 @@ export async function getMonthlyEntityMatrix(year: number): Promise<MonthlyEntit
   if (entitiesResult.error) throw entitiesResult.error;
 
   const entities = entitiesResult.data ?? [];
+  const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
 
   const entityRows = entities.map((entity) => {
     const entityTransactions = transactions.filter((tx) => tx.classification.entity_id === entity.id);
     return buildMonthlyRow(entity.slug, entity.name, entityTransactions);
   });
 
-  const unclassifiedTransactions = transactions.filter((tx) => !tx.classification.category_id);
-  const unclassifiedRow = buildMonthlyRow("unclassified", "Uncategorized backlog", unclassifiedTransactions, {
+  const unclassifiedTransactions = transactions.filter((tx) =>
+    needsReviewCategory(tx.classification.category_id, cpaReviewIds),
+  );
+  const unclassifiedRow = buildMonthlyRow("unclassified", "Review backlog", unclassifiedTransactions, {
     isUnclassified: true,
   });
 
@@ -289,15 +308,17 @@ export async function getMonthlyCategoryMatrix(entitySlug: string, year: number)
   }
 
   const transactions = await fetchYearMatrixTransactions(year, entity.id);
+  const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
   const byCategory = new Map<string, MatrixTransaction[]>();
   const unclassified: MatrixTransaction[] = [];
 
   for (const tx of transactions) {
     const categoryId = tx.classification.category_id;
-    if (!categoryId) {
+    if (needsReviewCategory(categoryId, cpaReviewIds)) {
       unclassified.push(tx);
       continue;
     }
+    if (!categoryId) continue;
     const bucket = byCategory.get(categoryId) ?? [];
     bucket.push(tx);
     byCategory.set(categoryId, bucket);
@@ -377,13 +398,13 @@ export async function getCategoriesByEntity() {
 }
 
 export async function getEntityTransactions(
-  year: number,
-  month: number,
+  period: PeriodRange,
   entitySlug: string,
   categoryFilter?: string | null,
 ): Promise<{ groups: CategoryGroup[]; transactions: TransactionWithDetails[] }> {
   const supabase = await createClient();
-  const { start, end } = monthBounds(year, month);
+  const { start, end } = period;
+  const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
 
   let query = supabase
     .from("transactions")
@@ -392,9 +413,7 @@ export async function getEntityTransactions(
     .lt("transaction_date", end)
     .order("transaction_date", { ascending: false });
 
-  if (entitySlug === "unclassified") {
-    query = query.is("classification.category_id", null);
-  } else {
+  if (entitySlug !== "unclassified") {
     const { data: entity, error: entityError } = await supabase
       .from("entities")
       .select("id")
@@ -406,7 +425,7 @@ export async function getEntityTransactions(
   }
 
   if (categoryFilter === "unclassified") {
-    query = query.is("classification.category_id", null);
+    // filtered after fetch — includes CPA review bucket
   } else if (categoryFilter) {
     query = query.eq("classification.category_id", categoryFilter);
   }
@@ -415,11 +434,19 @@ export async function getEntityTransactions(
   if (error) throw error;
 
   let transactions = (data ?? []) as unknown as TransactionWithDetails[];
+
+  if (entitySlug === "unclassified" || categoryFilter === "unclassified") {
+    transactions = transactions.filter((tx) =>
+      needsReviewCategory(tx.classification.category_id, cpaReviewIds),
+    );
+  }
   const groupMap = new Map<string, CategoryGroup>();
 
   for (const tx of transactions) {
     const categoryId = tx.classification.category?.id ?? null;
-    const categoryName = tx.classification.category?.full_path ?? "Unclassified";
+    const categoryName = isCpaReviewCategory(tx.classification.category?.full_path)
+      ? "Ask My Accountant (CPA review)"
+      : (tx.classification.category?.full_path ?? "Uncategorized");
     const key = categoryId ?? "unclassified";
 
     const existing = groupMap.get(key);

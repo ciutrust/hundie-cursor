@@ -8,7 +8,7 @@ const LINKS = [
   { href: "/review", label: "Overview", match: (path: string) => path === "/review" },
   {
     href: "/review/unclassified",
-    label: "Uncategorized backlog",
+    label: "Backlog",
     match: (path: string) => path.startsWith("/review/unclassified"),
   },
 ] as const;

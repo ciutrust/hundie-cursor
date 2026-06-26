@@ -25,6 +25,7 @@ type MenuPosition = {
   top: number;
   left: number;
   width: number;
+  openUp: boolean;
 };
 
 function selectionLabel(options: FilterOption[], selectedIds: string[], emptyLabel: string): string {
@@ -54,7 +55,12 @@ export function FilterMultiSelect({
 }: FilterMultiSelectProps) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [menuPosition, setMenuPosition] = useState<MenuPosition>({ top: 0, left: 0, width: 256 });
+  const [menuPosition, setMenuPosition] = useState<MenuPosition>({
+    top: 0,
+    left: 0,
+    width: 256,
+    openUp: false,
+  });
   const triggerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -66,10 +72,16 @@ export function FilterMultiSelect({
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
 
+    const maxMenuHeight = 256;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const openUp = spaceBelow < maxMenuHeight && spaceAbove > spaceBelow;
+
     setMenuPosition({
-      top: rect.bottom + 4,
+      top: openUp ? rect.top - 4 : rect.bottom + 4,
       left: rect.left,
       width: Math.max(rect.width, 256),
+      openUp,
     });
   }
 
@@ -128,7 +140,8 @@ export function FilterMultiSelect({
           top: menuPosition.top,
           left: menuPosition.left,
           width: menuPosition.width,
-          zIndex: 50,
+          zIndex: 100,
+          transform: menuPosition.openUp ? "translateY(-100%)" : undefined,
         }}
         className="max-h-64 overflow-y-auto rounded-md border border-border bg-card p-1 shadow-lg"
       >

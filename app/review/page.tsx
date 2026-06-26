@@ -1,26 +1,25 @@
-import { AppHeader } from "@/components/layout/app-header";
 import { EntitySummaryGrid } from "@/components/review/entity-summary-grid";
 import { MonthlyEntityMatrix } from "@/components/review/monthly-entity-matrix";
-import { MonthPicker } from "@/components/review/month-picker";
-import { ReviewNav } from "@/components/review/review-nav";
+import { PeriodPicker } from "@/components/review/period-picker";
 import { getEntitySummaries, getMonthlyEntityMatrix } from "@/lib/queries/review";
-import { formatCurrency, monthLabel, parseMonthParam } from "@/lib/utils";
+import { parsePeriodParams } from "@/lib/period";
+import { formatCurrency } from "@/lib/utils";
 
 type ReviewPageProps = {
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<{ month?: string; period?: string; at?: string }>;
 };
 
 export default async function ReviewPage({ searchParams }: ReviewPageProps) {
   const params = await searchParams;
-  const { year, month } = parseMonthParam(params.month);
-  const monthParam = `${year}-${String(month).padStart(2, "0")}`;
+  const period = parsePeriodParams(params);
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
+  const matrixYear = period.type === "year" ? Number(period.at) : Number(period.start.slice(0, 4));
 
   const [summaries, monthlyMatrix] = await Promise.all([
-    getEntitySummaries(year, month),
-    getMonthlyEntityMatrix(year),
+    getEntitySummaries(period),
+    getMonthlyEntityMatrix(matrixYear),
   ]);
 
   const grandTotal = summaries
@@ -28,31 +27,26 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
     .reduce((sum, summary) => sum + summary.total, 0);
 
   return (
-    <div className="min-h-screen bg-background">
-      <AppHeader title="Monthly review" />
-      <main className="mx-auto max-w-5xl space-y-6 px-4 py-6">
-        <ReviewNav />
-
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-2xl font-semibold">{monthLabel(year, month)}</h2>
-            <p className="text-sm text-muted-foreground">
-              Total expenses: {formatCurrency(grandTotal)} · all assigned transactions (includes items still
-              uncategorized within each entity)
-            </p>
-          </div>
-          <MonthPicker year={year} month={month} />
+    <div className="space-y-8">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-primary">Expense review</p>
+          <h1 className="text-3xl font-semibold tracking-tight">{period.label}</h1>
+          <p className="text-sm text-muted-foreground">
+            {formatCurrency(grandTotal)} across entities · includes items still uncategorized within each entity
+          </p>
         </div>
+        <PeriodPicker period={period} />
+      </div>
 
-        <EntitySummaryGrid summaries={summaries} month={monthParam} />
+      <EntitySummaryGrid summaries={summaries} period={period} />
 
-        <MonthlyEntityMatrix
-          rows={monthlyMatrix}
-          year={year}
-          currentYear={currentYear}
-          currentMonth={currentMonth}
-        />
-      </main>
+      <MonthlyEntityMatrix
+        rows={monthlyMatrix}
+        year={matrixYear}
+        currentYear={currentYear}
+        currentMonth={currentMonth}
+      />
     </div>
   );
 }

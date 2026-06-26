@@ -112,8 +112,8 @@ export async function getCategorySuggestions(
     return fetchQbTrainingSuggestions(tokens);
   }
 
-  if (input.entitySlug === "personal") {
-    return fetchConfirmedHistorySuggestions("personal", tokens);
+  if (["personal", "acaa-austin", "pflugerville", "keller"].includes(input.entitySlug)) {
+    return fetchConfirmedHistorySuggestions(input.entitySlug, tokens);
   }
 
   return { suggestions: [] };
@@ -132,8 +132,8 @@ export async function getBulkCategorySuggestions(
     return fetchQbTrainingSuggestions(tokens);
   }
 
-  if (input.entitySlug === "personal") {
-    return fetchConfirmedHistorySuggestions("personal", tokens);
+  if (["personal", "acaa-austin", "pflugerville", "keller"].includes(input.entitySlug)) {
+    return fetchConfirmedHistorySuggestions(input.entitySlug, tokens);
   }
 
   return { suggestions: [] };

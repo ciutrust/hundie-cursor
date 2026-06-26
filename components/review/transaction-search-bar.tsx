@@ -130,7 +130,7 @@ export function TransactionSearchBar({
           expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
         )}
       >
-        <div className="overflow-hidden">
+        <div className={cn(expanded ? "overflow-visible" : "overflow-hidden")}>
           <div className="space-y-3 border-t border-border px-4 pb-4 pt-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="min-w-0 flex-1">

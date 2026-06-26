@@ -64,8 +64,8 @@ export function TransactionList({
   );
 
   const categoryOptions = useMemo(
-    () => getCategoryFilterOptions(transactions),
-    [transactions],
+    () => getCategoryFilterOptions(transactions, categories),
+    [transactions, categories],
   );
 
   const accountOptions = useMemo(
@@ -127,7 +127,19 @@ export function TransactionList({
   }
 
   if (transactions.length === 0) {
-    return <p className="text-sm text-muted-foreground">No transactions for this view.</p>;
+    return (
+      <div className="space-y-3">
+        <TransactionSearchBar
+          filters={filters}
+          onChange={setFilters}
+          resultCount={0}
+          totalCount={0}
+          categoryOptions={getCategoryFilterOptions([], categories)}
+          accountOptions={[]}
+        />
+        <p className="text-sm text-muted-foreground">No transactions for this view.</p>
+      </div>
+    );
   }
 
   return (
@@ -338,7 +350,12 @@ function ReclassifyDialog({
   const selectedEntity = entities.find((entity) => entity.id === entityId);
   const showCategories = (categoriesByEntity[selectedEntity?.slug ?? ""]?.length ?? 0) > 0;
   const suggestionEntitySlug = selectedEntity?.slug;
-  const showSuggestions = suggestionEntitySlug === "gbsl" || suggestionEntitySlug === "personal";
+  const showSuggestions =
+    suggestionEntitySlug === "gbsl" ||
+    suggestionEntitySlug === "personal" ||
+    suggestionEntitySlug === "acaa-austin" ||
+    suggestionEntitySlug === "pflugerville" ||
+    suggestionEntitySlug === "keller";
 
   useEffect(() => {
     if (!showSuggestions || !suggestionEntitySlug) {
@@ -511,7 +528,12 @@ function BulkAssignDialog({
   const selectedEntity = entities.find((entity) => entity.id === entityId);
   const showCategories = (categoriesByEntity[selectedEntity?.slug ?? ""]?.length ?? 0) > 0;
   const suggestionEntitySlug = selectedEntity?.slug;
-  const showSuggestions = suggestionEntitySlug === "gbsl" || suggestionEntitySlug === "personal";
+  const showSuggestions =
+    suggestionEntitySlug === "gbsl" ||
+    suggestionEntitySlug === "personal" ||
+    suggestionEntitySlug === "acaa-austin" ||
+    suggestionEntitySlug === "pflugerville" ||
+    suggestionEntitySlug === "keller";
   const totalAmount = transactions.reduce((sum, tx) => sum + Number(tx.amount), 0);
   const suggestionKey = useMemo(
     () =>

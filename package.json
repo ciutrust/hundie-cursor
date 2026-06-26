@@ -12,6 +12,8 @@
     "verify:qb-parser": "node scripts/verify-qb-parser.mjs",
     "verify:card-parsers": "node scripts/verify-card-parsers.mjs",
     "import:qb-gbsl": "node scripts/import-qb-gbsl.mjs",
+    "import:qb-apply-categories": "node scripts/apply-qb-categories-to-ledger.mjs --apply",
+    "import:qb-apply-categories:dry-run": "node scripts/apply-qb-categories-to-ledger.mjs --dry-run",
     "import:cards": "node scripts/import-cards.mjs --all",
     "import:cards:dry-run": "node scripts/import-cards.mjs --dry-run",
     "import:cards:verify": "node scripts/import-cards.mjs --verify",

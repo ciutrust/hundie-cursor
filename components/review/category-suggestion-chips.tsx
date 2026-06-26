@@ -4,6 +4,24 @@ import { Button } from "@/components/ui/button";
 import type { CategorySuggestion } from "@/lib/suggestions/category-suggestions";
 import { cn } from "@/lib/utils";
 
+const CONFIDENCE_STYLES = {
+  high: {
+    chip: "border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10",
+    dot: "bg-emerald-500",
+    label: "High confidence",
+  },
+  medium: {
+    chip: "border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10",
+    dot: "bg-amber-500",
+    label: "Medium confidence",
+  },
+  low: {
+    chip: "border-red-500/40 bg-red-500/5 hover:bg-red-500/10",
+    dot: "bg-red-500",
+    label: "Low confidence",
+  },
+} as const;
+
 type CategorySuggestionChipsProps = {
   suggestions: CategorySuggestion[];
   selectedCategoryId: string | null;
@@ -21,19 +39,19 @@ export function CategorySuggestionChips({
   entitySlug = "gbsl",
   onSelect,
 }: CategorySuggestionChipsProps) {
-  const source = suggestions[0]?.source ?? (entitySlug === "personal" ? "confirmed_history" : "qb_training");
+  const source = suggestions[0]?.source ?? (entitySlug === "gbsl" ? "qb_training" : "confirmed_history");
   const loadingMessage =
     source === "confirmed_history"
       ? "Loading suggestions from your past classifications…"
       : "Loading suggestions from QB history…";
   const emptyMessage =
     source === "confirmed_history"
-      ? "No matches from your past Personal picks — pick manually below."
-      : "No QuickBooks category matches for this vendor — pick manually below.";
+      ? "No matches from your past picks for this vendor — choose manually below."
+      : "No QuickBooks matches for this vendor — choose manually below.";
   const footerMessage =
     source === "confirmed_history"
-      ? "Based on categories you've confirmed before. Tap a suggestion or pick manually below."
-      : "Based on QuickBooks training history. Tap a suggestion or pick manually below.";
+      ? "Green = strong match from your history · yellow = possible · red = weak guess."
+      : "Green = strong QB history match · yellow = possible · red = weak guess.";
 
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">{loadingMessage}</p>;
@@ -48,11 +66,19 @@ export function CategorySuggestionChips({
   }
 
   return (
-    <div className="space-y-2">
-      <p className="text-sm font-medium">Suggested categories</p>
+    <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-sm font-medium">Suggested categories</p>
+        <div className="flex gap-3 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> High</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> Medium</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" /> Low</span>
+        </div>
+      </div>
       <div className="flex flex-wrap gap-2">
         {suggestions.map((suggestion) => {
           const isSelected = selectedCategoryId === suggestion.categoryId;
+          const styles = CONFIDENCE_STYLES[suggestion.confidence];
 
           return (
             <Button
@@ -60,9 +86,15 @@ export function CategorySuggestionChips({
               type="button"
               size="sm"
               variant={isSelected ? "default" : "outline"}
-              className={cn("h-auto whitespace-normal py-1.5 text-left", isSelected && "ring-2 ring-ring")}
+              className={cn(
+                "h-auto border py-2 text-left whitespace-normal",
+                !isSelected && styles.chip,
+                isSelected && "ring-2 ring-ring",
+              )}
+              title={styles.label}
               onClick={() => onSelect(suggestion.categoryId)}
             >
+              <span className={cn("mr-2 inline-block h-2 w-2 shrink-0 rounded-full", styles.dot)} />
               {suggestion.fullPath}
               <span className="ml-1 text-xs opacity-70">· {suggestion.count}×</span>
             </Button>

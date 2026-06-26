@@ -5,14 +5,14 @@ import { cn, formatCurrency } from "@/lib/utils";
 type CategoryBreakdownProps = {
   groups: CategoryGroup[];
   entitySlug: string;
-  month: string;
+  periodQuery: string;
   selectedCategoryId?: string | null;
 };
 
 export function CategoryBreakdown({
   groups,
   entitySlug,
-  month,
+  periodQuery,
   selectedCategoryId,
 }: CategoryBreakdownProps) {
   if (groups.length === 0) return null;
@@ -29,7 +29,7 @@ export function CategoryBreakdown({
     selectedCategoryId !== undefined &&
     (group.categoryId === selectedCategoryId ||
       (group.categoryId === null && selectedCategoryId === null));
-          const href = `/review/${entitySlug}?month=${month}&category=${categoryParam}`;
+          const href = `/review/${entitySlug}?${periodQuery}&category=${categoryParam}`;
 
           return (
             <Link

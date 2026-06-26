@@ -79,8 +79,15 @@ function transactionCategoryFilterId(tx: TransactionWithDetails): string {
   return tx.classification.category_id ?? UNCLASSIFIED_CATEGORY_ID;
 }
 
-export function getCategoryFilterOptions(transactions: TransactionWithDetails[]): CategoryFilterOption[] {
+export function getCategoryFilterOptions(
+  transactions: TransactionWithDetails[],
+  allCategories: Array<{ id: string; full_path: string }> = [],
+): CategoryFilterOption[] {
   const options = new Map<string, CategoryFilterOption>();
+
+  for (const category of allCategories) {
+    options.set(category.id, { id: category.id, label: category.full_path });
+  }
 
   for (const tx of transactions) {
     const category = tx.classification.category;
