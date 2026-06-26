@@ -136,6 +136,7 @@ export function TransactionList({
   // A: "Find similar" — narrow to the same vendor and select them all for bulk assign.
   function findSimilar(tx: TransactionWithDetails) {
     const key = transactionVendorKey(tx);
+    if (!key) return; // no extractable vendor token — nothing meaningful to match
     const matches = transactions.filter((candidate) => transactionVendorKey(candidate) === key);
     setFilters({ ...EMPTY_TRANSACTION_FILTERS, similarVendorKey: key });
     setSelectedIds(new Set(matches.map((candidate) => candidate.id)));
