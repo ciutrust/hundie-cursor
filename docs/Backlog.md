@@ -40,9 +40,11 @@ Classification UX, category gaps, learning loop foundations.
 
 ## Done — Phase 1 review (2026-06-26)
 
+**Status:** Shipped on `main` (2026-06-26). Repo + remote Supabase `ihciuqpiavxhbulfkwod`.
+
 From [REVIEW-2026-06-26.md](./REVIEW-2026-06-26.md):
 
-- [x] RLS lockdown merged (`20260629140000`)
+- [x] RLS lockdown — `20260629140000`; committed and applied remote
 - [x] Auth guards: middleware `/reports` + `/settings`, server-action `getUser()`, category↔entity validation
 - [x] CSV export reconcile columns (`counts_as_expense`, `expense_amount`) + formula injection hardening
 - [x] `import_hash` disambiguation via issuer ref + source row index

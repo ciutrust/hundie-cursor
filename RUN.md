@@ -30,6 +30,15 @@ npm run build
 
 See [docs/SUPABASE.md](docs/SUPABASE.md) for RLS verification curl command.
 
+## AI pre-classifier (optional)
+
+Requires `ANTHROPIC_API_KEY` in `.env.local`. See [docs/AI-PRECLASSIFY.md](docs/AI-PRECLASSIFY.md).
+
+```bash
+npm test
+npm run build
+```
+
 ## Test plan
 
 ### Review UI

@@ -30,11 +30,9 @@ Hundie is deployed on Vercel. The **publishable (anon) key** is in the browser b
 | `authenticated` (signed-in Alex/Claudia) | Allowed (`USING (true)`) | UPDATE classifications/accounts; INSERT suggestion_events |
 | `service_role` (import scripts only) | Bypasses RLS | Full access for imports |
 
-**Migration:** `20260629140000_lock_anon_select_to_authenticated.sql` — replaced all `"Anyone can read …"` policies with `"Authenticated users can read …"`.
+**Migration:** `20260629140000_lock_anon_select_to_authenticated.sql` — replaced all `"Anyone can read …"` policies with `"Authenticated users can read …"`. **Committed on `main` and applied** to project `ihciuqpiavxhbulfkwod`.
 
-**Single-tenant today:** any authenticated user sees the full ledger. Per-user row isolation is a future step if the app becomes multi-tenant (no `user_id` columns yet).
-
-**Middleware gap:** `/reports` and `/settings` are not in `middleware.ts` auth redirect, but anon cannot read data after RLS lockdown — they show empty UI only.
+**App-layer auth:** `middleware.ts` protects `/review`, `/reports`, and `/settings` (defense in depth alongside RLS).
 
 ### Verify anon is locked out
 
@@ -70,6 +68,8 @@ SQL migrations live in `supabase/migrations/`. Apply with Supabase CLI (`supabas
 | `20260628120000_create_suggestion_events` | suggestion_events + authenticated INSERT |
 | `20260629120000_add_transfer_and_rental_categories` | GBSL transfers, rental fees, Personal CC interest |
 | `20260629140000_lock_anon_select_to_authenticated` | **Security:** authenticated-only SELECT on all ledger tables |
+| `20260630120000_create_ai_suggestions` | AI pre-classifier staging table + RLS |
+| `20260630140000_quicksilver_re_resolve_to_gbsl` | Quicksilver date_rules 2026 + re-resolve mis-booked entity |
 
 ## Card CSV import
 

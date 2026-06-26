@@ -20,12 +20,12 @@ The original seed used **2025** boundaries, so every charge from July 2025 onwar
 | Layer | Change |
 |-------|--------|
 | Migration `20260627120000` | Account `date_rules` updated to 2026 |
-| Migration `20260630140000` | Re-resolve classifications Jul 2025–Jun 2026 from Personal → GBSL; clear Personal-only categories |
+| Migration `20260630140000` | Re-resolve classifications Jul 2025–Jun 2026 from Personal → GBSL; clear Personal-only categories (**applied remote**) |
 | `scripts/lib/seed-accounts.mjs` | Local import dry-runs use 2026 boundaries |
 | `tests/entity-resolver.test.ts` | Boundary tests pinned |
 
-## After applying migration
+## After migration (applied 2026-06-26)
 
-Re-classify any Quicksilver rows that landed back in the review backlog (category cleared because they had a Personal chart tag).
+Re-classify any Quicksilver rows in the GBSL review backlog (category cleared when they had a Personal chart tag).
 
 See [REVIEW-2026-06-26.md](./REVIEW-2026-06-26.md) §C1.

@@ -11,10 +11,10 @@ ANTHROPIC_API_KEY=sk-ant-...
 AI_MODEL=claude-sonnet-4-20250514
 ```
 
-Apply migration:
+Apply migration (already applied to remote Supabase `ihciuqpiavxhbulfkwod`; file in repo):
 
 ```bash
-supabase db push   # or apply 20260630120000_create_ai_suggestions.sql via dashboard
+supabase db push   # fresh environments only — or apply 20260630120000_create_ai_suggestions.sql via dashboard
 ```
 
 ## In-app workflow
