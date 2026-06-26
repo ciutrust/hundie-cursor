@@ -23,6 +23,7 @@ export function parseWellsFargoCsv(csvText, { accountType = "credit_card" } = {}
 
     if (!transactionDate || !description || rawAmount == null) continue;
     if (PAYMENT_PATTERN.test(description)) continue;
+    if (rawAmount === 0) continue; // $0 noise rows (auth holds); parity with other parsers
 
     let amount = null;
 

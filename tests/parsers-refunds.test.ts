@@ -20,13 +20,15 @@ describe("Wells Fargo refunds", () => {
     "01/15/2026,STARBUCKS STORE 123,-5.50,,posted", // charge (negative in export)
     "01/16/2026,STARBUCKS REFUND,5.50,,posted", // refund (positive in export)
     "01/17/2026,ONLINE PAYMENT THANK YOU,500.00,,posted", // card payment
+    "01/18/2026,ZERO AUTH HOLD,0.00,,posted", // $0 noise row
   ].join("\n");
 
-  test("credit card: charge positive, refund negative, payment dropped", () => {
+  test("credit card: charge positive, refund negative, payment and $0 rows dropped", () => {
     const txs = parseWellsFargoCsv(csv, { accountType: "credit_card" });
     expect(byDesc(txs, "STARBUCKS STORE")?.amount).toBe(5.5);
     expect(byDesc(txs, "STARBUCKS REFUND")?.amount).toBe(-5.5);
     expect(byDesc(txs, "PAYMENT")).toBeUndefined();
+    expect(byDesc(txs, "ZERO AUTH")).toBeUndefined();
   });
 
   test("checking: positive deposit (income) stays dropped", () => {
