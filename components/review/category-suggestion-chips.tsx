@@ -22,6 +22,46 @@ const CONFIDENCE_STYLES = {
   },
 } as const;
 
+function suggestionSourceCopy(
+  source: CategorySuggestion["source"] | undefined,
+  entitySlug: string,
+  hasAmountMatch: boolean,
+) {
+  if (hasAmountMatch) {
+    return {
+      loading: "Loading suggestions from amount + your past picks…",
+      empty: "No amount match for this vendor — choose manually below.",
+      footer:
+        "Ranked by amount bucket from your confirmed history · green = strong · yellow = possible · red = weak.",
+    };
+  }
+
+  const resolved = source ?? (entitySlug === "gbsl" ? "blended" : "confirmed_history");
+
+  if (resolved === "confirmed_history") {
+    return {
+      loading: "Loading suggestions from your past classifications…",
+      empty: "No matches from your past picks for this vendor — choose manually below.",
+      footer: "Green = strong match from your history · yellow = possible · red = weak guess.",
+    };
+  }
+
+  if (resolved === "blended") {
+    return {
+      loading: "Loading blended suggestions (QB + your picks)…",
+      empty: "No blended matches for this vendor — choose manually below.",
+      footer:
+        "Blends QuickBooks history, your confirmed picks, and recent accept/reject learning.",
+    };
+  }
+
+  return {
+    loading: "Loading suggestions from QB history…",
+    empty: "No QuickBooks matches for this vendor — choose manually below.",
+    footer: "Green = strong QB history match · yellow = possible · red = weak guess.",
+  };
+}
+
 type CategorySuggestionChipsProps = {
   suggestions: CategorySuggestion[];
   selectedCategoryId: string | null;
@@ -39,28 +79,13 @@ export function CategorySuggestionChips({
   entitySlug = "gbsl",
   onSelect,
 }: CategorySuggestionChipsProps) {
-  const source = suggestions[0]?.source ?? (entitySlug === "gbsl" ? "blended" : "confirmed_history");
-  const loadingMessage =
-    source === "confirmed_history"
-      ? "Loading suggestions from your past classifications…"
-      : source === "blended"
-        ? "Loading blended suggestions (QB + your picks)…"
-        : "Loading suggestions from QB history…";
-  const emptyMessage =
-    source === "confirmed_history"
-      ? "No matches from your past picks for this vendor — choose manually below."
-      : source === "blended"
-        ? "No blended matches for this vendor — choose manually below."
-        : "No QuickBooks matches for this vendor — choose manually below.";
-  const footerMessage =
-    source === "confirmed_history"
-      ? "Green = strong match from your history · yellow = possible · red = weak guess."
-      : source === "blended"
-        ? "Blends QuickBooks history, your confirmed picks, and recent accept/reject learning."
-        : "Green = strong QB history match · yellow = possible · red = weak guess.";
+  const hasAmountMatch = suggestions.some(
+    (suggestion) => suggestion.source === "amount_match" || suggestion.amountMatchType,
+  );
+  const copy = suggestionSourceCopy(suggestions[0]?.source, entitySlug, hasAmountMatch);
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">{loadingMessage}</p>;
+    return <p className="text-sm text-muted-foreground">{copy.loading}</p>;
   }
 
   if (error) {
@@ -68,13 +93,18 @@ export function CategorySuggestionChips({
   }
 
   if (suggestions.length === 0) {
-    return <p className="text-sm text-muted-foreground">{emptyMessage}</p>;
+    return <p className="text-sm text-muted-foreground">{copy.empty}</p>;
   }
 
   return (
     <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-4">
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-sm font-medium">Suggested categories</p>
+        {hasAmountMatch ? (
+          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+            Amount match
+          </span>
+        ) : null}
         <div className="flex gap-3 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> High</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> Medium</span>
@@ -85,6 +115,12 @@ export function CategorySuggestionChips({
         {suggestions.map((suggestion) => {
           const isSelected = selectedCategoryId === suggestion.categoryId;
           const styles = CONFIDENCE_STYLES[suggestion.confidence];
+          const amountHint =
+            suggestion.amountMatchType === "exact"
+              ? " · exact amount"
+              : suggestion.amountMatchType === "nearest"
+                ? " · similar amount"
+                : "";
 
           return (
             <Button
@@ -102,12 +138,14 @@ export function CategorySuggestionChips({
             >
               <span className={cn("mr-2 inline-block h-2 w-2 shrink-0 rounded-full", styles.dot)} />
               {suggestion.fullPath}
-              <span className="ml-1 text-xs opacity-70">· {suggestion.count}×</span>
+              <span className="ml-1 text-xs opacity-70">
+                · {suggestion.count}×{amountHint}
+              </span>
             </Button>
           );
         })}
       </div>
-      <p className="text-xs text-muted-foreground">{footerMessage}</p>
+      <p className="text-xs text-muted-foreground">{copy.footer}</p>
     </div>
   );
 }

@@ -257,8 +257,10 @@ Meals & Entertainment, Contract Labor, Merchant Fees, Cost of Goods Sold, Cost o
 ```
 QB CSV → qb_training_expenses + categories table
 Card CSV → transactions table (source of truth)
-AI suggestions = QB vendor/description patterns + confirmed Hundie classifications
+AI suggestions = QB training + confirmed ledger + suggestion events + amount buckets (vendor key)
 ```
+
+See [CLASSIFICATION.md](./CLASSIFICATION.md) for suggestion sources and [PHASE3_PLAN.md](./PHASE3_PLAN.md) for amount-aware rules.
 
 QB export does **not** replace card CSV import. Different jobs.
 
@@ -289,9 +291,9 @@ Time view (Week / Month / Quarter / Year)
 | Repo | GitHub `ciutrust/hundie-cursor` |
 | Database | Supabase (Postgres) — project ref `ihciuqpiavxhbulfkwod` |
 | Auth | Supabase Auth (Alex now, Claudia later) |
-| App | TBD — Next.js planned |
+| App | Next.js (shipped — `/review`, `/reports`) |
 | Bank sync (later) | Plaid |
-| AI (later) | Suggestions from QB training + user corrections; pgvector possible |
+| AI suggestions | QB training + confirmed ledger + amount buckets; pgvector possible later |
 
 ### Env vars (local, gitignored)
 

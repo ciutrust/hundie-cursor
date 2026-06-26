@@ -1,11 +1,11 @@
 # Build handoff
 
-> **Phase 1:** Complete. See [RUN.md](../RUN.md) to start the app.
-> **Phase 2:** See [PHASE2_PLAN.md](./PHASE2_PLAN.md) — AI category suggestions (next).
+> **Phase 1–2:** Complete. **Phase 3:** In progress — amount-aware suggestions on `feature/amount-aware-suggestions`.
+> See [RUN.md](../RUN.md) to start the app · [CLASSIFICATION.md](./CLASSIFICATION.md) for agents.
 
 ---
 
-## Phase 1 — done ✅
+## Current state (Jun 2026)
 
 Alex can:
 
@@ -14,29 +14,29 @@ npm install && npm run dev
 # → http://localhost:3000 → sign in → /review (default June 2026)
 ```
 
-- Monthly entity summary (GBSL, Keller, Personal, Pflugerville, acaa-austin, Unclassified)
-- Drill-down → search/filter (text, amount, category, account) → reclassify single or bulk
-- GBSL categories from QB chart; Keller/Personal categories stubbed until native chart exists
+- Monthly entity summary (expense totals exclude transfers/refunds)
+- Drill-down → search/filter → **Unclassified & AMA** toggle → reclassify single or bulk
+- **Suggestions:** QB training (GBSL) + confirmed history + amount buckets
+- Category charts: GBSL (QB), Personal (28), Austin ACAA + Pflugerville (Schedule E)
 
 **Ledger:** ~1,882 transactions · 17 accounts · Supabase `ihciuqpiavxhbulfkwod`
 
-**Do not redo:** QB import, initial 13-account backfill, Next.js scaffold, auth, core review UI.
+**Branch:** `feature/amount-aware-suggestions` — amount-aware ranking + category chart gaps
 
 ---
 
-## Keller import notes (Jun 2026)
+## Do not redo
 
-- **WF Keller CC:** Import **child** CSV; parent CSV auto-merged for parent-only rows (late fees). **72 dupes avoided** — do not import parent as separate account.
-- **Checking:** Outflows only (same as other WF checking imports).
-- **Re-import:** Same month twice → existing rows skipped via `import_hash` dedupe.
+- QB import, initial card backfill, Next.js scaffold, auth, core review UI
+- Phase 2 suggestion pipeline (extend, don't replace)
+- Category migrations through `20260629120000`
 
 ---
 
-## Phase 2 — next
+## Keller import notes
 
-Read [PHASE2_PLAN.md](./PHASE2_PLAN.md). Build AI suggestion v0 on transaction detail (GBSL, top 3 from QB training, human confirms).
-
-**Not yet:** Keller QBO, Claudia auth, pgvector, write-back, bank automation.
+- **WF Keller CC:** Import **child** CSV; parent CSV auto-merged for parent-only rows (late fees)
+- **Re-import:** Same month twice → skipped via `import_hash` dedupe
 
 ---
 
@@ -44,19 +44,20 @@ Read [PHASE2_PLAN.md](./PHASE2_PLAN.md). Build AI suggestion v0 on transaction d
 
 ```bash
 npm run verify:db
-npm run import:cards:verify   # ~1,882 tx across 17 accounts
+npm run import:cards:verify
+npm run verify:amount-aware
 npm run build
 ```
 
 ---
 
-## Suggested agent prompt (Phase 2)
+## What's next
 
-```
-Read docs/PHASE2_PLAN.md and docs/PROJECT_CONTEXT.md.
+1. Alex classifies Jan–Jun backlog
+2. Reports CSV export polish
+3. Keller QBO when access available
+4. Merge `feature/amount-aware-suggestions` → `main`
 
-Implement Phase 2 v0: category suggestions on transaction reclassify dialog.
-GBSL only. Top 3 from qb_training_expenses vendor/description match. Human confirms — never auto-apply.
-Follow build order in PHASE2_PLAN.md. npm run build must pass.
-Do not start Keller QBO, Claudia auth, or pgvector.
-```
+**Plans:** [PHASE3_PLAN.md](./PHASE3_PLAN.md) · [Backlog.md](./Backlog.md)
+
+**Not yet:** Keller QBO, Claudia auth, pgvector, write-back, bank automation.

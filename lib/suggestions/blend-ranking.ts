@@ -1,3 +1,4 @@
+import type { AmountBucketMatch } from "@/lib/suggestions/amount-aware-ranking";
 import type { CategorySuggestion } from "@/lib/suggestions/category-suggestions";
 
 export type SuggestionSourceKind = CategorySuggestion["source"];
@@ -9,6 +10,8 @@ export type WeightedCategoryEntry = {
   qbScore: number;
   ledgerScore: number;
   eventScore: number;
+  amountScore: number;
+  amountMatchType?: AmountBucketMatch["matchType"];
 };
 
 /** Months ago → weight. Current month = 3, last month = 2, older = 1. */
@@ -20,6 +23,9 @@ export function recencyWeight(isoDate: string, reference = new Date()): number {
   if (monthsAgo === 1) return 2;
   return 1;
 }
+
+const AMOUNT_EXACT_WEIGHT = 6;
+const AMOUNT_NEAREST_WEIGHT = 4;
 
 export function mergeWeightedSuggestions(
   qbRows: Array<{ category_id: string | null; category_name: string }>,
@@ -36,19 +42,21 @@ export function mergeWeightedSuggestions(
     category?: { id: string; full_path: string } | null;
     chosen?: { id: string; full_path: string } | null;
   }>,
+  amountAwareMatches: AmountBucketMatch[] = [],
 ): CategorySuggestion[] {
   const entries = new Map<string, WeightedCategoryEntry>();
 
   function ensure(categoryId: string, fullPath: string) {
     const existing = entries.get(categoryId);
     if (existing) return existing;
-    const created = {
+    const created: WeightedCategoryEntry = {
       categoryId,
       fullPath,
       score: 0,
       qbScore: 0,
       ledgerScore: 0,
       eventScore: 0,
+      amountScore: 0,
     };
     entries.set(categoryId, created);
     return created;
@@ -91,6 +99,16 @@ export function mergeWeightedSuggestions(
     }
   }
 
+  for (const match of amountAwareMatches) {
+    const weight = match.matchType === "exact" ? AMOUNT_EXACT_WEIGHT : AMOUNT_NEAREST_WEIGHT;
+    const entry = ensure(match.categoryId, match.fullPath);
+    entry.amountScore += weight * match.count;
+    entry.score += weight * match.count;
+    if (!entry.amountMatchType || match.matchType === "exact") {
+      entry.amountMatchType = match.matchType;
+    }
+  }
+
   const ranked = [...entries.values()]
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score)
@@ -100,29 +118,50 @@ export function mergeWeightedSuggestions(
 
   return ranked.map((entry, index) => {
     const primarySource: SuggestionSourceKind =
-      entry.ledgerScore >= entry.qbScore && entry.ledgerScore >= entry.eventScore
-        ? "confirmed_history"
-        : entry.eventScore > entry.qbScore
+      entry.amountScore > 0 &&
+      entry.amountScore >= entry.qbScore &&
+      entry.amountScore >= entry.ledgerScore &&
+      entry.amountScore >= entry.eventScore
+        ? "amount_match"
+        : entry.ledgerScore >= entry.qbScore && entry.ledgerScore >= entry.eventScore
           ? "confirmed_history"
-          : entry.qbScore > 0 && entry.ledgerScore > 0
-            ? "blended"
-            : entry.qbScore > 0
-              ? "qb_training"
-              : "confirmed_history";
+          : entry.eventScore > entry.qbScore
+            ? "confirmed_history"
+            : entry.qbScore > 0 && entry.ledgerScore > 0
+              ? "blended"
+              : entry.qbScore > 0
+                ? "qb_training"
+                : "confirmed_history";
 
     const displayCount = Math.max(1, Math.round(entry.score));
     const share = entry.score / Math.max(totalScore, 1);
 
     let confidence: CategorySuggestion["confidence"] = "low";
-    if (index === 0 && entry.score >= 4 && share >= 0.45) confidence = "high";
-    else if (entry.score >= 2 && share >= 0.25) confidence = "medium";
+    if (
+      index === 0 &&
+      entry.amountScore > 0 &&
+      entry.amountMatchType === "exact" &&
+      entry.amountScore >= AMOUNT_EXACT_WEIGHT * 2
+    ) {
+      confidence = "high";
+    } else if (index === 0 && entry.score >= 4 && share >= 0.45) {
+      confidence = "high";
+    } else if (entry.score >= 2 && share >= 0.25) {
+      confidence = "medium";
+    }
+
+    const source =
+      primarySource === "confirmed_history" && entry.qbScore > 0 && entry.amountScore === 0
+        ? "blended"
+        : primarySource;
 
     return {
       categoryId: entry.categoryId,
       fullPath: entry.fullPath,
       count: displayCount,
-      source: primarySource === "confirmed_history" && entry.qbScore > 0 ? "blended" : primarySource,
+      source,
       confidence,
+      amountMatchType: entry.amountMatchType,
     };
   });
 }

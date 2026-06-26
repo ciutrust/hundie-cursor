@@ -398,6 +398,7 @@ function ReclassifyDialog({
       description: transaction.description,
       vendor: transaction.vendor,
       entitySlug: suggestionEntitySlug,
+      amount: Number(transaction.amount),
     })
       .then((result) => {
         if (cancelled) return;
@@ -603,6 +604,7 @@ function BulkAssignDialog({
       transactions: transactions.map((tx) => ({
         description: tx.description,
         vendor: tx.vendor,
+        amount: Number(tx.amount),
       })),
     })
       .then((result) => {

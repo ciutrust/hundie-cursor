@@ -1,7 +1,7 @@
 # Classification guide — for agents and operators
 
 > **Audience:** Cursor agents, Alex (classifier), future Claudia.  
-> **Code truth:** `lib/category-expense.ts`, `lib/category-review.ts`, `lib/suggestions/category-suggestions.ts`, migrations under `supabase/migrations/`.
+> **Code truth:** `lib/category-expense.ts`, `lib/category-review.ts`, `lib/transaction-filters.ts`, `lib/suggestions/category-suggestions.ts`, `lib/suggestions/amount-aware-ranking.ts`, `lib/suggestions/blend-ranking.ts`, migrations under `supabase/migrations/`.
 
 Human-in-the-loop always — suggestions help; Alex confirms every category.
 
@@ -112,18 +112,24 @@ Transactions need review when:
 
 ## How suggestions work (Phase 2–3)
 
-**Files:** `lib/suggestions/category-suggestions.ts`, `lib/actions/suggestions.ts`, `lib/suggestions/blend-ranking.ts`
+**Files:** `lib/suggestions/category-suggestions.ts`, `lib/suggestions/amount-aware-ranking.ts`, `lib/actions/suggestions.ts`, `lib/suggestions/blend-ranking.ts`
 
 1. Extract **vendor search tokens** from description (strips digits, normalizes `GOOGLE *ADS` → `google ads`).
 2. Match against:
    - **QB training** (`qb_training_expenses`) — GBSL only
    - **Confirmed ledger** — same entity, same vendor tokens
    - **Suggestion events** — accept/reject weights (`suggestion_events` table)
-3. Return top 3 with confidence (high / medium / low).
+   - **Amount buckets** — same vendor key, grouped by exact/nearest amount (≥2 prior confirmations)
+3. Return top 3 with confidence (high / medium / low). Source may be `amount_match` when amount bucket dominates.
 
-**What suggestions learn today:** vendor/description tokens → category (same merchant string family).
+**Amount-aware (shipped on `feature/amount-aware-suggestions`):**
 
-**What suggestions do NOT learn today:** amount-based rules (see [PHASE3_PLAN.md](./PHASE3_PLAN.md#amount-aware-rules-phase-33--scoped-not-built)).
+- Same vendor, different category by amount (Gracie Barra $125 = Software, $850 = Franchise Fees)
+- Requires **≥2** prior confirmations at that amount bucket before re-ranking kicks in
+- Bulk assign uses amount when **>50%** of selected txs share the same amount
+- Verify: `npm run verify:amount-aware` · Spec: [PHASE3_PLAN.md § Amount-aware](./PHASE3_PLAN.md#amount-aware-rules-phase-33--shipped)
+
+**Description-token learning:** Google Ads vs Workspace (`ADS` vs `Workspace` substrings).
 
 ---
 
@@ -139,6 +145,6 @@ Transactions need review when:
 
 ## Related docs
 
-- [PHASE3_PLAN.md](./PHASE3_PLAN.md) — learning loop, amount-aware rules scope
+- [PHASE3_PLAN.md](./PHASE3_PLAN.md) — learning loop, amount-aware rules (shipped)
 - [PERSONAL_CATEGORIES_AND_REPORTS_PLAN.md](./PERSONAL_CATEGORIES_AND_REPORTS_PLAN.md) — Personal chart design
 - [PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md) — QB import rules, entity model

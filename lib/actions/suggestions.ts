@@ -2,6 +2,12 @@
 
 import { createClient } from "@/lib/supabase/server";
 import {
+  rankAmountAwareMatches,
+  representativeBulkAmount,
+  type AmountHistoryRow,
+} from "@/lib/suggestions/amount-aware-ranking";
+import { mergeWeightedSuggestions } from "@/lib/suggestions/blend-ranking";
+import {
   escapeIlikePattern,
   extractSearchTokens,
   extractSearchTokensFromTransactions,
@@ -12,7 +18,12 @@ import {
   type CategorySuggestion,
   type CategorySuggestionInput,
 } from "@/lib/suggestions/category-suggestions";
-import { mergeWeightedSuggestions } from "@/lib/suggestions/blend-ranking";
+
+type LedgerRow = AmountHistoryRow & {
+  transaction_date: string;
+  description: string;
+  vendor: string | null;
+};
 
 async function getEntityId(slug: string) {
   const supabase = await createClient();
@@ -40,7 +51,7 @@ async function fetchQbTrainingRows(entityId: string, tokens: string[]) {
   return data ?? [];
 }
 
-async function fetchLedgerRows(entityId: string, tokens: string[]) {
+async function fetchLedgerRows(entityId: string, tokens: string[]): Promise<LedgerRow[]> {
   const supabase = await createClient();
   if (tokens.length === 0) return [];
 
@@ -53,6 +64,9 @@ async function fetchLedgerRows(entityId: string, tokens: string[]) {
     .from("transactions")
     .select(
       `
+      amount,
+      description,
+      vendor,
       transaction_date,
       classification:classifications!inner(
         category_id,
@@ -69,6 +83,9 @@ async function fetchLedgerRows(entityId: string, tokens: string[]) {
 
   return (
     data?.map((row) => ({
+      amount: Number(row.amount),
+      description: row.description,
+      vendor: row.vendor,
       category_id: row.classification.category_id,
       category: row.classification.category,
       transaction_date: row.transaction_date,
@@ -107,7 +124,19 @@ async function fetchSuggestionEventRows(entityId: string, tokens: string[]) {
   );
 }
 
-async function fetchBlendedSuggestions(entitySlug: string, tokens: string[]) {
+function filterLedgerRowsByVendorKey(ledgerRows: LedgerRow[], vendorKey: string): AmountHistoryRow[] {
+  if (!vendorKey) return ledgerRows;
+
+  return ledgerRows.filter(
+    (row) => extractVendorSearchKey(row.description, row.vendor) === vendorKey,
+  );
+}
+
+async function fetchBlendedSuggestions(
+  entitySlug: string,
+  tokens: string[],
+  options?: { amount?: number; vendorKey?: string },
+) {
   const entityId = await getEntityId(entitySlug);
   if (!entityId) {
     return { suggestions: [], error: `${entitySlug} entity not found` };
@@ -120,8 +149,20 @@ async function fetchBlendedSuggestions(entitySlug: string, tokens: string[]) {
       fetchSuggestionEventRows(entityId, tokens),
     ]);
 
+    const vendorKey = options?.vendorKey ?? "";
+    const vendorLedgerRows = filterLedgerRowsByVendorKey(ledgerRows, vendorKey);
+    const amountAwareMatches =
+      options?.amount != null && vendorLedgerRows.length > 0
+        ? rankAmountAwareMatches(options.amount, vendorLedgerRows)
+        : [];
+
     return {
-      suggestions: mergeWeightedSuggestions(qbRows, ledgerRows, eventRows),
+      suggestions: mergeWeightedSuggestions(
+        qbRows,
+        ledgerRows,
+        eventRows,
+        amountAwareMatches,
+      ),
     };
   } catch (error) {
     return {
@@ -139,7 +180,12 @@ export async function getCategorySuggestions(
   }
 
   const tokens = extractSearchTokens(input.description, input.vendor);
-  return fetchBlendedSuggestions(input.entitySlug, tokens);
+  const vendorKey = extractVendorSearchKey(input.description, input.vendor);
+
+  return fetchBlendedSuggestions(input.entitySlug, tokens, {
+    amount: input.amount,
+    vendorKey,
+  });
 }
 
 export async function getBulkCategorySuggestions(
@@ -150,7 +196,20 @@ export async function getBulkCategorySuggestions(
   }
 
   const tokens = extractSearchTokensFromTransactions(input.transactions);
-  return fetchBlendedSuggestions(input.entitySlug, tokens);
+  const sample = input.transactions[0];
+  const vendorKey = sample
+    ? extractVendorSearchKey(sample.description, sample.vendor)
+    : "";
+  const bulkAmount = representativeBulkAmount(
+    input.transactions
+      .map((tx) => tx.amount)
+      .filter((amount): amount is number => amount != null),
+  );
+
+  return fetchBlendedSuggestions(input.entitySlug, tokens, {
+    amount: bulkAmount,
+    vendorKey,
+  });
 }
 
 export { extractVendorSearchKey };

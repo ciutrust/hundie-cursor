@@ -1,6 +1,6 @@
 # Phase 2 plan — AI category suggestions
 
-> **Status:** Ready to build. Phase 1 UI is shipped; ledger has ~1,882 transactions and 3,577 GBSL QB training rows.
+> **Status:** Shipped (June 2026). Extended in Phase 3 with confirmed-ledger blend, suggestion events, and amount-aware rules — see [PHASE3_PLAN.md](./PHASE3_PLAN.md).
 > **Principle:** Human-in-the-loop always — AI suggests, Alex confirms. Never silent book changes.
 
 ---

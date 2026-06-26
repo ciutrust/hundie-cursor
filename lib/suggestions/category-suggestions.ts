@@ -2,18 +2,21 @@ export type CategorySuggestion = {
   categoryId: string;
   fullPath: string;
   count: number;
-  source: "qb_training" | "confirmed_history" | "blended";
+  source: "qb_training" | "confirmed_history" | "blended" | "amount_match";
   confidence: "high" | "medium" | "low";
+  /** Set when amount bucket re-ranking applied (exact or nearest prior amount). */
+  amountMatchType?: "exact" | "nearest";
 };
 
 export type CategorySuggestionInput = {
   description: string;
   vendor: string | null;
   entitySlug: string;
+  amount?: number;
 };
 
 export type BulkCategorySuggestionInput = {
-  transactions: Array<{ description: string; vendor: string | null }>;
+  transactions: Array<{ description: string; vendor: string | null; amount?: number }>;
   entitySlug: string;
 };
 

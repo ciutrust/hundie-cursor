@@ -38,7 +38,7 @@ See [RUN.md](../RUN.md) for start instructions.
 | AI suggestion v0 (vendor match, top 3) | Done | training + ledger |
 | Suggestion UI on transaction detail + bulk | Done | suggestion v0 |
 | Personal categories + monthly matrix + backlog nav | Done | UI |
-| Progressive learning from confirmations | **Next (Phase 3)** | suggestion v0 |
+| Progressive learning from confirmations | Done (Phase 3) | suggestion v0 |
 | Keller QBO read | Blocked (no access yet) | — |
 | Claudia auth | Not started | UI stable |
 
@@ -58,7 +58,7 @@ See [RUN.md](../RUN.md) for start instructions.
 | Unclassified & AMA filter + non-expense totals | Done |
 | GBSL/rental/Personal category gaps (transfers, fees, interest) | Done |
 | Reports + CSV export | Partial |
-| Amount-aware rules (Gracie Barra amount bands) | Scoped — Phase 3.3 |
+| Amount-aware rules (Gracie Barra amount bands) | Done |
 
 **Plans:** [PHASE3_PLAN.md](./PHASE3_PLAN.md) · [CLASSIFICATION.md](./CLASSIFICATION.md)
 
@@ -73,5 +73,6 @@ Bank import, QBO API, write-back, splits, CPA packet — after Phase 2 is reliab
 ## Timeline
 
 - **Jun 2026:** Schema, parsers, initial backfill, Phase 1 UI shipped
-- **Now:** Alex classifies Jan–Jun; build Phase 2 suggestions in parallel
-- **After Phase 2:** Claudia, Keller QBO, banks, QBO API
+- **Jun 2026:** Phase 2 suggestions + Phase 3 learning loop, category charts, amount-aware rules
+- **Now:** Alex classifies Jan–Jun backlog; reports polish
+- **Later:** Claudia, Keller QBO, banks, QBO API
