@@ -2,10 +2,14 @@ export type CategorySuggestion = {
   categoryId: string;
   fullPath: string;
   count: number;
-  source: "qb_training" | "confirmed_history" | "blended" | "amount_match";
+  source: "qb_training" | "confirmed_history" | "blended" | "amount_match" | "ai_llm";
   confidence: "high" | "medium" | "low";
   /** Set when amount bucket re-ranking applied (exact or nearest prior amount). */
   amountMatchType?: "exact" | "nearest";
+  /** One-line explanation when source is ai_llm. */
+  rationale?: string;
+  /** Proposed entity when AI suggests reclassification. */
+  suggestedEntitySlug?: string;
 };
 
 export type CategorySuggestionInput = {

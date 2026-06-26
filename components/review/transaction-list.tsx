@@ -23,6 +23,7 @@ import { CategorySuggestionChips } from "@/components/review/category-suggestion
 import { TransactionSearchBar } from "@/components/review/transaction-search-bar";
 import { bulkReclassifyTransactions, reclassifyTransaction } from "@/lib/actions/reclassify";
 import type { SuggestionOutcome } from "@/lib/actions/suggestion-events";
+import { getAiCategorySuggestion } from "@/lib/actions/ai-category-suggestion";
 import { getBulkCategorySuggestions, getCategorySuggestions } from "@/lib/actions/suggestions";
 import type { CategorySuggestion } from "@/lib/suggestions/category-suggestions";
 import type { Category, Entity, TransactionWithDetails } from "@/lib/types/database";
@@ -45,6 +46,8 @@ type TransactionListProps = {
   categoriesByEntity: Record<string, EntityCategory[]>;
   month: string;
   entitySlug: string;
+  /** Transaction ids with a stored AI suggestion — shows violet badge in list */
+  aiSuggestionTxIds?: Set<string>;
 };
 
 export function TransactionList({
@@ -54,6 +57,7 @@ export function TransactionList({
   categoriesByEntity,
   month,
   entitySlug,
+  aiSuggestionTxIds,
 }: TransactionListProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailTransaction, setDetailTransaction] = useState<TransactionWithDetails | null>(null);
@@ -225,7 +229,17 @@ export function TransactionList({
                 className="flex min-w-0 flex-1 items-start justify-between gap-4 text-left hover:opacity-80"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium">{tx.description}</p>
+                  <p className="flex items-center gap-2 truncate font-medium">
+                    <span className="truncate">{tx.description}</span>
+                    {aiSuggestionTxIds?.has(tx.id) ? (
+                      <span
+                        className="shrink-0 rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400"
+                        title="AI suggestion available — open to review"
+                      >
+                        AI
+                      </span>
+                    ) : null}
+                  </p>
                   <p className="mt-0.5 text-sm text-muted-foreground">
                     {tx.transaction_date} · {tx.account.display_name}
                     {tx.classification.category
@@ -400,9 +414,13 @@ function ReclassifyDialog({
       entitySlug: suggestionEntitySlug,
       amount: Number(transaction.amount),
     })
-      .then((result) => {
+      .then(async (result) => {
         if (cancelled) return;
-        setSuggestions(result.suggestions);
+        const aiSuggestion = await getAiCategorySuggestion(transaction.id);
+        const merged = aiSuggestion
+          ? [aiSuggestion, ...result.suggestions.filter((s) => s.categoryId !== aiSuggestion.categoryId)]
+          : result.suggestions;
+        setSuggestions(merged);
         setSuggestionsError(result.error ?? null);
         setSuggestionsLoading(false);
       })
@@ -418,7 +436,7 @@ function ReclassifyDialog({
     return () => {
       cancelled = true;
     };
-  }, [showSuggestions, suggestionEntitySlug, transaction.description, transaction.vendor]);
+  }, [showSuggestions, suggestionEntitySlug, transaction.description, transaction.vendor, transaction.id, transaction.amount]);
 
   function handleEntityChange(nextEntityId: string) {
     setEntityId(nextEntityId);

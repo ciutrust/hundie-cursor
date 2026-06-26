@@ -55,6 +55,14 @@ function suggestionSourceCopy(
     };
   }
 
+  if (resolved === "ai_llm") {
+    return {
+      loading: "Loading AI suggestion…",
+      empty: "No AI suggestion for this transaction — run Ask AI from the review panel.",
+      footer: "AI guess from batch pre-classifier · confirm before saving · feeds learning when accepted.",
+    };
+  }
+
   return {
     loading: "Loading suggestions from QB history…",
     empty: "No QuickBooks matches for this vendor — choose manually below.",
@@ -82,6 +90,7 @@ export function CategorySuggestionChips({
   const hasAmountMatch = suggestions.some(
     (suggestion) => suggestion.source === "amount_match" || suggestion.amountMatchType,
   );
+  const hasAi = suggestions.some((suggestion) => suggestion.source === "ai_llm");
   const copy = suggestionSourceCopy(suggestions[0]?.source, entitySlug, hasAmountMatch);
 
   if (isLoading) {
@@ -100,6 +109,11 @@ export function CategorySuggestionChips({
     <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-4">
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-sm font-medium">Suggested categories</p>
+        {hasAi ? (
+          <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-300">
+            AI
+          </span>
+        ) : null}
         {hasAmountMatch ? (
           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
             Amount match
@@ -114,7 +128,13 @@ export function CategorySuggestionChips({
       <div className="flex flex-wrap gap-2">
         {suggestions.map((suggestion) => {
           const isSelected = selectedCategoryId === suggestion.categoryId;
-          const styles = CONFIDENCE_STYLES[suggestion.confidence];
+          const styles = suggestion.source === "ai_llm"
+            ? {
+                chip: "border-violet-500/40 bg-violet-500/5 hover:bg-violet-500/10",
+                dot: "bg-violet-500",
+                label: "AI suggestion",
+              }
+            : CONFIDENCE_STYLES[suggestion.confidence];
           const amountHint =
             suggestion.amountMatchType === "exact"
               ? " · exact amount"
@@ -133,13 +153,20 @@ export function CategorySuggestionChips({
                 !isSelected && styles.chip,
                 isSelected && "ring-2 ring-ring",
               )}
-              title={styles.label}
+              title={
+                suggestion.rationale
+                  ? `${styles.label} — ${suggestion.rationale}`
+                  : styles.label
+              }
               onClick={() => onSelect(suggestion.categoryId)}
             >
               <span className={cn("mr-2 inline-block h-2 w-2 shrink-0 rounded-full", styles.dot)} />
+              {suggestion.source === "ai_llm" ? "AI: " : null}
               {suggestion.fullPath}
               <span className="ml-1 text-xs opacity-70">
-                · {suggestion.count}×{amountHint}
+                {suggestion.source === "ai_llm"
+                  ? amountHint
+                  : ` · ${suggestion.count}×${amountHint}`}
               </span>
             </Button>
           );

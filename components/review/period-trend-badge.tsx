@@ -22,7 +22,9 @@ export function PeriodTrendBadge({ current, compareTo, className }: PeriodTrendB
     <span
       className={cn(
         "rounded-full px-2 py-0.5 text-xs font-medium tabular-nums",
-        up ? "bg-amber-500/10 text-amber-700" : "bg-emerald-500/10 text-emerald-700",
+        up
+          ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+          : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
         className,
       )}
       title={`${up ? "Up" : "Down"} ${Math.abs(pct).toFixed(0)}% vs prior period`}

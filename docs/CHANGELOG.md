@@ -16,6 +16,8 @@ All notable changes to the Hundie project. Format based on [Keep a Changelog](ht
 - **CSV reconcile columns** — `counts_as_expense` + `expense_amount` on report exports; formula-injection hardening
 - **`gen:types` script** — regenerate `lib/types/database.ts` from Supabase
 - **Quicksilver date rule** — GBSL through 2026-06-30; migration re-resolves mis-booked classifications ([QUICKSILVER-DATE-RULE.md](./QUICKSILVER-DATE-RULE.md))
+- **AI pre-classifier** — Anthropic batch classify for Personal uncategorized; `ai_suggestions` table; Ask AI panel; `/reports/ai-suggestions` stats ([AI-PRECLASSIFY.md](./AI-PRECLASSIFY.md))
+- **UI polish** — app shell sidebar, dark mode, review dashboard KPI strip, entity cards, spending trends
 
 - **Amount-aware suggestions (Phase 3.3)** — re-rank by vendor + amount bucket; `lib/suggestions/amount-aware-ranking.ts`; source `amount_match`; UI badge on chips; `npm run verify:amount-aware`
 - **Unclassified & AMA filter** — toggle next to Select all; `reviewBacklogOnly` in `lib/transaction-filters.ts`

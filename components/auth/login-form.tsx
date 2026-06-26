@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { safeRedirectPath } from "@/lib/auth/safe-redirect";
 import { createClient } from "@/lib/supabase/client";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -59,10 +60,21 @@ export function LoginForm() {
   }
 
   return (
-    <Card className="w-full max-w-md">
-      <CardHeader>
-        <CardTitle>Hundie</CardTitle>
-        <CardDescription>Sign in to review and classify transactions.</CardDescription>
+    <Card className="w-full max-w-md border-border/80 shadow-lg">
+      <CardHeader className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
+              H
+            </div>
+            <div>
+              <CardTitle>Hundie</CardTitle>
+              <CardDescription>Multi-entity ledger</CardDescription>
+            </div>
+          </div>
+          <ThemeToggle />
+        </div>
+        <p className="text-sm text-muted-foreground">Sign in to review and classify transactions.</p>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">

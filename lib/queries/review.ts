@@ -2,7 +2,9 @@ import type { PeriodRange } from "@/lib/period";
 import { isOperatingExpense } from "@/lib/category-expense";
 import { CPA_REVIEW_CATEGORY_PATHS, isCpaReviewCategory } from "@/lib/category-review";
 import { createClient } from "@/lib/supabase/server";
-import type { CategoryGroup, EntitySummary, MonthlyCategoryRow, MonthlyEntityRow, TransactionWithDetails } from "@/lib/types/database";
+import { getAiPreclassifiedCount } from "@/lib/queries/ai-suggestions";
+import { paginateAll } from "@/lib/supabase/paginate";
+import type { CategoryGroup, EntitySummary, MonthlyCategoryRow, MonthlyEntityRow, ReviewDashboardStats, TransactionWithDetails } from "@/lib/types/database";
 const TRANSACTION_SELECT = `
   id,
   account_id,
@@ -128,6 +130,46 @@ function needsReviewCategory(categoryId: string | null | undefined, cpaReviewIds
   return !categoryId || cpaReviewIds.has(categoryId);
 }
 
+function isNullCategory(categoryId: string | null | undefined) {
+  return !categoryId;
+}
+
+function isAmaCategory(categoryId: string | null | undefined, cpaReviewIds: Set<string>) {
+  return categoryId != null && cpaReviewIds.has(categoryId);
+}
+
+export function buildReviewDashboardStats(
+  summaries: EntitySummary[],
+  transactions: Array<{ classification: { category_id: string | null } }>,
+  cpaReviewIds: Set<string>,
+  aiPreclassifiedCount = 0,
+): ReviewDashboardStats {
+  const entitySummaries = summaries.filter((summary) => summary.slug !== "unclassified");
+  const grandTotal = entitySummaries.reduce((sum, summary) => sum + summary.total, 0);
+  const previousGrandTotal = entitySummaries.reduce(
+    (sum, summary) => sum + (summary.previousMonthTotal ?? 0),
+    0,
+  );
+  const totalTransactions = entitySummaries.reduce((sum, summary) => sum + summary.transactionCount, 0);
+  const unclassifiedCount = transactions.filter((tx) => isNullCategory(tx.classification.category_id)).length;
+  const amaCount = transactions.filter((tx) =>
+    isAmaCategory(tx.classification.category_id, cpaReviewIds),
+  ).length;
+  const taxReady = entitySummaries.filter((summary) => summary.unclassifiedCount === 0);
+
+  return {
+    grandTotal,
+    previousGrandTotal,
+    totalTransactions,
+    unclassifiedCount,
+    amaCount,
+    aiPreclassifiedCount,
+    taxReadyCount: taxReady.length,
+    taxReadyNames: taxReady.map((summary) => summary.name.split(",")[0]?.trim() ?? summary.name),
+    classifiableEntityCount: entitySummaries.length,
+  };
+}
+
 export async function getClassifiableEntities() {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -215,6 +257,51 @@ export async function getEntitySummaries(period: PeriodRange): Promise<EntitySum
   });
 
   return summaries;
+}
+
+export async function getReviewDashboardStats(period: PeriodRange): Promise<ReviewDashboardStats> {
+  const supabase = await createClient();
+  const { start, end } = period;
+  const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
+  const [summaries, transactions, aiPreclassifiedCount] = await Promise.all([
+    getEntitySummaries(period),
+    fetchPeriodSummaryTransactions(supabase, start, end),
+    getAiPreclassifiedCount(),
+  ]);
+  return buildReviewDashboardStats(summaries, transactions, cpaReviewIds, aiPreclassifiedCount);
+}
+
+export async function getTotalBacklogCount(): Promise<number> {
+  const supabase = await createClient();
+  const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
+
+  const rows = await paginateAll(async (from, pageSize) => {
+    const result = await supabase
+      .from("transactions")
+      .select("classification:classifications!inner(category_id)")
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    return { data: result.data, error: result.error };
+  });
+
+  return rows.filter((tx) =>
+    needsReviewCategory(
+      (tx.classification as { category_id: string | null }).category_id,
+      cpaReviewIds,
+    ),
+  ).length;
+}
+
+export async function getDormantEntities() {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("entities")
+    .select("name, slug, status")
+    .eq("is_classifiable", false)
+    .order("display_order");
+
+  if (error) throw error;
+  return data ?? [];
 }
 
 type MatrixTransaction = {

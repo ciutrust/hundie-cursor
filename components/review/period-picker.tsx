@@ -49,7 +49,7 @@ export function PeriodPicker({ period }: PeriodPickerProps) {
 
   return (
     <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-      <div className="inline-flex rounded-lg border border-border bg-muted/50 p-0.5">
+      <div className="inline-flex rounded-lg border border-border bg-muted/50 p-0.5 dark:bg-muted/30">
         {PERIOD_TYPES.map((item) => (
           <button
             key={item.value}
@@ -58,7 +58,7 @@ export function PeriodPicker({ period }: PeriodPickerProps) {
             className={cn(
               "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
               period.type === item.value
-                ? "bg-background text-foreground shadow-sm"
+                ? "bg-background text-foreground shadow-sm ring-1 ring-border dark:bg-card"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >

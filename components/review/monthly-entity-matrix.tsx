@@ -13,6 +13,7 @@ type MonthlyEntityMatrixProps = {
   filterSlugs?: string[];
   title?: string;
   subtitle?: string;
+  embedded?: boolean;
 };
 
 export function MonthlyEntityMatrix({
@@ -23,6 +24,7 @@ export function MonthlyEntityMatrix({
   filterSlugs,
   title,
   subtitle,
+  embedded = false,
 }: MonthlyEntityMatrixProps) {
   const visibleRows = filterSlugs ? rows.filter((row) => filterSlugs.includes(row.slug)) : rows;
   if (visibleRows.length === 0) return null;
@@ -34,13 +36,20 @@ export function MonthlyEntityMatrix({
   }));
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-      <div className="border-b border-border px-4 py-4">
-        <h2 className="text-sm font-semibold">{title ?? `${year} calendar year`}</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {subtitle ?? "Monthly totals by entity. Click a cell to open that month."}
-        </p>
-      </div>
+    <div
+      className={cn(
+        "overflow-hidden bg-card",
+        embedded ? "border-0 shadow-none" : "rounded-xl border border-border shadow-sm",
+      )}
+    >
+      {!embedded ? (
+        <div className="border-b border-border px-4 py-4">
+          <h2 className="text-sm font-semibold">{title ?? `${year} calendar year`}</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {subtitle ?? "Monthly totals by entity. Click a cell to open that month."}
+          </p>
+        </div>
+      ) : null}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-sm">
           <thead>

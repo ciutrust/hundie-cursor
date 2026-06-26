@@ -355,6 +355,79 @@ export type Database = {
           },
         ]
       }
+      ai_suggestions: {
+        Row: {
+          confidence: string
+          created_at: string
+          entity_id: string
+          entity_slug: string
+          id: string
+          input_tokens: number | null
+          is_current: boolean
+          model: string
+          output_tokens: number | null
+          rationale: string
+          suggested_category_id: string | null
+          suggested_category_path: string | null
+          transaction_id: string
+          vendor_group_key: string
+        }
+        Insert: {
+          confidence: string
+          created_at?: string
+          entity_id: string
+          entity_slug: string
+          id?: string
+          input_tokens?: number | null
+          is_current?: boolean
+          model: string
+          output_tokens?: number | null
+          rationale: string
+          suggested_category_id?: string | null
+          suggested_category_path?: string | null
+          transaction_id: string
+          vendor_group_key?: string
+        }
+        Update: {
+          confidence?: string
+          created_at?: string
+          entity_id?: string
+          entity_slug?: string
+          id?: string
+          input_tokens?: number | null
+          is_current?: boolean
+          model?: string
+          output_tokens?: number | null
+          rationale?: string
+          suggested_category_id?: string | null
+          suggested_category_path?: string | null
+          transaction_id?: string
+          vendor_group_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_suggestions_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_suggestions_suggested_category_id_fkey"
+            columns: ["suggested_category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_suggestions_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       suggestion_events: {
         Row: {
           chosen_category_id: string | null
@@ -528,6 +601,18 @@ export type EntitySummary = {
   previousMonthTotal: number | null
   transactionCount: number
   unclassifiedCount: number
+}
+
+export type ReviewDashboardStats = {
+  grandTotal: number
+  previousGrandTotal: number
+  totalTransactions: number
+  unclassifiedCount: number
+  amaCount: number
+  aiPreclassifiedCount: number
+  taxReadyCount: number
+  taxReadyNames: string[]
+  classifiableEntityCount: number
 }
 
 export type MonthlyEntityRow = {

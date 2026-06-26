@@ -1,9 +1,17 @@
-import { EntitySummaryGrid } from "@/components/review/entity-summary-grid";
+import { Suspense } from "react";
+import { DormantEntitiesCard } from "@/components/review/dormant-entities-card";
+import { EntityCardGrid } from "@/components/review/entity-card-grid";
 import { MonthlyEntityMatrix } from "@/components/review/monthly-entity-matrix";
 import { PeriodPicker } from "@/components/review/period-picker";
-import { getEntitySummaries, getMonthlyEntityMatrix } from "@/lib/queries/review";
+import { ReviewKpiStrip } from "@/components/review/review-kpi-strip";
+import { SpendingTrendsSection } from "@/components/review/spending-trends-section";
+import {
+  getDormantEntities,
+  getEntitySummaries,
+  getMonthlyEntityMatrix,
+  getReviewDashboardStats,
+} from "@/lib/queries/review";
 import { parsePeriodParams } from "@/lib/period";
-import { formatCurrency } from "@/lib/utils";
 
 type ReviewPageProps = {
   searchParams: Promise<{ month?: string; period?: string; at?: string }>;
@@ -17,36 +25,45 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
   const currentMonth = now.getMonth() + 1;
   const matrixYear = period.type === "year" ? Number(period.at) : Number(period.start.slice(0, 4));
 
-  const [summaries, monthlyMatrix] = await Promise.all([
+  const [summaries, monthlyMatrix, stats, dormantEntities] = await Promise.all([
     getEntitySummaries(period),
     getMonthlyEntityMatrix(matrixYear),
+    getReviewDashboardStats(period),
+    getDormantEntities(),
   ]);
-
-  const grandTotal = summaries
-    .filter((summary) => summary.slug !== "unclassified")
-    .reduce((sum, summary) => sum + summary.total, 0);
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div className="space-y-1">
-          <p className="text-sm font-medium text-primary">Expense review</p>
-          <h1 className="text-3xl font-semibold tracking-tight">{period.label}</h1>
-          <p className="text-sm text-muted-foreground">
-            {formatCurrency(grandTotal)} across entities · includes items still uncategorized within each entity
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Classify · Review
           </p>
+          <h1 className="text-3xl font-semibold tracking-tight">{period.label} review</h1>
         </div>
-        <PeriodPicker period={period} />
+        <Suspense fallback={null}>
+          <PeriodPicker period={period} />
+        </Suspense>
       </div>
 
-      <EntitySummaryGrid summaries={summaries} period={period} />
+      <ReviewKpiStrip stats={stats} />
 
-      <MonthlyEntityMatrix
-        rows={monthlyMatrix}
-        year={matrixYear}
-        currentYear={currentYear}
-        currentMonth={currentMonth}
-      />
+      <EntityCardGrid summaries={summaries} period={period} />
+
+      <DormantEntitiesCard entities={dormantEntities} />
+
+      <SpendingTrendsSection title={`${matrixYear} spending trends`}>
+        <MonthlyEntityMatrix
+          rows={monthlyMatrix}
+          year={matrixYear}
+          currentYear={currentYear}
+          currentMonth={currentMonth}
+          filterSlugs={summaries
+            .filter((summary) => summary.slug !== "unclassified")
+            .map((summary) => summary.slug)}
+          embedded
+        />
+      </SpendingTrendsSection>
     </div>
   );
 }

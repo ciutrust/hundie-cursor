@@ -55,6 +55,9 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
         <Link href="/reports/business-expenses-personal-cards" className="font-medium text-primary hover:underline">
           Business expenses on personal cards
         </Link>
+        <Link href="/reports/ai-suggestions" className="font-medium text-violet-600 hover:underline dark:text-violet-400">
+          AI suggestions
+        </Link>
       </div>
 
       <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">

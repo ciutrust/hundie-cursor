@@ -1,5 +1,5 @@
-import { ReviewShell } from "@/components/layout/review-shell";
+import { AppShellWrapper } from "@/components/layout/app-shell-wrapper";
 
 export default function ReviewLayout({ children }: { children: React.ReactNode }) {
-  return <ReviewShell>{children}</ReviewShell>;
+  return <AppShellWrapper>{children}</AppShellWrapper>;
 }
