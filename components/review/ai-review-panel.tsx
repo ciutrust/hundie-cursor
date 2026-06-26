@@ -304,11 +304,23 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
             <span className="text-muted-foreground">None selected</span>
           )}
           {selectedCount > 0 ? (
-            <Button type="button" variant="link" size="sm" className="h-auto px-0" onClick={() => selectAll(false)}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-auto px-0 text-primary underline-offset-4 hover:underline"
+              onClick={() => selectAll(false)}
+            >
               Unselect all
             </Button>
           ) : transactions.length > 0 ? (
-            <Button type="button" variant="link" size="sm" className="h-auto px-0" onClick={() => selectAll(true)}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-auto px-0 text-primary underline-offset-4 hover:underline"
+              onClick={() => selectAll(true)}
+            >
               Select all
             </Button>
           ) : null}
