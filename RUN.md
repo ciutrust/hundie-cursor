@@ -22,11 +22,13 @@ Supabase Auth (email/password or magic link). Review UI: `/review` — default m
 ## Verify
 
 ```bash
-npm run verify:db
-npm run import:cards:verify      # ~1,882 transactions, 17 accounts
-npm run verify:amount-aware      # amount bucket ranking (Gracie Barra fixture)
+npm run verify:db              # needs SUPABASE_SERVICE_ROLE_KEY after RLS lockdown
+npm run import:cards:verify    # ~1,882 transactions, 17 accounts
+npm run verify:amount-aware
 npm run build
 ```
+
+See [docs/SUPABASE.md](docs/SUPABASE.md) for RLS verification curl command.
 
 ## Test plan
 
@@ -66,6 +68,7 @@ Keller CC: use **child** CSV; parent file is auto-merged (no duplicate charges).
 | [CLASSIFICATION.md](docs/CLASSIFICATION.md) | Categories, transfers, suggestion behavior, operator patterns |
 | [PHASE3_PLAN.md](docs/PHASE3_PLAN.md) | Phase 3 scope, amount-aware rules (shipped) |
 | [Backlog.md](docs/Backlog.md) | Prioritized work items |
+| [SUPABASE.md](docs/SUPABASE.md) | RLS security, migrations, verify curl |
 | [PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md) | Architecture, QB import rules |
 
 ## What's next

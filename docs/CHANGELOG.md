@@ -4,7 +4,9 @@ All notable changes to the Hundie project. Format based on [Keep a Changelog](ht
 
 ## [Unreleased]
 
-Branch: `feature/amount-aware-suggestions` (from `main`)
+### Security
+
+- **RLS lockdown** — migration `20260629140000_lock_anon_select_to_authenticated.sql`; anon can no longer SELECT ledger tables; authenticated-only read (see [SUPABASE.md](./SUPABASE.md))
 
 ### Added
 
@@ -25,6 +27,7 @@ Branch: `feature/amount-aware-suggestions` (from `main`)
 
 ### Changed
 
+- `npm run verify:db` prefers `SUPABASE_SERVICE_ROLE_KEY` (anon returns empty after RLS lockdown)
 - Entity expense totals use `isOperatingExpense()` — credit card payments no longer inflate spend numbers
 - Suggestion pipeline passes transaction `amount` + `vendorKey` for amount-aware ranking
 - Ledger ~1,882 transactions across 17 accounts
