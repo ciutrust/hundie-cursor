@@ -19,6 +19,7 @@ import {
   type AcceptAiItem,
   type AiEstimateResult,
 } from "@/lib/actions/ai-suggestions";
+import { AI_BATCH_SIZE } from "@/lib/ai/config";
 import type { BacklogTransaction, VendorGroup } from "@/lib/ai/vendor-groups";
 import { buildVendorGroups } from "@/lib/ai/vendor-groups";
 import type { Entity } from "@/lib/types/database";
@@ -142,21 +143,50 @@ export function AiReviewPanel({ transactions, entities }: AiReviewPanelProps) {
     if (!runConfirm) return;
     const { ids } = runConfirm;
     setRunConfirm(null);
+    setError(null);
 
     startTransition(async () => {
-      setStatus(`Running AI on ${ids.length} transaction(s)…`);
+      let totalProcessed = 0;
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
+      let totalCostUsd = 0;
+      let model = "";
 
-      const result = await requestAiSuggestions(ids);
-      if ("error" in result) {
-        setError(result.error);
+      try {
+        for (let i = 0; i < ids.length; i += AI_BATCH_SIZE) {
+          const chunk = ids.slice(i, i + AI_BATCH_SIZE);
+          const batchNum = Math.floor(i / AI_BATCH_SIZE) + 1;
+          const batchTotal = Math.ceil(ids.length / AI_BATCH_SIZE);
+          const rangeEnd = Math.min(i + AI_BATCH_SIZE, ids.length);
+
+          setStatus(
+            `Running AI batch ${batchNum} of ${batchTotal} (transactions ${i + 1}–${rangeEnd} of ${ids.length})…`,
+          );
+
+          const result = await requestAiSuggestions(chunk);
+          if ("error" in result) {
+            const partial =
+              totalProcessed > 0 ? ` ${totalProcessed} suggestion(s) were saved before the failure.` : "";
+            setError(`${result.error}${partial}`);
+            setStatus(null);
+            return;
+          }
+
+          totalProcessed += result.processed;
+          totalInputTokens += result.inputTokens;
+          totalOutputTokens += result.outputTokens;
+          totalCostUsd += result.costUsd;
+          model = result.model;
+        }
+
+        setStatus(
+          `Done — ${totalProcessed} suggestions · ${totalInputTokens + totalOutputTokens} tokens · $${totalCostUsd.toFixed(2)} (${model})`,
+        );
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "AI run failed unexpectedly");
         setStatus(null);
-        return;
       }
-
-      setStatus(
-        `Done — ${result.processed} suggestions · ${result.inputTokens + result.outputTokens} tokens · $${result.costUsd.toFixed(2)} (${result.model})`,
-      );
-      router.refresh();
     });
   }
 

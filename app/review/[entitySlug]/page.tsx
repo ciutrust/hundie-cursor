@@ -19,6 +19,9 @@ import { getPersonalAiBacklog } from "@/lib/queries/ai-suggestions";
 import { isOperatingExpense } from "@/lib/category-expense";
 import { formatCurrency } from "@/lib/utils";
 
+/** Large AI runs invoke Anthropic in batches; allow enough time per server action. */
+export const maxDuration = 300;
+
 type EntityReviewPageProps = {
   params: Promise<{ entitySlug: string }>;
   searchParams: Promise<{ month?: string; period?: string; at?: string; category?: string }>;

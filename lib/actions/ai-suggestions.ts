@@ -55,89 +55,108 @@ async function loadBacklogMap() {
   return new Map(backlog.map((tx) => [tx.id, tx]));
 }
 
-async function resolveCategoryId(entityId: string, categoryPath: string | null) {
-  if (!categoryPath) return null;
+async function loadCategoryLookup() {
   const supabase = await createClient();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("categories")
-    .select("id")
-    .eq("entity_id", entityId)
-    .eq("full_path", categoryPath)
-    .maybeSingle();
-  return data?.id ?? null;
+    .select("id, entity_id, full_path")
+    .eq("is_active", true);
+
+  if (error) throw error;
+
+  const lookup = new Map<string, string>();
+  for (const row of data ?? []) {
+    lookup.set(`${row.entity_id}:${row.full_path}`, row.id);
+  }
+  return lookup;
+}
+
+function resolveCategoryIdFromLookup(
+  lookup: Map<string, string>,
+  entityId: string,
+  categoryPath: string | null,
+) {
+  if (!categoryPath) return null;
+  return lookup.get(`${entityId}:${categoryPath}`) ?? null;
 }
 
 export async function requestAiSuggestions(
   transactionIds: string[],
 ): Promise<AiRunResult | { error: string }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Not authenticated" };
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "Not authenticated" };
 
-  const backlogMap = await loadBacklogMap();
-  const transactions: BacklogTransaction[] = transactionIds
-    .map((id) => backlogMap.get(id))
-    .filter((tx): tx is BacklogTransaction => tx != null);
+    const backlogMap = await loadBacklogMap();
+    const transactions: BacklogTransaction[] = transactionIds
+      .map((id) => backlogMap.get(id))
+      .filter((tx): tx is BacklogTransaction => tx != null);
 
-  if (transactions.length === 0) {
-    return { error: "No eligible Personal uncategorized transactions in 2025–2026" };
-  }
+    if (transactions.length === 0) {
+      return { error: "No eligible Personal uncategorized transactions in 2025–2026" };
+    }
 
-  const entityCharts = await getEntityChartsForAi();
-  const { data: entities } = await supabase.from("entities").select("id, slug");
-  const entityIdBySlug = new Map((entities ?? []).map((entity) => [entity.slug, entity.id]));
+    const entityCharts = await getEntityChartsForAi();
+    const { data: entities } = await supabase.from("entities").select("id, slug");
+    const entityIdBySlug = new Map((entities ?? []).map((entity) => [entity.slug, entity.id]));
 
-  const { items, inputTokens, outputTokens, model } = await classifyAllTransactions({
-    transactions,
-    entityCharts,
-  });
-
-  const staleIds = transactions.map((tx) => tx.id);
-  if (staleIds.length > 0) {
-    await supabase.from("ai_suggestions").update({ is_current: false }).in("transaction_id", staleIds);
-  }
-
-  const rows = [];
-  for (const item of items) {
-    const tx = backlogMap.get(item.transaction_id);
-    if (!tx) continue;
-    const entityId = entityIdBySlug.get(item.entity_slug);
-    if (!entityId) continue;
-    const categoryId = await resolveCategoryId(entityId, item.category_path);
-
-    rows.push({
-      transaction_id: item.transaction_id,
-      vendor_group_key: extractVendorSearchKey(tx.description, tx.vendor),
-      entity_id: entityId,
-      entity_slug: item.entity_slug,
-      suggested_category_id: categoryId,
-      suggested_category_path: item.category_path,
-      confidence: item.confidence,
-      rationale: item.rationale,
-      model,
-      input_tokens: Math.round(inputTokens / items.length),
-      output_tokens: Math.round(outputTokens / items.length),
-      is_current: true,
+    const { items, inputTokens, outputTokens, model } = await classifyAllTransactions({
+      transactions,
+      entityCharts,
     });
+
+    const staleIds = transactions.map((tx) => tx.id);
+    if (staleIds.length > 0) {
+      await supabase.from("ai_suggestions").update({ is_current: false }).in("transaction_id", staleIds);
+    }
+
+    const categoryLookup = await loadCategoryLookup();
+    const rows = [];
+    for (const item of items) {
+      const tx = backlogMap.get(item.transaction_id);
+      if (!tx) continue;
+      const entityId = entityIdBySlug.get(item.entity_slug);
+      if (!entityId) continue;
+      const categoryId = resolveCategoryIdFromLookup(categoryLookup, entityId, item.category_path);
+
+      rows.push({
+        transaction_id: item.transaction_id,
+        vendor_group_key: extractVendorSearchKey(tx.description, tx.vendor),
+        entity_id: entityId,
+        entity_slug: item.entity_slug,
+        suggested_category_id: categoryId,
+        suggested_category_path: item.category_path,
+        confidence: item.confidence,
+        rationale: item.rationale,
+        model,
+        input_tokens: Math.round(inputTokens / items.length),
+        output_tokens: Math.round(outputTokens / items.length),
+        is_current: true,
+      });
+    }
+
+    if (rows.length > 0) {
+      const { error } = await supabase.from("ai_suggestions").insert(rows);
+      if (error) return { error: error.message };
+    }
+
+    revalidatePath("/review/personal");
+    revalidatePath("/reports/ai-suggestions");
+
+    return {
+      processed: rows.length,
+      inputTokens,
+      outputTokens,
+      costUsd: estimateCostUsd(inputTokens, outputTokens),
+      model,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "AI run failed";
+    return { error: message };
   }
-
-  if (rows.length > 0) {
-    const { error } = await supabase.from("ai_suggestions").insert(rows);
-    if (error) return { error: error.message };
-  }
-
-  revalidatePath("/review/personal");
-  revalidatePath("/reports/ai-suggestions");
-
-  return {
-    processed: rows.length,
-    inputTokens,
-    outputTokens,
-    costUsd: estimateCostUsd(inputTokens, outputTokens),
-    model,
-  };
 }
 
 export type AcceptAiItem = {

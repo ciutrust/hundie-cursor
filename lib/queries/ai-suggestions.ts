@@ -58,15 +58,33 @@ export async function getPersonalAiBacklog(): Promise<BacklogTransaction[]> {
     if (!data?.length) break;
 
     const ids = data.map((row) => row.id);
-    const { data: aiRows } = await supabase
-      .from("ai_suggestions")
-      .select(
-        "transaction_id, entity_slug, suggested_category_id, suggested_category_path, confidence, rationale",
-      )
-      .in("transaction_id", ids)
-      .eq("is_current", true);
+    const aiByTx = new Map<
+      string,
+      {
+        transaction_id: string;
+        entity_slug: string;
+        suggested_category_id: string | null;
+        suggested_category_path: string | null;
+        confidence: string;
+        rationale: string;
+      }
+    >();
 
-    const aiByTx = new Map((aiRows ?? []).map((row) => [row.transaction_id, row]));
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
+      const { data: aiRows, error: aiError } = await supabase
+        .from("ai_suggestions")
+        .select(
+          "transaction_id, entity_slug, suggested_category_id, suggested_category_path, confidence, rationale",
+        )
+        .in("transaction_id", chunk)
+        .eq("is_current", true);
+
+      if (aiError) throw aiError;
+      for (const row of aiRows ?? []) {
+        aiByTx.set(row.transaction_id, row);
+      }
+    }
 
     for (const row of data) {
       const ai = aiByTx.get(row.id);
