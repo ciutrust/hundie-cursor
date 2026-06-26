@@ -76,6 +76,15 @@ Some categories move money or stage reclassification — they must **not** infla
 
 **QuickBooks alignment:** QB export skips Credit Card Payments and account-to-account transfers. Hundie classifies checking-side payment rows as `Credit card payment` so they stay out of expense roll-ups while remaining searchable.
 
+### Refunds & credits — import behavior (C2, since 0.2.2)
+
+Card **refunds/credits** now import as **negative-amount** rows. (Before this change all five issuer parsers dropped them at parse time, so `Refund / credit` was unreachable from card data.) Practically:
+
+- Classify a refund as **`Refund / credit`**. The negative amount keeps it out of the `amount > 0` expense totals automatically; it still shows in the category drill-down and the CSV export (`counts_as_expense = no`).
+- Card **payments** (paying off the card) and **checking deposits / income** are still dropped at import — they are not spend.
+- Totals stay **gross**: a refund is a visible row, not auto-netted against the original charge. Net spend = charges − refunds; the netting and tax treatment happen in **QBO**, not here (Hundie is expense control, not the books).
+- **Backfill:** to pull in refunds from CSVs imported before this change, **re-import the card CSVs** — dedupe is safe, so existing charges are not duplicated (`npm run import:cards`).
+
 ---
 
 ## Review backlog
