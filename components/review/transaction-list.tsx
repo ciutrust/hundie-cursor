@@ -33,6 +33,7 @@ import {
   getAccountFilterOptions,
   getCategoryFilterOptions,
   isReviewBacklogTransaction,
+  transactionVendorKey,
   type TransactionFilterState,
 } from "@/lib/transaction-filters";
 import { cn, formatCurrency } from "@/lib/utils";
@@ -132,6 +133,18 @@ export function TransactionList({
     setSelectedIds(new Set());
   }
 
+  // A: "Find similar" — narrow to the same vendor and select them all for bulk assign.
+  function findSimilar(tx: TransactionWithDetails) {
+    const key = transactionVendorKey(tx);
+    const matches = transactions.filter((candidate) => transactionVendorKey(candidate) === key);
+    setFilters({ ...EMPTY_TRANSACTION_FILTERS, similarVendorKey: key });
+    setSelectedIds(new Set(matches.map((candidate) => candidate.id)));
+  }
+
+  function clearSimilar() {
+    setFilters((current) => ({ ...current, similarVendorKey: null }));
+  }
+
   function handleBulkComplete() {
     setBulkOpen(false);
     clearSelection();
@@ -198,6 +211,11 @@ export function TransactionList({
               {!reviewBacklogFilterActive ? ` (${reviewBacklogCount})` : null}
             </Button>
           ) : null}
+          {filters.similarVendorKey ? (
+            <Button type="button" variant="default" size="sm" onClick={clearSimilar}>
+              Similar: {filters.similarVendorKey} ✕
+            </Button>
+          ) : null}
         </div>
         {selectedIds.size > 0 ? (
           <span className="text-sm text-muted-foreground">{selectedIds.size} selected</span>
@@ -248,6 +266,14 @@ export function TransactionList({
                   </p>
                 </div>
                 <span className="shrink-0 font-medium">{formatCurrency(Number(tx.amount))}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => findSimilar(tx)}
+                title="Select all transactions from this vendor for bulk assign"
+                className="mt-1 shrink-0 self-center rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                Find similar
               </button>
             </div>
           );

@@ -1,4 +1,5 @@
 import { isCpaReviewCategory } from "@/lib/category-review";
+import { extractVendorSearchKey } from "@/lib/suggestions/category-suggestions";
 import type { TransactionWithDetails } from "@/lib/types/database";
 
 export const UNCLASSIFIED_CATEGORY_ID = "__unclassified__";
@@ -20,6 +21,8 @@ export type TransactionFilterState = {
   categoryIds: string[];
   accountIds: string[];
   reviewBacklogOnly: boolean;
+  /** When set, keep only transactions whose vendor key matches (Find similar). */
+  similarVendorKey: string | null;
 };
 
 export const EMPTY_TRANSACTION_FILTERS: TransactionFilterState = {
@@ -29,6 +32,7 @@ export const EMPTY_TRANSACTION_FILTERS: TransactionFilterState = {
   categoryIds: [],
   accountIds: [],
   reviewBacklogOnly: false,
+  similarVendorKey: null,
 };
 
 const ACCOUNT_TYPE_LABELS: Record<string, string> = {
@@ -133,6 +137,13 @@ export function getAccountFilterOptions(transactions: TransactionWithDetails[]):
   return Array.from(options.values()).sort((a, b) => a.label.localeCompare(b.label));
 }
 
+/** Vendor key used to group "similar" transactions (same merchant), shared with suggestions. */
+export function transactionVendorKey(
+  tx: Pick<TransactionWithDetails, "description" | "vendor">,
+): string {
+  return extractVendorSearchKey(tx.description, tx.vendor);
+}
+
 export function filterTransactions(
   transactions: TransactionWithDetails[],
   filters: TransactionFilterState,
@@ -168,6 +179,10 @@ export function filterTransactions(
       return false;
     }
 
+    if (filters.similarVendorKey && transactionVendorKey(tx) !== filters.similarVendorKey) {
+      return false;
+    }
+
     return true;
   });
 }
@@ -178,7 +193,8 @@ export function hasActiveTransactionFilters(filters: TransactionFilterState): bo
     (filters.amountOperator !== "any" && filters.amountValue.trim().length > 0) ||
     filters.categoryIds.length > 0 ||
     filters.accountIds.length > 0 ||
-    filters.reviewBacklogOnly
+    filters.reviewBacklogOnly ||
+    (filters.similarVendorKey != null && filters.similarVendorKey.length > 0)
   );
 }
 
