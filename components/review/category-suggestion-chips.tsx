@@ -39,19 +39,25 @@ export function CategorySuggestionChips({
   entitySlug = "gbsl",
   onSelect,
 }: CategorySuggestionChipsProps) {
-  const source = suggestions[0]?.source ?? (entitySlug === "gbsl" ? "qb_training" : "confirmed_history");
+  const source = suggestions[0]?.source ?? (entitySlug === "gbsl" ? "blended" : "confirmed_history");
   const loadingMessage =
     source === "confirmed_history"
       ? "Loading suggestions from your past classifications…"
-      : "Loading suggestions from QB history…";
+      : source === "blended"
+        ? "Loading blended suggestions (QB + your picks)…"
+        : "Loading suggestions from QB history…";
   const emptyMessage =
     source === "confirmed_history"
       ? "No matches from your past picks for this vendor — choose manually below."
-      : "No QuickBooks matches for this vendor — choose manually below.";
+      : source === "blended"
+        ? "No blended matches for this vendor — choose manually below."
+        : "No QuickBooks matches for this vendor — choose manually below.";
   const footerMessage =
     source === "confirmed_history"
       ? "Green = strong match from your history · yellow = possible · red = weak guess."
-      : "Green = strong QB history match · yellow = possible · red = weak guess.";
+      : source === "blended"
+        ? "Blends QuickBooks history, your confirmed picks, and recent accept/reject learning."
+        : "Green = strong QB history match · yellow = possible · red = weak guess.";
 
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">{loadingMessage}</p>;

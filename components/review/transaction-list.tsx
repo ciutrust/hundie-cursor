@@ -22,6 +22,7 @@ import { CategorySearchSelect } from "@/components/review/category-search-select
 import { CategorySuggestionChips } from "@/components/review/category-suggestion-chips";
 import { TransactionSearchBar } from "@/components/review/transaction-search-bar";
 import { bulkReclassifyTransactions, reclassifyTransaction } from "@/lib/actions/reclassify";
+import type { SuggestionOutcome } from "@/lib/actions/suggestion-events";
 import { getBulkCategorySuggestions, getCategorySuggestions } from "@/lib/actions/suggestions";
 import type { CategorySuggestion } from "@/lib/suggestions/category-suggestions";
 import type { Category, Entity, TransactionWithDetails } from "@/lib/types/database";
@@ -403,6 +404,22 @@ function ReclassifyDialog({
     }
   }
 
+  function buildSuggestionOutcome(chosenCategoryId: string | null): SuggestionOutcome | null {
+    if (!showSuggestions || suggestions.length === 0) return null;
+    return {
+      transactionId: transaction.id,
+      classificationId: transaction.classification.id,
+      entityId,
+      description: transaction.description,
+      vendor: transaction.vendor,
+      chosenCategoryId,
+      suggestionsShown: suggestions.map((item) => ({
+        categoryId: item.categoryId,
+        source: item.source,
+      })),
+    };
+  }
+
   function handleSave() {
     setError(null);
     startTransition(async () => {
@@ -413,6 +430,7 @@ function ReclassifyDialog({
         notes,
         month,
         entitySlug,
+        suggestionOutcome: buildSuggestionOutcome(showCategories ? categoryId : null),
       });
 
       if (result.error) {
@@ -592,6 +610,23 @@ function BulkAssignDialog({
     }
   }
 
+  function buildBulkSuggestionOutcome(chosenCategoryId: string | null): SuggestionOutcome | null {
+    if (!showSuggestions || suggestions.length === 0 || transactions.length === 0) return null;
+    const sample = transactions[0];
+    return {
+      transactionId: sample.id,
+      classificationId: sample.classification.id,
+      entityId,
+      description: sample.description,
+      vendor: sample.vendor,
+      chosenCategoryId,
+      suggestionsShown: suggestions.map((item) => ({
+        categoryId: item.categoryId,
+        source: item.source,
+      })),
+    };
+  }
+
   function handleSave() {
     setError(null);
     startTransition(async () => {
@@ -600,6 +635,7 @@ function BulkAssignDialog({
         entityId,
         categoryId: showCategories ? categoryId : null,
         entitySlug,
+        suggestionOutcome: buildBulkSuggestionOutcome(showCategories ? categoryId : null),
       });
 
       if (result.error) {

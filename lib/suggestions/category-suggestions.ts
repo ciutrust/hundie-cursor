@@ -2,7 +2,7 @@ export type CategorySuggestion = {
   categoryId: string;
   fullPath: string;
   count: number;
-  source: "qb_training" | "confirmed_history";
+  source: "qb_training" | "confirmed_history" | "blended";
   confidence: "high" | "medium" | "low";
 };
 

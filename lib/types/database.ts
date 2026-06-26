@@ -355,6 +355,84 @@ export type Database = {
           },
         ]
       }
+      suggestion_events: {
+        Row: {
+          chosen_category_id: string | null
+          classification_id: string | null
+          created_at: string
+          created_by: string | null
+          entity_id: string
+          event_type: "accept" | "reject" | "manual"
+          id: string
+          suggested_category_id: string | null
+          suggestion_source: string | null
+          transaction_id: string | null
+          vendor_key: string
+        }
+        Insert: {
+          chosen_category_id?: string | null
+          classification_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          entity_id: string
+          event_type: "accept" | "reject" | "manual"
+          id?: string
+          suggested_category_id?: string | null
+          suggestion_source?: string | null
+          transaction_id?: string | null
+          vendor_key?: string
+        }
+        Update: {
+          chosen_category_id?: string | null
+          classification_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          entity_id?: string
+          event_type?: "accept" | "reject" | "manual"
+          id?: string
+          suggested_category_id?: string | null
+          suggestion_source?: string | null
+          transaction_id?: string | null
+          vendor_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "suggestion_events_chosen_category_id_fkey"
+            columns: ["chosen_category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suggestion_events_classification_id_fkey"
+            columns: ["classification_id"]
+            isOneToOne: false
+            referencedRelation: "classifications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suggestion_events_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suggestion_events_suggested_category_id_fkey"
+            columns: ["suggested_category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suggestion_events_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       transactions: {
         Row: {
           account_id: string

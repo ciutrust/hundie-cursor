@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { logSuggestionEvent, type SuggestionOutcome } from "@/lib/actions/suggestion-events";
 import { createClient } from "@/lib/supabase/server";
 
 export type ReclassifyInput = {
@@ -11,6 +12,7 @@ export type ReclassifyInput = {
   notes: string | null;
   month: string;
   entitySlug: string;
+  suggestionOutcome?: SuggestionOutcome | null;
 };
 
 export type BulkReclassifyInput = {
@@ -18,6 +20,7 @@ export type BulkReclassifyInput = {
   entityId: string;
   categoryId: string | null;
   entitySlug: string;
+  suggestionOutcome?: SuggestionOutcome | null;
 };
 
 export async function reclassifyTransaction(input: ReclassifyInput) {
@@ -46,6 +49,10 @@ export async function reclassifyTransaction(input: ReclassifyInput) {
 
   if (error) {
     return { error: error.message };
+  }
+
+  if (input.suggestionOutcome) {
+    await logSuggestionEvent(input.suggestionOutcome, user.email ?? user.id);
   }
 
   revalidatePath("/review");
@@ -82,6 +89,10 @@ export async function bulkReclassifyTransactions(input: BulkReclassifyInput) {
 
   if (error) {
     return { error: error.message };
+  }
+
+  if (input.suggestionOutcome) {
+    await logSuggestionEvent(input.suggestionOutcome, user.email ?? user.id);
   }
 
   revalidatePath("/review");
