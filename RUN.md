@@ -50,6 +50,15 @@ npm run build
 5. Click transaction → reclassify; check **Suggested categories** chips
 6. Multi-select → **Assign category** for bulk
 7. Save → totals refresh
+8. **Find similar** — on any row click **Find similar** → the list narrows to that vendor and selects them all → pick a category → **Assign** (one click categorizes the whole vendor; the **Similar:** chip clears it)
+9. **Mortgage / HELOC** — on a Pflugerville / Austin ACAA / Personal payment, reclassify → pick **Mortgage payment** or **HELOC payment** (whole payment, one line; the principal/interest split is QBO's job)
+
+### AI Review — assign + override (`/review/ai`)
+
+1. **Ask AI** on selected vendor groups (or all) → confirm the cost estimate → suggestions are saved (nothing is classified yet)
+2. Each vendor-group line shows an editable **Entity** + **Category** (prefilled from the AI) and an **Assign** button; per-row checkboxes choose which rows get it (all selected by default)
+3. **Keep** the AI pick → **Assign** (logs an accept). **Override** the category → **Assign** (saves your category, logs a reject of the AI's pick — and still trains the deterministic engine)
+4. Check **Reports → AI suggestions** (`/reports/ai-suggestions`) — accept rate **by source** (AI vs the deterministic engine)
 
 ### Suggestions
 

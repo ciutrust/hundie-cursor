@@ -26,9 +26,9 @@ supabase db push   # fresh environments only — or apply 20260630120000_create_
 
 3. Click **Ask AI (N)** for selected transactions, or **Ask AI (all)** for the full backlog.
 
-4. After the run, click **Review AI** on a group. Confirm dialog lets you **uncheck individual transactions** again before **Accept selected** or **Reject selected**.
+4. After the run, each vendor-group line shows an editable **Entity** dropdown and **Category** dropdown (both **prefilled from the AI suggestion**), per-row **checkboxes** (all selected by default — uncheck to exclude), and an **Assign** button. Assign applies to the selected rows in that group.
 
-5. Accepted suggestions write to `classifications` via the normal reclassify path and log `suggestion_events` with `suggestion_source = 'ai_llm'`. That feeds the deterministic engine on the next visit.
+5. **Keeping the AI pick and clicking Assign logs an `accept`.** **Overriding** the category saves *your* category and logs a `reject` of the AI's original pick. Either way the write goes to `classifications` via the normal reclassify path and logs `suggestion_events` with `suggestion_source = 'ai_llm'`. An override still **trains** the deterministic engine — via confirmed history plus a reject-credits-chosen rule — so your category compounds on the next visit.
 
 ## Relationship to deterministic engine
 
@@ -43,7 +43,7 @@ Both compound: confirmed AI picks become `confirmed_history` training data.
 
 ## Measurement
 
-**Reports → AI suggestions** (`/reports/ai-suggestions`) — accept/reject rates by entity and confidence band.
+**Reports → AI suggestions** (`/reports/ai-suggestions`) — accept/reject rates by entity and confidence band, plus accept-rate **by source** (AI vs deterministic) so you can compare which engine you keep more often.
 
 ## Guardrails
 

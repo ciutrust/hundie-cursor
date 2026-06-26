@@ -30,6 +30,8 @@ Human-in-the-loop always — suggestions help; Alex confirms every category.
 | `Transfer / Zelle (personal)` | Moving money, not spend |
 | `Refund / credit` | Refunds, credits |
 | `Credit card interest (non-deductible)` | CC interest on personal cards (added Jun 2026) |
+| `Mortgage payment` | Whole mortgage payment as one line — **no principal/interest split** (split is QBO's job); added Jul 2026 |
+| `HELOC payment` | Whole HELOC payment as one line — no split (added Jul 2026) |
 | `→ GBSL business expense` | Staging — reclassify to GBSL + QB category |
 
 ### Austin ACAA & Pflugerville (`acaa-austin`, `pflugerville`)
@@ -43,6 +45,13 @@ Schedule E rental charts — see `supabase/migrations/20260627120000_rental_cate
 | `Bank fees` | Past due fees, late fees on rental CC |
 | `Interest expense (credit card)` | CC purchase interest (not mortgage) |
 | `Meals & entertainment (rental)` | Tenant meals, property-related dining |
+
+**Added Jul 2026** (`20260701120000_mortgage_heloc_payment_categories.sql`) — counted expenses on Pflugerville + Austin ACAA (136 Anita):
+
+| Category | Use |
+|----------|-----|
+| `Mortgage payment` | Whole mortgage payment as one line — **no principal/interest split** (split is QBO's job) |
+| `HELOC payment` | Whole HELOC payment as one line — no split |
 
 **Non-expense (already seeded):** `Refund / credit`, `Mortgage principal payment`, `Security deposit movement`, reclassify staging rows.
 
@@ -140,6 +149,11 @@ Transactions need review when:
 
 **Description-token learning:** Google Ads vs Workspace (`ADS` vs `Workspace` substrings).
 
+**Fast operator workflows:**
+
+- **AI Review screen** (`/review/ai`): each vendor-group line has an editable **Entity** + **Category** dropdown (prefilled from the AI suggestion) and an **Assign** button. Assign applies to the **selected** rows in the group (all selected by default; uncheck to exclude). Keeping the AI pick logs an `accept`; overriding the category saves **your** category, logs a `reject` of the AI's pick, and still **trains** the deterministic engine (confirmed history + a reject-credits-chosen rule). Accept-rate by source (AI vs deterministic) shows on `/reports/ai-suggestions`.
+- **Find similar** (`/review/<entity>` rows): narrows the list to the same vendor (vendor-key match) and selects them all, so the existing bulk **Assign category** applies to the whole vendor in one click. Scope is the current screen (month/entity); a `Similar:` chip clears it.
+
 ---
 
 ## Migrations reference (Jun 2026 category work)
@@ -149,6 +163,7 @@ Transactions need review when:
 | `20260626120000_seed_personal_categories.sql` | Personal chart (28 categories) |
 | `20260627120000_rental_categories_and_account_settings.sql` | Austin ACAA + Pflugerville Schedule E chart |
 | `20260629120000_add_transfer_and_rental_categories.sql` | GBSL transfer categories, Personal CC interest, rental Bank fees / CC interest / meals |
+| `20260701120000_mortgage_heloc_payment_categories.sql` | `Mortgage payment` + `HELOC payment` (counted) on Pflugerville, Austin ACAA, Personal |
 
 ---
 

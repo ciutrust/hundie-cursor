@@ -59,6 +59,10 @@ See [RUN.md](../RUN.md) for start instructions.
 | GBSL/rental/Personal category gaps (transfers, fees, interest) | Done |
 | Reports + CSV export | Partial |
 | Amount-aware rules (Gracie Barra amount bands) | Done |
+| Mortgage/HELOC payment categories (whole payment, no P&I split — that's QBO) | Done |
+| AI Review inline assign + category override (override trains the engine) | Done |
+| Find-similar bulk categorize on review list | Done |
+| Review dashboard performance pass (dedup + parallel queries + indexes) | Done |
 
 **Plans:** [PHASE3_PLAN.md](./PHASE3_PLAN.md) · [CLASSIFICATION.md](./CLASSIFICATION.md)
 
@@ -74,5 +78,5 @@ Bank import, QBO API, write-back, splits, CPA packet — after Phase 2 is reliab
 
 - **Jun 2026:** Schema, parsers, initial backfill, Phase 1 UI shipped
 - **Jun 2026:** Phase 2 suggestions + Phase 3 learning loop, category charts, amount-aware rules
-- **Now:** Alex classifies Jan–Jun backlog; reports polish
+- **Now:** Mortgage/HELOC categories, AI-Review inline assign + override, find-similar bulk categorize, dashboard speedup; Alex classifies Jan–Jun backlog; reports polish
 - **Later:** Claudia, Keller QBO, banks, QBO API

@@ -12,6 +12,29 @@ All notable changes to the Hundie project. Format based on [Keep a Changelog](ht
 - Keller QBO import
 - Remaining card accounts (Home Depot, Best Buy, etc.)
 - Refactor the `blend-ranking.ts` source ternary for legibility; net refunds in report totals (currently gross — refunds visible but not auto-netted)
+- AI Review backlog: server-side vendor grouping / pagination (the page loads ~2,845 uncategorized Personal rows client-side today)
+
+---
+
+## [0.3.0] — 2026-06-26
+
+Productivity + expense-control features (commits `37ee55f`..`4e1b60e`). Suite: 39 tests / 12 files green; adversarially QA'd before push (no regressions).
+
+> Hundie is an **expense-control** tool, not the books — categorization is for managing spend by entity; the tax treatment (mortgage principal/interest split, deductions) happens in **QuickBooks Online**.
+
+### Added
+
+- **AI Review — inline assign + override** (`/review/ai`) — each vendor-group line now has an editable **Entity** + **Category** (prefilled from the AI suggestion) and an **Assign** button. Assign applies to the **selected** rows (all by default; uncheck to exclude). Keeping the AI pick logs an `accept`; overriding saves *your* category and logs a `reject` of the AI's original. An override still trains the deterministic engine — via confirmed history **and** a new reject-credits-chosen rule in `blend-ranking.ts`. Replaces the all-or-nothing "Accept AI". (D)
+- **Find similar → bulk categorize** — a **"Find similar"** button on each review-list row narrows to the same vendor (vendor-key match, the same logic suggestions use) and selects them all for the existing bulk **Assign**; a "Similar:" chip clears it. (A)
+- **Mortgage payment / HELOC payment categories** — single-payment, **counted** expense categories on Pflugerville, Austin ACAA, Personal (the whole payment, no principal/interest split — the split happens in QBO). Migration `20260701120000`; seeded live. (B)
+
+### Changed
+
+- **Performance** (C) — the review dashboard recomputed `getEntitySummaries` twice (page + inside `getReviewDashboardStats`); the latter now returns its summaries so the page reuses them (~40% fewer period loads on the busiest page). Folded the serial `getCpaReviewCategoryIdSet` round-trip into the `Promise.all` of `getEntitySummaries` + `getReviewDashboardStats`. Added `transactions(transaction_date)` and `classifications(entity_id, category_id)` indexes (migration `20260701130000`).
+
+### Docs
+
+- `CLASSIFICATION.md`: refund import behavior (C2) + mortgage/HELOC categories + Find-similar / AI-assign workflows.
 
 ---
 
@@ -134,7 +157,8 @@ Phase 3 classification UX and learning (already on `main` before 0.2.0).
 
 Initial repository setup — GitHub repo, Supabase project, entities migration, verify scripts.
 
-[Unreleased]: https://github.com/ciutrust/hundie-cursor/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/ciutrust/hundie-cursor/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ciutrust/hundie-cursor/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/ciutrust/hundie-cursor/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ciutrust/hundie-cursor/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ciutrust/hundie-cursor/compare/v0.1.0...v0.2.0

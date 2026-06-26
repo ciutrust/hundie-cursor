@@ -59,6 +59,18 @@ From [REVIEW-2026-06-26.md](./REVIEW-2026-06-26.md):
 
 ---
 
+## Done — Review UX + categories (2026-07-01)
+
+AI Review override loop, find-similar, mortgage/HELOC categories, dashboard perf.
+
+- [x] **Mortgage/HELOC categories** — counted `Mortgage payment` + `HELOC payment` on Pflugerville, Austin ACAA, Personal; whole payment as one line (no principal/interest split — that's QBO) (`20260701120000`)
+- [x] **AI Review inline assign + override** (`/review/ai`) — per-group Entity + Category dropdowns (prefilled from AI), per-row select, `Assign` button; keeping AI logs accept, overriding saves your category + logs reject; override still trains the engine (confirmed history + reject-credits-chosen). Replaces all-or-nothing "Accept AI"
+- [x] **Accept-rate by source** (AI vs deterministic) on `/reports/ai-suggestions`
+- [x] **Find similar** — per-row button on `/review/<entity>` narrows to same vendor-key + selects all for one-click bulk assign; `Similar:` chip clears (scope = current month/entity)
+- [x] **Dashboard perf** — deduped `getEntitySummaries` (one call) + parallelized queries + DB indexes (`20260701130000`); review dashboard loads faster
+
+---
+
 ## Now
 
 - [ ] Alex classifies Jan–Jun backlog (operator work)
