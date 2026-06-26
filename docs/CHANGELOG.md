@@ -6,12 +6,34 @@ All notable changes to the Hundie project. Format based on [Keep a Changelog](ht
 
 ### Planned
 
-- Refund import policy (C2) — credits/refunds dropped at parse time
-- Archive dead MCP scripts to `scripts/archive/`
-- Git history scrub for `.qb-import-batches.json` (removed from tracking in 0.2.0)
+- Git history scrub for `.qb-import-batches.json` (removed from tracking in 0.2.0; still in history — needs `git filter-repo`/BFG + force-push)
+- Enable Supabase leaked-password protection (Auth setting)
+- Make card import atomic (txn + classification in one RPC) so partial failures can't orphan rows (C5 prevention; audit script covers existing orphans)
 - Keller QBO import
-- Manual intercompany flag (GBSL → Anita lease)
 - Remaining card accounts (Home Depot, Best Buy, etc.)
+- Refactor the `blend-ranking.ts` source ternary for legibility; net refunds in report totals (currently gross — refunds visible but not auto-netted)
+
+---
+
+## [0.2.2] — 2026-06-26
+
+Review follow-ups (issues 1–8 from the [REVIEW](./REVIEW-2026-06-26.md) status ledger). Suite: 35 tests / 11 files green.
+
+### Added
+
+- **Accept-rate by source** — `acceptanceBySource()` (pure, tested) + `getSuggestionAcceptanceBySource()`; a table on `/reports/ai-suggestions` comparing the LLM (`ai_llm`) vs the deterministic engine sources, so weight-tuning is data-driven (#6)
+- **Intercompany review** — `/reports/intercompany` surfaces GBSL ↔ Austin ACAA (136 Anita) lease legs and flags same-date/`|amount|` cross-entity pairs as possible double-counts, with a "verify manually" banner; `flagIntercompanyMatches` pure + tested (C10)
+- **Orphan-classification audit** — `scripts/audit-orphan-classifications.mjs` reports (and `--apply` heals) transactions with no classification row, which the inner-join queries would otherwise hide (C5). Live: 0 orphans today
+- **Tests** — parser refund handling, amount-aware ranking, accept-rate tally, intercompany flagging (+13 tests)
+
+### Changed
+
+- **Refunds/credits now imported as negative transactions** across all five parsers (C2) — they enter the ledger, are classifiable as `Refund / credit`, show in the CSV (`counts_as_expense=no`), and stay out of `amount>0` expense totals; card payments still dropped; checking deposits still dropped (income out of scope). **Re-import card CSVs to backfill historical refunds.** Totals remain gross (CPA nets via the visible refund rows)
+- **~45 dead one-off `mcp-*`/`run-*`/`exec-*` backfill scripts** removed from tracking (local copies in the gitignored `scripts/archive/`); `scripts/` 65 → 18 (#5)
+
+### Verified
+
+- **Live RLS** — anon SELECT on `transactions`/`classifications`/`categories`/`accounts` returns `[]` on `ihciuqpiavxhbulfkwod` (the previously-unverifiable production check — confirmed locked out) (#8)
 
 ---
 
@@ -112,7 +134,8 @@ Phase 3 classification UX and learning (already on `main` before 0.2.0).
 
 Initial repository setup — GitHub repo, Supabase project, entities migration, verify scripts.
 
-[Unreleased]: https://github.com/ciutrust/hundie-cursor/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/ciutrust/hundie-cursor/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/ciutrust/hundie-cursor/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ciutrust/hundie-cursor/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ciutrust/hundie-cursor/compare/v0.1.0...v0.2.0
 [0.1.1]: https://github.com/ciutrust/hundie-cursor/compare/v0.1.0...v0.1.1
