@@ -212,8 +212,13 @@ export function extractSearchTokensFromTransactions(transactions: TransactionLik
   return rankTokenCounts(tokenCounts).slice(0, 5);
 }
 
+export function sanitizeOrToken(token: string): string {
+  return token.replace(/[%_\\(),.]/g, "");
+}
+
+/** @deprecated Use sanitizeOrToken — kept for call-site compatibility. */
 export function escapeIlikePattern(token: string): string {
-  return token.replace(/[%_\\]/g, "");
+  return sanitizeOrToken(token);
 }
 
 export function computeSuggestionConfidence(

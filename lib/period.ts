@@ -116,7 +116,7 @@ export function periodRangeFor(type: PeriodType, at: string): PeriodRange {
     };
   }
 
-  return periodRangeFor("month", "2026-06");
+  return periodRangeFor("month", `${new Date().getFullYear()}-${pad2(new Date().getMonth() + 1)}`);
 }
 
 export function parsePeriodParams(searchParams: {

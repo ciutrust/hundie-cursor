@@ -36,6 +36,19 @@ export async function reclassifyTransaction(input: ReclassifyInput) {
 
   const notes = input.notes?.trim() || null;
 
+  if (input.categoryId) {
+    const { data: category, error: categoryError } = await supabase
+      .from("categories")
+      .select("entity_id")
+      .eq("id", input.categoryId)
+      .maybeSingle();
+
+    if (categoryError) return { error: categoryError.message };
+    if (!category || category.entity_id !== input.entityId) {
+      return { error: "Category does not belong to the selected entity" };
+    }
+  }
+
   const { error } = await supabase
     .from("classifications")
     .update({
@@ -75,6 +88,19 @@ export async function bulkReclassifyTransactions(input: BulkReclassifyInput) {
 
   if (!user) {
     return { error: "Not authenticated" };
+  }
+
+  if (input.categoryId) {
+    const { data: category, error: categoryError } = await supabase
+      .from("categories")
+      .select("entity_id")
+      .eq("id", input.categoryId)
+      .maybeSingle();
+
+    if (categoryError) return { error: categoryError.message };
+    if (!category || category.entity_id !== input.entityId) {
+      return { error: "Category does not belong to the selected entity" };
+    }
   }
 
   const { error } = await supabase

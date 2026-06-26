@@ -163,10 +163,18 @@ export async function getEntitySummaries(period: PeriodRange): Promise<EntitySum
       (tx) => tx.classification.entity_id === entity.id,
     );
     const expenseTotal = entityTransactions
-      .filter((tx) => isOperatingExpense(tx.amount, tx.classification.category?.full_path))
+      .filter(
+        (tx) =>
+          !needsReviewCategory(tx.classification.category_id, cpaReviewIds) &&
+          isOperatingExpense(tx.amount, tx.classification.category?.full_path),
+      )
       .reduce((sum, tx) => sum + Number(tx.amount), 0);
     const previousExpenseTotal = previousEntityTransactions
-      .filter((tx) => isOperatingExpense(tx.amount, tx.classification.category?.full_path))
+      .filter(
+        (tx) =>
+          !needsReviewCategory(tx.classification.category_id, cpaReviewIds) &&
+          isOperatingExpense(tx.amount, tx.classification.category?.full_path),
+      )
       .reduce((sum, tx) => sum + Number(tx.amount), 0);
 
     return {

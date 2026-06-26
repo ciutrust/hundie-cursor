@@ -16,7 +16,7 @@ export function parseCitiCsv(csvText) {
   const rows = rowsToObjects(parseCsv(csvText));
   const transactions = [];
 
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
     const transactionDate = parseUsDate(row.Date);
     const description = normalizeDescription(row.Description);
     const debit = parseAmount(row.Debit);
@@ -34,6 +34,7 @@ export function parseCitiCsv(csvText) {
       description,
       vendor: description,
       rawCategory: null,
+      sourceRowIndex: index + 2,
     });
   }
 

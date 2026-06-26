@@ -11,6 +11,7 @@ export type WeightedCategoryEntry = {
   ledgerScore: number;
   eventScore: number;
   amountScore: number;
+  matchCount: number;
   amountMatchType?: AmountBucketMatch["matchType"];
 };
 
@@ -57,6 +58,7 @@ export function mergeWeightedSuggestions(
       ledgerScore: 0,
       eventScore: 0,
       amountScore: 0,
+      matchCount: 0,
     };
     entries.set(categoryId, created);
     return created;
@@ -67,6 +69,7 @@ export function mergeWeightedSuggestions(
     const entry = ensure(row.category_id, row.category_name);
     entry.qbScore += 1;
     entry.score += 1;
+    entry.matchCount += 1;
   }
 
   for (const row of ledgerRows) {
@@ -77,6 +80,7 @@ export function mergeWeightedSuggestions(
     const entry = ensure(categoryId, fullPath);
     entry.ledgerScore += weight;
     entry.score += weight;
+    entry.matchCount += 1;
   }
 
   for (const row of eventRows) {
@@ -88,6 +92,7 @@ export function mergeWeightedSuggestions(
       const entry = ensure(row.chosen_category_id, fullPath);
       entry.eventScore += 2.5 * weight;
       entry.score += 2.5 * weight;
+      entry.matchCount += 1;
     }
 
     if (row.event_type === "reject" && row.suggested_category_id) {
@@ -104,6 +109,7 @@ export function mergeWeightedSuggestions(
     const entry = ensure(match.categoryId, match.fullPath);
     entry.amountScore += weight * match.count;
     entry.score += weight * match.count;
+    entry.matchCount += match.count;
     if (!entry.amountMatchType || match.matchType === "exact") {
       entry.amountMatchType = match.matchType;
     }
@@ -133,7 +139,7 @@ export function mergeWeightedSuggestions(
                 ? "qb_training"
                 : "confirmed_history";
 
-    const displayCount = Math.max(1, Math.round(entry.score));
+    const displayCount = Math.max(1, entry.matchCount);
     const share = entry.score / Math.max(totalScore, 1);
 
     let confidence: CategorySuggestion["confidence"] = "low";

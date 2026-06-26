@@ -99,6 +99,8 @@ for (const known of KNOWN_ACCOUNTS) {
       transactionDate: tx.transactionDate,
       amount: tx.amount,
       description: tx.description,
+      issuerReference: tx.issuerReference,
+      sourceRowIndex: tx.sourceRowIndex,
     });
     return {
       transaction: {

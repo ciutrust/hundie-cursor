@@ -16,7 +16,7 @@ export function parseAmexCsv(csvText) {
   const rows = rowsToObjects(parseCsv(csvText));
   const transactions = [];
 
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
     const transactionDate = parseUsDate(row.Date);
     const description = normalizeDescription(row.Description);
     const amount = parseAmount(row.Amount);
@@ -33,6 +33,8 @@ export function parseAmexCsv(csvText) {
       description,
       vendor: row["Appears On Your Statement As"]?.trim() || description,
       rawCategory: category || null,
+      issuerReference: row["Account #"]?.trim() || null,
+      sourceRowIndex: index + 2,
     });
   }
 

@@ -25,4 +25,7 @@ data/imports/
 scripts/.card-import-sql/
 scripts/.qb-import-sql/
 scripts/.sheet-import-review.json
+scripts/.qb-import-batches.json
+scripts/.*-qb-*.mjs
+scripts/archive/
 *.csv

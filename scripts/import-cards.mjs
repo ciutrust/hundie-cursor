@@ -159,6 +159,8 @@ function buildImportPlan(account, csvPath, csvText, entityMap, { dryRun = false,
       transactionDate: tx.transactionDate,
       amount: tx.amount,
       description: tx.description,
+      issuerReference: tx.issuerReference,
+      sourceRowIndex: tx.sourceRowIndex,
     });
 
     rows.push({

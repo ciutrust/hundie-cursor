@@ -75,6 +75,8 @@ export function buildImportPlan(
       transactionDate: tx.transactionDate,
       amount: tx.amount,
       description: tx.description,
+      issuerReference: tx.issuerReference,
+      sourceRowIndex: tx.sourceRowIndex,
     });
 
     rows.push({
@@ -149,6 +151,8 @@ export function buildImportPlanFromTransactions(
       transactionDate: tx.transactionDate,
       amount: tx.amount,
       description: tx.description,
+      issuerReference: tx.issuerReference,
+      sourceRowIndex: tx.sourceRowIndex,
     });
 
     rows.push({

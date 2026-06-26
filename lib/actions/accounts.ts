@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth/require-user";
 import type { AccountDateRule } from "@/lib/queries/accounts";
 
 export async function updateAccountSettings(input: {
@@ -9,7 +9,10 @@ export async function updateAccountSettings(input: {
   defaultEntityId: string;
   dateRules: AccountDateRule[];
 }) {
-  const supabase = await createClient();
+  const auth = await requireUser();
+  if (auth.error) return { error: auth.error };
+
+  const supabase = auth.supabase;
 
   const cleanedRules = input.dateRules
     .filter((rule) => rule.entity_slug && (rule.from || rule.until))

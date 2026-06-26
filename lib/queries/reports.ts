@@ -1,7 +1,9 @@
 import type { PeriodRange } from "@/lib/period";
+import { rowsToCsv } from "@/lib/csv";
 import { needsCategoryReview } from "@/lib/category-review";
 import { isOperatingExpense } from "@/lib/category-expense";
 import { createClient } from "@/lib/supabase/server";
+import { paginateAll } from "@/lib/supabase/paginate";
 
 export type ReportEntityRow = {
   slug: string;
@@ -22,6 +24,8 @@ export type ReportTransactionRow = {
   amount: number;
   category_name: string;
   notes: string | null;
+  counts_as_expense: boolean;
+  expense_amount: number;
 };
 
 export async function getReportByEntity(period: PeriodRange): Promise<ReportEntityRow[]> {
@@ -62,19 +66,7 @@ async function fetchPeriodSummaryTransactionsForReports(
   start: string,
   end: string,
 ) {
-  const pageSize = 1000;
-  const all: Array<{
-    amount: number;
-    classification: {
-      entity_id: string;
-      category_id: string | null;
-      entity: { name: string; slug: string };
-      category: { full_path: string } | null;
-    };
-  }> = [];
-  let from = 0;
-
-  while (true) {
+  return paginateAll(async (from, pageSize) => {
     const { data, error } = await supabase
       .from("transactions")
       .select(
@@ -94,24 +86,15 @@ async function fetchPeriodSummaryTransactionsForReports(
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
 
-    if (error) throw error;
-    const page = data ?? [];
-    all.push(...page);
-    if (page.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return all;
+    return { data: data ?? [], error };
+  });
 }
 
 export async function getReportTransactions(period: PeriodRange): Promise<ReportTransactionRow[]> {
   const supabase = await createClient();
   const { start, end } = period;
-  const pageSize = 1000;
-  const all: ReportTransactionRow[] = [];
-  let from = 0;
 
-  while (true) {
+  const rows = await paginateAll(async (from, pageSize) => {
     const { data, error } = await supabase
       .from("transactions")
       .select(
@@ -134,26 +117,26 @@ export async function getReportTransactions(period: PeriodRange): Promise<Report
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
 
-    if (error) throw error;
-    const page =
-      data?.map((row) => ({
-        transaction_date: row.transaction_date,
-        entity_name: row.classification.entity.name,
-        entity_slug: row.classification.entity.slug,
-        account_name: row.account.display_name,
-        description: row.description,
-        vendor: row.vendor,
-        amount: Number(row.amount),
-        category_name: row.classification.category?.full_path ?? "Uncategorized",
-        notes: row.classification.notes,
-      })) ?? [];
+    return { data: data ?? [], error };
+  });
 
-    all.push(...page);
-    if (page.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return all;
+  return rows.map((row) => {
+    const categoryPath = row.classification.category?.full_path ?? null;
+    const countsAsExpense = isOperatingExpense(row.amount, categoryPath);
+    return {
+      transaction_date: row.transaction_date,
+      entity_name: row.classification.entity.name,
+      entity_slug: row.classification.entity.slug,
+      account_name: row.account.display_name,
+      description: row.description,
+      vendor: row.vendor,
+      amount: Number(row.amount),
+      category_name: categoryPath ?? "Uncategorized",
+      notes: row.classification.notes,
+      counts_as_expense: countsAsExpense,
+      expense_amount: countsAsExpense ? Number(row.amount) : 0,
+    };
+  });
 }
 
 export function reportTransactionsToCsv(rows: ReportTransactionRow[]) {
@@ -164,30 +147,24 @@ export function reportTransactionsToCsv(rows: ReportTransactionRow[]) {
     "vendor",
     "description",
     "amount",
+    "counts_as_expense",
+    "expense_amount",
     "category",
     "notes",
   ];
-  const escape = (value: string | number | null) => {
-    const text = value == null ? "" : String(value);
-    if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
-    return text;
-  };
-  const lines = [
-    header.join(","),
-    ...rows.map((row) =>
-      [
-        row.transaction_date,
-        row.entity_name,
-        row.account_name,
-        row.vendor,
-        row.description,
-        row.amount.toFixed(2),
-        row.category_name,
-        row.notes,
-      ]
-        .map(escape)
-        .join(","),
-    ),
-  ];
-  return lines.join("\n");
+  return rowsToCsv(
+    header,
+    rows.map((row) => [
+      row.transaction_date,
+      row.entity_name,
+      row.account_name,
+      row.vendor,
+      row.description,
+      row.amount.toFixed(2),
+      row.counts_as_expense ? "yes" : "no",
+      row.expense_amount.toFixed(2),
+      row.category_name,
+      row.notes,
+    ]),
+  );
 }

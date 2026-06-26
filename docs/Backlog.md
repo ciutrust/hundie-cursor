@@ -38,6 +38,26 @@ Classification UX, category gaps, learning loop foundations.
 
 ---
 
+## Done — Phase 1 review (2026-06-26)
+
+From [REVIEW-2026-06-26.md](./REVIEW-2026-06-26.md):
+
+- [x] RLS lockdown merged (`20260629140000`)
+- [x] Auth guards: middleware `/reports` + `/settings`, server-action `getUser()`, category↔entity validation
+- [x] CSV export reconcile columns (`counts_as_expense`, `expense_amount`) + formula injection hardening
+- [x] `import_hash` disambiguation via issuer ref + source row index
+- [x] Vitest + core unit tests
+- [x] Suggestion chip count shows real match count, not blended score
+- [x] Review dashboard entity totals exclude backlog overlap (C8)
+- [x] Personal card report `grandTotal` uses `isOperatingExpense`
+- [ ] **Quicksilver switch year** — confirm with operator ([QUICKSILVER-DATE-RULE.md](./QUICKSILVER-DATE-RULE.md))
+- [ ] Refund import policy (C2)
+- [ ] AI pre-classifier backlog (PROMPT-3)
+- [ ] Remove `.qb-import-batches.json` from git history (S4)
+- [ ] Archive dead MCP scripts to `scripts/archive/`
+
+---
+
 ## Now
 
 - [ ] Alex classifies Jan–Jun backlog (operator work)

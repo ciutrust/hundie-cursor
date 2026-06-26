@@ -12,6 +12,8 @@
     "verify:qb-parser": "node scripts/verify-qb-parser.mjs",
     "verify:card-parsers": "node scripts/verify-card-parsers.mjs",
     "verify:amount-aware": "node --experimental-strip-types scripts/verify-amount-aware-suggestions.ts",
+    "test": "vitest run",
+    "gen:types": "supabase gen types typescript --project-id ihciuqpiavxhbulfkwod > lib/types/database.ts",
     "import:qb-gbsl": "node scripts/import-qb-gbsl.mjs",
     "import:qb-apply-categories": "node scripts/apply-qb-categories-to-ledger.mjs --apply",
     "import:qb-apply-categories:dry-run": "node scripts/apply-qb-categories-to-ledger.mjs --dry-run",
@@ -55,6 +57,7 @@
     "pg": "^8.22.0",
     "postcss": "^8.5.15",
     "tailwindcss": "^4.3.1",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.6"
   }
 }

@@ -14,7 +14,7 @@ export function parseCapitalOneCsv(csvText) {
   const rows = rowsToObjects(parseCsv(csvText));
   const transactions = [];
 
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
     const transactionDate = parseUsDate(row["Transaction Date"]);
     const postedDate = parseUsDate(row["Posted Date"]) ?? transactionDate;
     const description = normalizeDescription(row.Description);
@@ -33,6 +33,8 @@ export function parseCapitalOneCsv(csvText) {
       description,
       vendor: description,
       rawCategory: category || null,
+      issuerReference: row["Card No."]?.trim() || null,
+      sourceRowIndex: index + 2,
     });
   }
 

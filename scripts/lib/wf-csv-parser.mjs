@@ -16,7 +16,7 @@ export function parseWellsFargoCsv(csvText, { accountType = "credit_card" } = {}
   const rows = rowsToObjects(parseCsv(csvText));
   const transactions = [];
 
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
     const transactionDate = parseUsDate(row.DATE);
     const description = normalizeDescription(row.DESCRIPTION);
     const rawAmount = parseAmount(row.AMOUNT);
@@ -34,6 +34,7 @@ export function parseWellsFargoCsv(csvText, { accountType = "credit_card" } = {}
       amount = Math.abs(rawAmount);
     }
 
+    const checkNumber = row["CHECK #"]?.trim();
     transactions.push({
       transactionDate,
       postedDate: transactionDate,
@@ -41,6 +42,8 @@ export function parseWellsFargoCsv(csvText, { accountType = "credit_card" } = {}
       description,
       vendor: extractVendor(description),
       rawCategory: null,
+      issuerReference: checkNumber || null,
+      sourceRowIndex: index + 2,
     });
   }
 

@@ -7,8 +7,15 @@ All notable changes to the Hundie project. Format based on [Keep a Changelog](ht
 ### Security
 
 - **RLS lockdown** — migration `20260629140000_lock_anon_select_to_authenticated.sql`; anon can no longer SELECT ledger tables; authenticated-only read (see [SUPABASE.md](./SUPABASE.md))
+- **Auth defense in depth** — middleware covers `/reports` and `/settings`; server actions require authenticated user; safe post-login redirect
 
 ### Added
+
+- **Phase 1 review fixes (2026-06-26)** — see [REVIEW-2026-06-26.md](./REVIEW-2026-06-26.md) and [Backlog.md](./Backlog.md)
+- **Vitest** — `npm test`; unit tests for category-expense, entity resolver, import hash, CSV escape, period fallback, blend ranking
+- **CSV reconcile columns** — `counts_as_expense` + `expense_amount` on report exports; formula-injection hardening
+- **`gen:types` script** — regenerate `lib/types/database.ts` from Supabase
+- **Quicksilver operator note** — [QUICKSILVER-DATE-RULE.md](./QUICKSILVER-DATE-RULE.md) (C1 decision pending)
 
 - **Amount-aware suggestions (Phase 3.3)** — re-rank by vendor + amount bucket; `lib/suggestions/amount-aware-ranking.ts`; source `amount_match`; UI badge on chips; `npm run verify:amount-aware`
 - **Unclassified & AMA filter** — toggle next to Select all; `reviewBacklogOnly` in `lib/transaction-filters.ts`
@@ -27,6 +34,12 @@ All notable changes to the Hundie project. Format based on [Keep a Changelog](ht
 
 ### Changed
 
+- **`import_hash`** — includes issuer reference or CSV row index to avoid dropping same-day duplicate charges
+- **Suggestion chips** — `count` reflects real match occurrences, not blended score weight
+- **Review entity totals** — exclude backlog rows from per-entity sums (C8)
+- **Personal card report** — `grandTotal` filters with `isOperatingExpense`
+- **Invalid period URLs** — fall back to current month instead of hard-coded `2026-06`
+- `.qb-import-batches.json` removed from git tracking (file remains local; added to `.gitignore`)
 - `npm run verify:db` prefers `SUPABASE_SERVICE_ROLE_KEY` (anon returns empty after RLS lockdown)
 - Entity expense totals use `isOperatingExpense()` — credit card payments no longer inflate spend numbers
 - Suggestion pipeline passes transaction `amount` + `vendorKey` for amount-aware ranking

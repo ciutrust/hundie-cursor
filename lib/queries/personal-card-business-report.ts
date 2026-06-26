@@ -1,5 +1,8 @@
 import type { PeriodRange } from "@/lib/period";
+import { rowsToCsv } from "@/lib/csv";
+import { isOperatingExpense } from "@/lib/category-expense";
 import { createClient } from "@/lib/supabase/server";
+import { paginateAll } from "@/lib/supabase/paginate";
 
 /** Personal credit cards only — not checking (transfers are separate). */
 export const PERSONAL_CARD_SLUGS = [
@@ -43,12 +46,9 @@ export async function getPersonalCardBusinessReport(period: PeriodRange): Promis
   }
 
   const personalCardIds = accounts.map((a) => a.id);
-  const pageSize = 1000;
-  const all: PersonalCardBusinessRow[] = [];
-  let from = 0;
 
-  while (true) {
-    const { data, error } = await supabase
+  const data = await paginateAll(async (from, pageSize) => {
+    const { data: page, error } = await supabase
       .from("transactions")
       .select(
         `
@@ -74,27 +74,22 @@ export async function getPersonalCardBusinessReport(period: PeriodRange): Promis
       .order("id")
       .range(from, from + pageSize - 1);
 
-    if (error) throw error;
-    if (!data?.length) break;
+    return { data: page ?? [], error };
+  });
 
-    for (const row of data) {
-      all.push({
-        transaction_date: row.transaction_date,
-        account_name: row.account.display_name,
-        account_slug: row.account.slug,
-        category_name: row.classification.category?.full_path ?? "Uncategorized",
-        description: row.description,
-        vendor: row.vendor,
-        amount: Number(row.amount),
-        notes: row.classification.notes,
-      });
-    }
+  const all: PersonalCardBusinessRow[] = data.map((row) => ({
+    transaction_date: row.transaction_date,
+    account_name: row.account.display_name,
+    account_slug: row.account.slug,
+    category_name: row.classification.category?.full_path ?? "Uncategorized",
+    description: row.description,
+    vendor: row.vendor,
+    amount: Number(row.amount),
+    notes: row.classification.notes,
+  }));
 
-    if (data.length < pageSize) break;
-    from += pageSize;
-  }
-
-  const grandTotal = all.reduce((sum, row) => sum + row.amount, 0);
+  const expenseRows = all.filter((row) => isOperatingExpense(row.amount, row.category_name));
+  const grandTotal = expenseRows.reduce((sum, row) => sum + row.amount, 0);
   return {
     rows: all.sort((a, b) => a.transaction_date.localeCompare(b.transaction_date)),
     grandTotal,
@@ -103,18 +98,32 @@ export async function getPersonalCardBusinessReport(period: PeriodRange): Promis
 }
 
 export function personalCardBusinessToCsv(rows: PersonalCardBusinessRow[]) {
-  const header = ["date", "account", "category", "vendor", "description", "amount", "notes"];
-  const escape = (value: string | number | null) => {
-    const text = value == null ? "" : String(value);
-    if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
-    return text;
-  };
-  return [
-    header.join(","),
-    ...rows.map((row) =>
-      [row.transaction_date, row.account_name, row.category_name, row.vendor, row.description, row.amount.toFixed(2), row.notes]
-        .map(escape)
-        .join(","),
-    ),
-  ].join("\n");
+  const header = [
+    "date",
+    "account",
+    "category",
+    "vendor",
+    "description",
+    "amount",
+    "counts_as_expense",
+    "expense_amount",
+    "notes",
+  ];
+  return rowsToCsv(
+    header,
+    rows.map((row) => {
+      const countsAsExpense = isOperatingExpense(row.amount, row.category_name);
+      return [
+        row.transaction_date,
+        row.account_name,
+        row.category_name,
+        row.vendor,
+        row.description,
+        row.amount.toFixed(2),
+        countsAsExpense ? "yes" : "no",
+        countsAsExpense ? row.amount.toFixed(2) : "0.00",
+        row.notes,
+      ];
+    }),
+  );
 }
