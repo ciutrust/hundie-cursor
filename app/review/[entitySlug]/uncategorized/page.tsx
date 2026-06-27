@@ -62,7 +62,11 @@ export default async function EntityUncategorizedPage({ params, searchParams }: 
           </p>
           <h1 className="text-3xl font-semibold tracking-tight">Classify · {entity.name}</h1>
           <p className="text-sm text-muted-foreground">
-            {period.label} · {formatCurrency(total)} · {transactions.length} uncategorized
+            {period.label} ·{" "}
+            <span className="font-semibold text-amber-600 dark:text-amber-400">
+              {formatCurrency(total)}
+            </span>{" "}
+            remaining across {transactions.length} transaction{transactions.length === 1 ? "" : "s"} to classify
           </p>
           {entitySlug === "personal" ? (
             <Link href="/review/ai" className="text-sm font-medium text-violet-600 hover:underline dark:text-violet-400">
