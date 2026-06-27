@@ -115,6 +115,9 @@ AI Review override loop, find-similar, mortgage/HELOC categories, dashboard perf
 
 ## Later — Income & funding view (captured 2026-06-27)
 
+**Detailed plan: [INCOME_CAPTURE_PLAN.md](./INCOME_CAPTURE_PLAN.md)** (2026-06-27) — backfill + going-forward,
+bank deposits only, 5-kind category model (expense/income/transfer/funding/capital), expense-first UX.
+
 Today the app is expense-only. Alex wants to see **where money comes in**, per entity, and to treat
 intercompany transfers as **funding (capital injection)** — not income, not expense. Later work (Alex
 is classifying expenses first), but capture the shape now.
