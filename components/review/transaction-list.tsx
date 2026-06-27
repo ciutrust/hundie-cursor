@@ -65,9 +65,29 @@ export function TransactionList({
   const [bulkOpen, setBulkOpen] = useState(false);
   const [filters, setFilters] = useState<TransactionFilterState>(EMPTY_TRANSACTION_FILTERS);
 
+  const [sortKey, setSortKey] = useState<"date" | "name" | "amount">("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
   const filteredTransactions = useMemo(
     () => filterTransactions(transactions, filters),
     [transactions, filters],
+  );
+
+  const sortedTransactions = useMemo(() => {
+    const arr = [...filteredTransactions];
+    arr.sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === "date") cmp = a.transaction_date.localeCompare(b.transaction_date);
+      else if (sortKey === "name") cmp = (a.description ?? "").localeCompare(b.description ?? "");
+      else cmp = Math.abs(Number(a.amount)) - Math.abs(Number(b.amount));
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return arr;
+  }, [filteredTransactions, sortKey, sortDir]);
+
+  const filteredTotal = useMemo(
+    () => filteredTransactions.reduce((sum, tx) => sum + Number(tx.amount), 0),
+    [filteredTransactions],
   );
 
   const categoryOptions = useMemo(
@@ -98,6 +118,11 @@ export function TransactionList({
   const selectedTransactions = useMemo(
     () => filteredTransactions.filter((tx) => selectedIds.has(tx.id)),
     [filteredTransactions, selectedIds],
+  );
+
+  const selectedTotal = useMemo(
+    () => selectedTransactions.reduce((sum, tx) => sum + Number(tx.amount), 0),
+    [selectedTransactions],
   );
 
   const allSelected =
@@ -149,6 +174,9 @@ export function TransactionList({
   function handleBulkComplete() {
     setBulkOpen(false);
     clearSelection();
+    // After assigning a batch (e.g. a Find-similar set), drop the filters so the view snaps back
+    // to the full list instead of getting stuck on a now-empty filtered set.
+    setFilters(EMPTY_TRANSACTION_FILTERS);
   }
 
   if (transactions.length === 0) {
@@ -178,10 +206,6 @@ export function TransactionList({
         accountOptions={accountOptions}
       />
 
-      {filteredTransactions.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No transactions match your search.</p>
-      ) : (
-        <>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
@@ -218,13 +242,40 @@ export function TransactionList({
             </Button>
           ) : null}
         </div>
-        {selectedIds.size > 0 ? (
-          <span className="text-sm text-muted-foreground">{selectedIds.size} selected</span>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm text-muted-foreground tabular-nums">
+            {filteredTransactions.length} · {formatCurrency(filteredTotal)}
+          </span>
+          <div className="flex items-center gap-1">
+            <select
+              value={sortKey}
+              onChange={(event) => setSortKey(event.target.value as "date" | "name" | "amount")}
+              aria-label="Sort by"
+              className="rounded-md border border-border bg-card px-2 py-1.5 text-sm"
+            >
+              <option value="date">Date</option>
+              <option value="name">Name</option>
+              <option value="amount">Amount</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => setSortDir((dir) => (dir === "asc" ? "desc" : "asc"))}
+              aria-label="Toggle sort direction"
+              className="rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-muted-foreground hover:text-foreground"
+            >
+              {sortDir === "asc" ? "↑" : "↓"}
+            </button>
+          </div>
+        </div>
       </div>
 
+      {filteredTransactions.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No transactions match your search.</p>
+      ) : (
+        <>
+
       <div className="divide-y divide-border rounded-lg border border-border bg-card">
-        {filteredTransactions.map((tx) => {
+        {sortedTransactions.map((tx) => {
           const isSelected = selectedIds.has(tx.id);
 
           return (
@@ -284,7 +335,8 @@ export function TransactionList({
       {selectedIds.size > 0 ? (
         <div className="sticky bottom-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-4 shadow-md">
           <p className="text-sm font-medium">
-            {selectedIds.size} transaction{selectedIds.size === 1 ? "" : "s"} selected
+            {selectedIds.size} transaction{selectedIds.size === 1 ? "" : "s"} selected ·{" "}
+            {formatCurrency(selectedTotal)}
           </p>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={clearSelection}>
