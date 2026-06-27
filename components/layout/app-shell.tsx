@@ -10,6 +10,7 @@ import {
   Landmark,
   LayoutGrid,
   Settings2,
+  ShieldCheck,
 } from "lucide-react";
 import { SidebarEntitiesNav } from "@/components/layout/sidebar-entities-nav";
 import { signOut } from "@/lib/actions/reclassify";
@@ -87,6 +88,12 @@ const SETUP_ITEMS: NavItem[] = [
     label: "Connections",
     icon: Landmark,
     match: (path) => path.startsWith("/settings/connections"),
+  },
+  {
+    href: "/settings/security",
+    label: "Security",
+    icon: ShieldCheck,
+    match: (path) => path.startsWith("/settings/security"),
   },
 ];
 

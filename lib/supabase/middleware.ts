@@ -27,19 +27,37 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const path = request.nextUrl.pathname;
   const isProtectedRoute =
-    request.nextUrl.pathname.startsWith("/review") ||
-    request.nextUrl.pathname.startsWith("/reports") ||
-    request.nextUrl.pathname.startsWith("/settings");
+    path.startsWith("/review") ||
+    path.startsWith("/reports") ||
+    path.startsWith("/settings") ||
+    path.startsWith("/month-close") ||
+    path.startsWith("/tax-close");
 
-  if (!user && isProtectedRoute) {
+  if (!user) {
+    if (isProtectedRoute || path === "/mfa") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/login";
+      url.searchParams.set("redirect", path + request.nextUrl.search);
+      return NextResponse.redirect(url);
+    }
+    return supabaseResponse;
+  }
+
+  // Authenticated. If a verified second factor exists but this session is still single-factor
+  // (aal1), require the MFA challenge before anything else.
+  const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  const needsMfa = aal?.currentLevel === "aal1" && aal?.nextLevel === "aal2";
+
+  if (needsMfa && path !== "/mfa") {
     const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("redirect", request.nextUrl.pathname + request.nextUrl.search);
+    url.pathname = "/mfa";
+    if (isProtectedRoute) url.searchParams.set("redirect", path + request.nextUrl.search);
     return NextResponse.redirect(url);
   }
 
-  if (user && request.nextUrl.pathname === "/login") {
+  if (!needsMfa && (path === "/mfa" || path === "/login")) {
     const url = request.nextUrl.clone();
     url.pathname = "/review";
     return NextResponse.redirect(url);

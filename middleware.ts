@@ -13,5 +13,6 @@ export const config = {
     "/tax-close/:path*",
     "/settings/:path*",
     "/login",
+    "/mfa",
   ],
 };
