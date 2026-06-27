@@ -4,6 +4,7 @@ import {
   isOperatingExpense,
   NON_EXPENSE_CATEGORY_PATHS,
 } from "@/lib/category-expense";
+import { categoryKind } from "@/lib/category-kind";
 
 describe("category-expense", () => {
   it("excludes non-expense category paths", () => {
@@ -33,5 +34,30 @@ describe("category-expense", () => {
       "Mixed / pending allocation",
     ];
     expect([...NON_EXPENSE_CATEGORY_PATHS].sort()).toEqual(seeded.sort());
+  });
+});
+
+describe("category-kind", () => {
+  it("labels money-movement categories as transfer", () => {
+    expect(categoryKind("Credit card payment")).toBe("transfer");
+    expect(categoryKind("→ Keller business expense")).toBe("transfer");
+    expect(categoryKind("Refund / credit")).toBe("transfer");
+  });
+
+  it("labels intercompany as funding", () => {
+    expect(categoryKind("Intercompany — pending")).toBe("funding");
+  });
+
+  it("defaults real and unknown categories (and null) to expense", () => {
+    expect(categoryKind("Software")).toBe("expense");
+    expect(categoryKind("Rent Expense")).toBe("expense");
+    expect(categoryKind(null)).toBe("expense");
+    expect(categoryKind(undefined)).toBe("expense");
+  });
+
+  it("every non-expense path resolves to a non-expense kind", () => {
+    for (const path of NON_EXPENSE_CATEGORY_PATHS) {
+      expect(categoryKind(path)).not.toBe("expense");
+    }
   });
 });

@@ -1,24 +1,14 @@
-/** Categories that move money or stage reclassification — not operating expenses. */
-export const NON_EXPENSE_CATEGORY_PATHS = new Set([
-  "Credit card payment",
-  "Transfer / Zelle (personal)",
-  "Refund / credit",
-  "Intercompany — pending",
-  "Security deposit movement",
-  "→ GBSL business expense",
-  "→ Keller business expense",
-  "→ Austin ACAA (136 Anita)",
-  "→ Pflugerville rental",
-  "→ Personal (mis-posted)",
-  "Mixed / pending allocation",
-]);
+import { categoryKind, NON_EXPENSE_CATEGORY_PATHS } from "./category-kind";
+
+/** Re-exported for backward compatibility; the source of truth is lib/category-kind.ts. */
+export { NON_EXPENSE_CATEGORY_PATHS };
 
 export function isNonExpenseCategory(fullPath: string | null | undefined) {
-  return fullPath != null && NON_EXPENSE_CATEGORY_PATHS.has(fullPath);
+  return fullPath != null && categoryKind(fullPath) !== "expense";
 }
 
 export function countsAsExpense(fullPath: string | null | undefined) {
-  return !isNonExpenseCategory(fullPath);
+  return categoryKind(fullPath) === "expense";
 }
 
 export function isExpenseAmount(amount: number | string) {
