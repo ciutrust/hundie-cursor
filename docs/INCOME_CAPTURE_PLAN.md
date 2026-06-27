@@ -128,12 +128,17 @@ Each phase ships independently. The risky step (4) lands last, after the foundat
   a fully sign-consistent ledger we'd flip them to negative. That's an amount edit (blocked by the safety
   layer by default) — revisit when Alex wants to authorize it. Low priority; numbers are already correct.
 
-- **Credit-card cash-back / rewards (note 2026-06-27):** 42 reward/rebate txns ledger-wide, inconsistently
-  handled — some negative + "Refund / credit" (correct), some negative + uncategorized (e.g. Austin ACAA
-  −$266.12 "CREDIT-CASH BACK REWARD"), and ~15 positive + uncategorized (sign-wrong — a reward stored as a
-  positive, looking like an expense). Cash-back is a **rebate**, not income and not an operating expense.
-  Plan: a **"Credit card rewards / cash back"** category, kind = `transfer` (excluded from both income and
-  expense, like Refund/credit). Classify the negatives there; flip/clean the ~15 positives.
+- **Credit-card cash-back / rewards (note 2026-06-27):** genuine cash-back is a **rebate** — not income and
+  not an operating expense. Identify it by the redemption phrasing ("cash back redemption", "redeem cash
+  back", "cash rebate", "cash back reward", "my deals cash back"), **not** the bare word "rewards" — that
+  over-matches store names like **CHRISTIANBOOKREWARDS**, which is a store and stays a normal expense.
+  Real cash-back is handled three ways today: negative + "Refund / credit" (correct), negative +
+  uncategorized (e.g. Austin ACAA −$266.12 "CREDIT-CASH BACK REWARD"), and a handful positive + uncategorized
+  (sign-wrong). Plan: a **"Credit card rewards / cash back"** category, kind = `transfer` (excluded from both
+  income and expense). Classify the negatives there; flip/clean the genuine sign-wrong positives.
+- **Sign-separation routes, never classifies:** uncategorized inflows go to an "income to classify" lane;
+  the operator still picks the category for each (income / refund / cash-back / transfer / funding / capital).
+  Nothing is auto-labeled income.
 
 ## Open questions
 
