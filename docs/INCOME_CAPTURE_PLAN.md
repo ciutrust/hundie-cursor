@@ -128,6 +128,13 @@ Each phase ships independently. The risky step (4) lands last, after the foundat
   a fully sign-consistent ledger we'd flip them to negative. That's an amount edit (blocked by the safety
   layer by default) — revisit when Alex wants to authorize it. Low priority; numbers are already correct.
 
+- **Credit-card cash-back / rewards (note 2026-06-27):** 42 reward/rebate txns ledger-wide, inconsistently
+  handled — some negative + "Refund / credit" (correct), some negative + uncategorized (e.g. Austin ACAA
+  −$266.12 "CREDIT-CASH BACK REWARD"), and ~15 positive + uncategorized (sign-wrong — a reward stored as a
+  positive, looking like an expense). Cash-back is a **rebate**, not income and not an operating expense.
+  Plan: a **"Credit card rewards / cash back"** category, kind = `transfer` (excluded from both income and
+  expense, like Refund/credit). Classify the negatives there; flip/clean the ~15 positives.
+
 ## Open questions
 
 - Should net-P&L appear on the dashboard now, or stay in Reports? (Expense-first leans Reports for v1.)
