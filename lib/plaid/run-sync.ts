@@ -148,8 +148,8 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
         const account = accountById.get(accountId);
         if (!account) continue;
 
-        // Drop non-expense rows (card payments, $0 noise, checking deposits) — parity with the
-        // CSV parsers, so payments/income never enter the ledger as fake refunds.
+        // Drop card payments + $0 noise (parity with the CSV parsers). Checking/savings deposits are
+        // now KEPT (income capture, Phase 3) and land uncategorized for the operator to classify.
         const eligible = txns.filter((t) => shouldImportPlaidTxn(t, account.account_type));
         if (eligible.length === 0) continue;
 

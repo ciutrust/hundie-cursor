@@ -5,10 +5,10 @@ import { parseAmexCsv } from "../scripts/lib/amex-csv-parser.mjs";
 import { parseCapitalOneCsv } from "../scripts/lib/capitalone-csv-parser.mjs";
 import { parseCitiCsv } from "../scripts/lib/citi-csv-parser.mjs";
 
-// C2: refunds/credits must enter the ledger as NEGATIVE amounts (so they are
-// visible, classifiable as "Refund / credit", and excluded from amount>0 expense
-// totals). Charges stay positive. Card PAYMENTS stay dropped. Checking DEPOSITS
-// stay dropped (income is out of scope — must not be mis-imported as refunds).
+// C2: refunds/credits enter the ledger as NEGATIVE amounts (visible, classifiable, excluded from
+// amount>0 expense totals). Charges stay positive. Card PAYMENTS stay dropped.
+// Income capture (Phase 3): checking/savings DEPOSITS are now captured as NEGATIVE inflows so income
+// can be classified (kind=income). Card payments and $0 noise are still dropped.
 
 function byDesc(txs: Array<{ description: string; amount: number }>, needle: string) {
   return txs.find((t) => t.description.toUpperCase().includes(needle));
@@ -31,15 +31,17 @@ describe("Wells Fargo refunds", () => {
     expect(byDesc(txs, "ZERO AUTH")).toBeUndefined();
   });
 
-  test("checking: positive deposit (income) stays dropped", () => {
+  test("checking: deposit (income) captured as inflow (negative); outflow positive", () => {
     const checkingCsv = [
       "DATE,DESCRIPTION,AMOUNT,CHECK #,STATUS",
       "01/18/2026,RENTAL INCOME DEPOSIT,1200.00,,posted",
       "01/15/2026,OFFICE DEPOT,-40.00,,posted",
+      "01/17/2026,ONLINE PAYMENT THANK YOU,500.00,,posted", // CC payment from checking still dropped
     ].join("\n");
     const txs = parseWellsFargoCsv(checkingCsv, { accountType: "checking" });
-    expect(byDesc(txs, "RENTAL INCOME")).toBeUndefined();
+    expect(byDesc(txs, "RENTAL INCOME")?.amount).toBe(-1200);
     expect(byDesc(txs, "OFFICE DEPOT")?.amount).toBe(40);
+    expect(byDesc(txs, "THANK YOU")).toBeUndefined();
   });
 });
 

@@ -39,13 +39,13 @@ describe("shouldImportPlaidTxn — mirrors the CSV parsers' non-expense drop rul
     expect(shouldImportPlaidTxn({ ...base, amount: 0 }, "credit_card")).toBe(false);
   });
 
-  test("drops checking money-in (deposit / income / transfer-in)", () => {
+  test("keeps checking money-in so income can be captured and classified", () => {
     expect(
       shouldImportPlaidTxn(
         { ...base, amount: -2000, rawCategory: "INCOME", description: "DIRECT DEP PAYROLL" },
         "checking",
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   test("keeps a checking outflow (a real expense)", () => {
