@@ -90,11 +90,7 @@ export default function PrivacyPolicyPage() {
           recordkeeping. You can remove a linked bank in the application at any time, which revokes
           the connection at Plaid and deletes the stored token and account mappings. You can also
           request deletion of your transaction data and settings by contacting us. More detail is in
-          the{" "}
-          <a href="/data-retention" className="text-primary underline-offset-4 hover:underline">
-            Data Retention and Disposal Policy
-          </a>
-          .
+          the trust&apos;s Data Retention and Disposal Policy.
         </p>
       </Section>
 

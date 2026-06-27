@@ -60,9 +60,6 @@ export function LegalShell({
             <Link href="/privacy" className="transition-colors hover:text-foreground">
               Privacy Policy
             </Link>
-            <Link href="/data-retention" className="transition-colors hover:text-foreground">
-              Data Retention &amp; Disposal
-            </Link>
           </nav>
         </div>
       </footer>

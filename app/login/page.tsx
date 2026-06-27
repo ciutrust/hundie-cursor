@@ -12,10 +12,6 @@ export default function LoginPage() {
         <Link href="/privacy" className="transition-colors hover:text-foreground">
           Privacy Policy
         </Link>
-        <span aria-hidden="true">·</span>
-        <Link href="/data-retention" className="transition-colors hover:text-foreground">
-          Data Retention and Disposal Policy
-        </Link>
       </nav>
     </main>
   );
