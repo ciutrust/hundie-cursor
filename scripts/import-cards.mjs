@@ -7,6 +7,7 @@ import { buildTransactionHash } from "./lib/import-hash.mjs";
 import { resolveEntitySlug } from "./lib/entity-resolver.mjs";
 import { rowsToObjects, parseCsv } from "./lib/csv-utils.mjs";
 import { SEED_ACCOUNTS, SEED_ACCOUNT_BY_SLUG } from "./lib/seed-accounts.mjs";
+import { CSV_2025_2026_DIR, CSV_2025_2026_MANIFEST } from "./lib/csv-2025-2026-manifest.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -48,6 +49,7 @@ function parseArgs(argv) {
     slug: null,
     filePath: null,
     verifyOnly: false,
+    csvDir: null,
   };
 
   for (let i = 2; i < argv.length; i++) {
@@ -56,6 +58,7 @@ function parseArgs(argv) {
     else if (arg === "--all") args.all = true;
     else if (arg === "--verify") args.verifyOnly = true;
     else if (arg === "--account") args.slug = argv[++i];
+    else if (arg === "--csv-dir") args.csvDir = argv[++i];
     else if (!arg.startsWith("-")) args.filePath = resolve(arg);
   }
 
@@ -105,8 +108,15 @@ function normalizeAccount(account) {
   };
 }
 
-function resolveSupplementalCsvTexts(known) {
-  if (!known.supplementalPaths?.length) return [];
+function resolveSupplementalCsvTexts(known, csvDir = null, manifestEntry = null) {
+  if (manifestEntry?.supplementalFiles?.length && csvDir) {
+    return manifestEntry.supplementalFiles
+      .map((file) => resolve(csvDir, file))
+      .filter((path) => existsSync(path))
+      .map((path) => readFileSync(path, "utf8"));
+  }
+
+  if (!known?.supplementalPaths?.length) return [];
 
   return known.supplementalPaths
     .map((relativePath) => resolveDefaultPath(relativePath))
@@ -114,12 +124,127 @@ function resolveSupplementalCsvTexts(known) {
     .map((path) => readFileSync(path, "utf8"));
 }
 
-function enrichAccountFromSeed(account, known) {
+function manifestEntryForSlug(slug, csvDir) {
+  if (csvDir !== CSV_2025_2026_DIR) return null;
+  return CSV_2025_2026_MANIFEST.find((entry) => entry.slug === slug) ?? null;
+}
+
+function resolveCsvPath(known, csvDir, manifestEntry) {
+  if (manifestEntry) {
+    return resolve(csvDir, manifestEntry.file);
+  }
+  return resolveDefaultPath(known.defaultPath);
+}
+
+function buildSeedDryRunTargets(args) {
+  const targets = [];
+  for (const account of SEED_ACCOUNTS) {
+    if (args.slug && account.slug !== args.slug) continue;
+    const manifestEntry = args.csvDir ? manifestEntryForSlug(account.slug, args.csvDir) : null;
+    if (args.csvDir && !manifestEntry) continue;
+    const csvPath = args.filePath ?? resolveCsvPath(account, args.csvDir, manifestEntry);
+    if (!existsSync(csvPath)) {
+      console.warn(`Skipping ${account.slug} — file not found: ${csvPath}`);
+      continue;
+    }
+    targets.push({ account, csvPath, known: account, manifestEntry });
+  }
+  return targets;
+}
+
+async function buildDbTargets(supabase, args) {
+  if (args.filePath) {
+    if (!args.slug) {
+      console.error("When importing a single file, pass --account <slug>");
+      process.exit(1);
+    }
+
+    const accounts = await loadAccounts(supabase, args.slug);
+    if (accounts.length !== 1) {
+      console.error(`Account not found: ${args.slug}`);
+      process.exit(1);
+    }
+
+    const known = SEED_ACCOUNT_BY_SLUG.get(args.slug);
+    return [
+      {
+        account: enrichAccountFromSeed(normalizeAccount(accounts[0]), known),
+        csvPath: args.filePath,
+        known,
+        manifestEntry: null,
+      },
+    ];
+  }
+
+  if (args.all || !args.slug) {
+    const accounts = await loadAccounts(supabase, args.slug);
+    const accountBySlug = new Map(accounts.map((account) => [account.slug, normalizeAccount(account)]));
+
+    const entries = args.csvDir === CSV_2025_2026_DIR ? CSV_2025_2026_MANIFEST : KNOWN_ACCOUNTS.map((known) => ({
+      slug: known.slug,
+      known,
+    }));
+
+    const targets = [];
+    for (const entry of entries) {
+      const slug = entry.slug;
+      const known = entry.known ?? SEED_ACCOUNT_BY_SLUG.get(slug);
+      const account = accountBySlug.get(slug);
+      if (!account || !known) {
+        if (!account) console.warn(`Skipping ${slug} — not in database`);
+        continue;
+      }
+
+      const manifestEntry = args.csvDir ? entry : null;
+      const csvPath = resolveCsvPath(known, args.csvDir, manifestEntry);
+      if (!existsSync(csvPath)) {
+        console.warn(`Skipping ${slug} — file not found: ${csvPath}`);
+        continue;
+      }
+
+      targets.push({
+        account: enrichAccountFromSeed(account, known, manifestEntry),
+        csvPath,
+        known,
+        manifestEntry,
+      });
+    }
+    return targets;
+  }
+
+  const accounts = await loadAccounts(supabase, args.slug);
+  const known = KNOWN_ACCOUNTS.find((item) => item.slug === args.slug);
+  if (accounts.length !== 1 || !known) {
+    console.error(`Unknown account slug: ${args.slug}`);
+    process.exit(1);
+  }
+
+  const manifestEntry = args.csvDir ? manifestEntryForSlug(args.slug, args.csvDir) : null;
+  const csvPath = resolveCsvPath(known, args.csvDir, manifestEntry);
+  if (!existsSync(csvPath)) {
+    console.error(`CSV not found: ${csvPath}`);
+    process.exit(1);
+  }
+
+  return [
+    {
+      account: enrichAccountFromSeed(normalizeAccount(accounts[0]), known, manifestEntry),
+      csvPath,
+      known,
+      manifestEntry,
+    },
+  ];
+}
+
+function enrichAccountFromSeed(account, known, manifestEntry = null) {
   if (!known) return account;
+
+  const mergeParentChild =
+    manifestEntry?.supplementalFiles?.length > 0 || known.mergeParentChild === true;
 
   return {
     ...account,
-    mergeParentChild: known.mergeParentChild ?? false,
+    mergeParentChild,
     supplementalPaths: known.supplementalPaths ?? [],
   };
 }
@@ -197,7 +322,9 @@ async function importAccount(supabase, plan, { dryRun = false, storeRaw = true }
 
   console.log(`\n${account.display_name} (${account.slug})`);
   console.log(`  File: ${basename(csvPath)}`);
-  console.log(`  Parsed charges: ${rows.length}`);
+  console.log(`  Parsed rows: ${rows.length}`);
+  const refundCount = rows.filter((row) => Number(row.transaction.amount) < 0).length;
+  if (refundCount > 0) console.log(`  Refunds/credits (negative): ${refundCount}`);
   if (dateMin) console.log(`  Date range: ${dateMin} → ${dateMax}`);
 
   if (dryRun) {
@@ -208,7 +335,7 @@ async function importAccount(supabase, plan, { dryRun = false, storeRaw = true }
     for (const [slug, count] of [...entityCounts.entries()].sort()) {
       console.log(`  Entity ${slug}: ${count}`);
     }
-    return { inserted: 0, skipped: 0, dryRun: true };
+    return { inserted: 0, skipped: 0, dryRun: true, refundCount };
   }
 
   const { data: batch, error: batchError } = await supabase
@@ -339,16 +466,7 @@ async function printVerificationReport(supabase) {
 const args = parseArgs(process.argv);
 
 if (args.dryRun) {
-  const targets = [];
-  for (const account of SEED_ACCOUNTS) {
-    if (args.slug && account.slug !== args.slug) continue;
-    const csvPath = args.filePath ?? resolveDefaultPath(account.defaultPath);
-    if (!existsSync(csvPath)) {
-      console.warn(`Skipping ${account.slug} — file not found: ${csvPath}`);
-      continue;
-    }
-    targets.push({ account, csvPath, known: account });
-  }
+  const targets = buildSeedDryRunTargets(args);
 
   if (targets.length === 0) {
     console.error("No CSV targets found for dry-run");
@@ -357,21 +475,28 @@ if (args.dryRun) {
 
   const entityMap = buildDryRunEntityMap();
   console.log(`Import mode: dry-run (no database)`);
+  if (args.csvDir) console.log(`CSV dir: ${args.csvDir}`);
   console.log(`Targets: ${targets.length}`);
 
   let total = 0;
+  let totalRefunds = 0;
   for (const target of targets) {
     const csvText = readFileSync(target.csvPath, "utf8");
-    const supplementalCsvTexts = resolveSupplementalCsvTexts(target.known);
+    const supplementalCsvTexts = resolveSupplementalCsvTexts(
+      target.known,
+      args.csvDir,
+      target.manifestEntry,
+    );
     const plan = buildImportPlan(target.account, target.csvPath, csvText, entityMap, {
       dryRun: true,
       supplementalCsvTexts,
     });
-    await importAccount(null, plan, { dryRun: true });
+    const result = await importAccount(null, plan, { dryRun: true });
     total += plan.rows.length;
+    totalRefunds += result.refundCount ?? 0;
   }
 
-  console.log(`\nDone. Total charges: ${total}`);
+  console.log(`\nDone. Total rows: ${total} (${totalRefunds} refunds/credits)`);
   process.exit(0);
 }
 
@@ -399,91 +524,38 @@ if (args.verifyOnly) {
 
 const entityMap = await loadEntityMap(supabase);
 
-let targets = [];
-
-if (args.filePath) {
-  if (!args.slug) {
-    console.error("When importing a single file, pass --account <slug>");
-    process.exit(1);
-  }
-
-  const accounts = await loadAccounts(supabase, args.slug);
-  if (accounts.length !== 1) {
-    console.error(`Account not found: ${args.slug}`);
-    process.exit(1);
-  }
-
-  const known = SEED_ACCOUNT_BY_SLUG.get(args.slug);
-  targets = [
-    {
-      account: enrichAccountFromSeed(normalizeAccount(accounts[0]), known),
-      csvPath: args.filePath,
-      known,
-    },
-  ];
-} else if (args.all || !args.slug) {
-  const accounts = await loadAccounts(supabase, args.slug);
-  const accountBySlug = new Map(accounts.map((account) => [account.slug, normalizeAccount(account)]));
-
-  for (const known of KNOWN_ACCOUNTS) {
-    const account = accountBySlug.get(known.slug);
-    if (!account) {
-      console.warn(`Skipping ${known.slug} — not in database`);
-      continue;
-    }
-
-    const csvPath = resolveDefaultPath(known.defaultPath);
-    if (!existsSync(csvPath)) {
-      console.warn(`Skipping ${known.slug} — file not found: ${csvPath}`);
-      continue;
-    }
-
-    targets.push({
-      account: enrichAccountFromSeed(account, known),
-      csvPath,
-      known,
-    });
-  }
-} else {
-  const accounts = await loadAccounts(supabase, args.slug);
-  const known = KNOWN_ACCOUNTS.find((item) => item.slug === args.slug);
-  if (accounts.length !== 1 || !known) {
-    console.error(`Unknown account slug: ${args.slug}`);
-    process.exit(1);
-  }
-
-  const csvPath = resolveDefaultPath(known.defaultPath);
-  if (!existsSync(csvPath)) {
-    console.error(`CSV not found: ${csvPath}`);
-    process.exit(1);
-  }
-
-  targets.push({
-    account: enrichAccountFromSeed(normalizeAccount(accounts[0]), known),
-    csvPath,
-    known,
-  });
-}
+const targets = await buildDbTargets(supabase, args);
 
 if (targets.length === 0) {
-  console.error("No import targets. Use --all or --account <slug> [--file path.csv]");
+  console.error("No import targets. Use --all or --account <slug> [--file path.csv] [--csv-dir dir]");
   process.exit(1);
 }
 
 console.log(`Import mode: ${args.dryRun ? "dry-run" : "write"}`);
+if (args.csvDir) console.log(`CSV dir: ${args.csvDir}`);
 console.log(`Targets: ${targets.length}`);
 
 const results = [];
 
 for (const target of targets) {
   const csvText = readFileSync(target.csvPath, "utf8");
-  const supplementalCsvTexts = resolveSupplementalCsvTexts(target.known);
+  const supplementalCsvTexts = resolveSupplementalCsvTexts(
+    target.known,
+    args.csvDir,
+    target.manifestEntry,
+  );
   const plan = buildImportPlan(target.account, target.csvPath, csvText, entityMap, {
     dryRun: false,
     supplementalCsvTexts,
   });
   const result = await importAccount(supabase, plan, { dryRun: args.dryRun });
-  results.push({ slug: target.account.slug, ...result, count: plan.rows.length, dateMin: plan.dateMin, dateMax: plan.dateMax });
+  results.push({
+    slug: target.account.slug,
+    ...result,
+    count: plan.rows.length,
+    dateMin: plan.dateMin,
+    dateMax: plan.dateMax,
+  });
 }
 
 if (!args.dryRun) {
