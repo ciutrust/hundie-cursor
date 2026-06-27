@@ -79,6 +79,25 @@ node scripts/import-cards.mjs --account wf-keller-services-cc \
 
 Keller CC: use **child** CSV; parent file is auto-merged (no duplicate charges).
 
+### Dedupe (re-import safe)
+
+Imports dedupe on **account + date + amount + normalized description** (not CSV row index). Re-running the same file or overlapping months is safe — existing rows are skipped.
+
+```bash
+npm run import:cards:csv-2025-2026:dry-run   # preview
+npm run import:cards:csv-2025-2026           # apply
+```
+
+If legacy duplicates are already in the ledger (e.g. same charge imported twice with different `import_hash`), run the one-time cleanup:
+
+```bash
+npm run cleanup:ledger-dupes:dry-run              # all entities
+npm run cleanup:ledger-dupes:dry-run -- --entity keller
+npm run cleanup:ledger-dupes -- --entity keller   # delete newer duplicate; keep oldest/categorized row
+```
+
+See [docs/CHANGELOG.md](docs/CHANGELOG.md) — Keller cleanup (130 rows, Jun 2026) applied in prod.
+
 ## Docs for agents
 
 | Doc | Purpose |

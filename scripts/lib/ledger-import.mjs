@@ -1,7 +1,11 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, basename } from "node:path";
 import { parseCardCsv } from "./card-parsers.mjs";
-import { buildTransactionHash } from "./import-hash.mjs";
+import {
+  buildTransactionDedupeKey,
+  buildTransactionHash,
+  dedupeImportPlanRows,
+} from "./import-hash.mjs";
 import { resolveEntitySlug } from "./entity-resolver.mjs";
 import { rowsToObjects, parseCsv } from "./csv-utils.mjs";
 
@@ -23,6 +27,71 @@ export function inDateRange(isoDate, from, to) {
   if (from && isoDate < from) return false;
   if (to && isoDate >= to) return false;
   return true;
+}
+
+async function loadExistingBusinessKeys(supabase, accountId, dateMin, dateMax) {
+  const keys = new Set();
+  if (!dateMin || !dateMax) return keys;
+
+  const pageSize = 1000;
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("transaction_date, amount, description")
+      .eq("account_id", accountId)
+      .gte("transaction_date", dateMin)
+      .lte("transaction_date", dateMax)
+      .range(offset, offset + pageSize - 1);
+
+    if (error) {
+      throw new Error(`Failed to load existing transactions: ${error.message}`);
+    }
+
+    if (!data?.length) break;
+
+    for (const tx of data) {
+      keys.add(
+        buildTransactionDedupeKey({
+          accountId,
+          transactionDate: tx.transaction_date,
+          amount: tx.amount,
+          description: tx.description,
+        }),
+      );
+    }
+
+    if (data.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  return keys;
+}
+
+/** Skip rows that already exist under a legacy import_hash or a prior batch. */
+export async function filterRowsAgainstExisting(supabase, accountId, rows, dateMin, dateMax) {
+  const existingKeys = await loadExistingBusinessKeys(supabase, accountId, dateMin, dateMax);
+  const seen = new Set(existingKeys);
+  const filtered = [];
+  let skipped = 0;
+
+  for (const row of rows) {
+    const key = buildTransactionDedupeKey({
+      accountId,
+      transactionDate: row.transaction.transaction_date,
+      amount: row.transaction.amount,
+      description: row.transaction.description,
+    });
+    if (seen.has(key)) {
+      skipped++;
+      continue;
+    }
+    seen.add(key);
+    filtered.push(row);
+  }
+
+  return { rows: filtered, skipped };
 }
 
 export function buildImportPlan(
@@ -76,7 +145,6 @@ export function buildImportPlan(
       amount: tx.amount,
       description: tx.description,
       issuerReference: tx.issuerReference,
-      sourceRowIndex: tx.sourceRowIndex,
     });
 
     rows.push({
@@ -97,11 +165,13 @@ export function buildImportPlan(
     });
   }
 
-  const dates = rows.map((row) => row.transaction.transaction_date).sort();
+  const { rows: dedupedRows, skipped: inFileDupes } = dedupeImportPlanRows(account.id, rows);
+  const dates = dedupedRows.map((row) => row.transaction.transaction_date).sort();
   return {
     account,
     csvPath,
-    rows,
+    rows: dedupedRows,
+    inFileDupes,
     dateMin: dates[0] ?? null,
     dateMax: dates.at(-1) ?? null,
     rawRows: rowsToObjects(parseCsv(csvText)),
@@ -152,7 +222,6 @@ export function buildImportPlanFromTransactions(
       amount: tx.amount,
       description: tx.description,
       issuerReference: tx.issuerReference,
-      sourceRowIndex: tx.sourceRowIndex,
     });
 
     rows.push({
@@ -183,11 +252,13 @@ export function buildImportPlanFromTransactions(
     });
   }
 
-  const dates = rows.map((row) => row.transaction.transaction_date).sort();
+  const { rows: dedupedRows, skipped: inFileDupes } = dedupeImportPlanRows(account.id, rows);
+  const dates = dedupedRows.map((row) => row.transaction.transaction_date).sort();
   return {
     account,
     csvPath: sourceLabel,
-    rows,
+    rows: dedupedRows,
+    inFileDupes,
     dateMin: dates[0] ?? null,
     dateMax: dates.at(-1) ?? null,
     rawRows: [],
@@ -199,11 +270,12 @@ export async function importAccountPlan(
   plan,
   { dryRun = false, storeRaw = true, sourceType = "card_csv" } = {},
 ) {
-  const { account, csvPath, rows, dateMin, dateMax, rawRows } = plan;
+  const { account, csvPath, rows, dateMin, dateMax, rawRows, inFileDupes = 0 } = plan;
 
   console.log(`\n${account.display_name} (${account.slug})`);
   console.log(`  File: ${basename(csvPath)}`);
   console.log(`  Parsed charges: ${rows.length}`);
+  if (inFileDupes > 0) console.log(`  In-file dupes skipped: ${inFileDupes}`);
   if (dateMin) console.log(`  Date range: ${dateMin} → ${dateMax}`);
 
   if (dryRun) {
@@ -238,7 +310,18 @@ export async function importAccountPlan(
   let insertedClassifications = 0;
   let inserted = 0;
 
-  for (const batchRows of chunk(rows, 200)) {
+  const { rows: rowsToImport, skipped: existingDupes } = await filterRowsAgainstExisting(
+    supabase,
+    account.id,
+    rows,
+    dateMin,
+    dateMax,
+  );
+  if (existingDupes > 0) {
+    console.log(`  Existing ledger dupes skipped: ${existingDupes}`);
+  }
+
+  for (const batchRows of chunk(rowsToImport, 200)) {
     const txPayload = batchRows.map((row) => ({
       ...row.transaction,
       import_batch_id: batch.id,
@@ -302,7 +385,7 @@ export async function importAccountPlan(
     }
   }
 
-  const skipped = rows.length - inserted;
+  const skipped = existingDupes + (rowsToImport.length - inserted);
 
   // A re-sync with nothing new leaves an empty batch behind — drop it so they don't accumulate.
   if (inserted === 0) {

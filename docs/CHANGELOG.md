@@ -4,6 +4,14 @@ All notable changes to the Hundie project. Format based on [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **`cleanup:ledger-dupes`** — one-time script to remove duplicate ledger rows (same account, date, amount, description). Keeps oldest or categorized row; `--entity` / `--account` filters. Dry-run by default; `--apply` deletes.
+
+### Fixed
+
+- **Import dedupe** — `import_hash` no longer includes CSV row index (caused Keller WF accounts to double-count ~130 charges when the same export was imported twice). Imports now also skip rows that match existing ledger rows on business key, even under legacy hashes. In-file dedupe before insert.
+
 ### Planned
 
 - Git history scrub for `.qb-import-batches.json` (removed from tracking in 0.2.0; still in history — needs `git filter-repo`/BFG + force-push)

@@ -3,7 +3,8 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseCardCsv, KNOWN_ACCOUNTS } from "./lib/card-parsers.mjs";
-import { buildTransactionHash } from "./lib/import-hash.mjs";
+import { buildTransactionHash, dedupeImportPlanRows } from "./lib/import-hash.mjs";
+import { filterRowsAgainstExisting } from "./lib/ledger-import.mjs";
 import { resolveEntitySlug } from "./lib/entity-resolver.mjs";
 import { rowsToObjects, parseCsv } from "./lib/csv-utils.mjs";
 import { SEED_ACCOUNTS, SEED_ACCOUNT_BY_SLUG } from "./lib/seed-accounts.mjs";
@@ -285,7 +286,6 @@ function buildImportPlan(account, csvPath, csvText, entityMap, { dryRun = false,
       amount: tx.amount,
       description: tx.description,
       issuerReference: tx.issuerReference,
-      sourceRowIndex: tx.sourceRowIndex,
     });
 
     rows.push({
@@ -306,11 +306,13 @@ function buildImportPlan(account, csvPath, csvText, entityMap, { dryRun = false,
     });
   }
 
-  const dates = rows.map((row) => row.transaction.transaction_date).sort();
+  const { rows: dedupedRows, skipped: inFileDupes } = dedupeImportPlanRows(account.id, rows);
+  const dates = dedupedRows.map((row) => row.transaction.transaction_date).sort();
   return {
     account,
     csvPath,
-    rows,
+    rows: dedupedRows,
+    inFileDupes,
     dateMin: dates[0] ?? null,
     dateMax: dates.at(-1) ?? null,
     rawRows: rowsToObjects(parseCsv(csvText)),
@@ -318,11 +320,12 @@ function buildImportPlan(account, csvPath, csvText, entityMap, { dryRun = false,
 }
 
 async function importAccount(supabase, plan, { dryRun = false, storeRaw = true } = {}) {
-  const { account, csvPath, rows, dateMin, dateMax, rawRows } = plan;
+  const { account, csvPath, rows, dateMin, dateMax, rawRows, inFileDupes = 0 } = plan;
 
   console.log(`\n${account.display_name} (${account.slug})`);
   console.log(`  File: ${basename(csvPath)}`);
   console.log(`  Parsed rows: ${rows.length}`);
+  if (inFileDupes > 0) console.log(`  In-file dupes skipped: ${inFileDupes}`);
   const refundCount = rows.filter((row) => Number(row.transaction.amount) < 0).length;
   if (refundCount > 0) console.log(`  Refunds/credits (negative): ${refundCount}`);
   if (dateMin) console.log(`  Date range: ${dateMin} → ${dateMax}`);
@@ -359,7 +362,18 @@ async function importAccount(supabase, plan, { dryRun = false, storeRaw = true }
     .select("*", { count: "exact", head: true })
     .eq("account_id", account.id);
 
-  for (const batchRows of chunk(rows, 200)) {
+  const { rows: rowsToImport, skipped: existingDupes } = await filterRowsAgainstExisting(
+    supabase,
+    account.id,
+    rows,
+    dateMin,
+    dateMax,
+  );
+  if (existingDupes > 0) {
+    console.log(`  Existing ledger dupes skipped: ${existingDupes}`);
+  }
+
+  for (const batchRows of chunk(rowsToImport, 200)) {
     const txPayload = batchRows.map((row) => ({
       ...row.transaction,
       import_batch_id: batch.id,
@@ -402,7 +416,7 @@ async function importAccount(supabase, plan, { dryRun = false, storeRaw = true }
     .eq("account_id", account.id);
 
   const inserted = (afterCount ?? 0) - (beforeCount ?? 0);
-  const skipped = rows.length - inserted;
+  const skipped = existingDupes + rowsToImport.length - inserted;
 
   if (storeRaw && rawRows.length > 0) {
     let rowNumber = 0;

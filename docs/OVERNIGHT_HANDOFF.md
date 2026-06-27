@@ -36,7 +36,8 @@ npm install && npm run dev
 ## Keller import notes
 
 - **WF Keller CC:** Import **child** CSV; parent CSV auto-merged for parent-only rows (late fees)
-- **Re-import:** Same month twice → skipped via `import_hash` dedupe
+- **Re-import:** Safe — dedupe on account + date + amount + normalized description (not CSV row index)
+- **Legacy dupes:** `npm run cleanup:ledger-dupes:dry-run -- --entity keller` then `--apply` if needed (130 Keller dupes cleaned Jun 2026)
 
 ---
 

@@ -34,7 +34,9 @@
     "import:cards:csv-2025-2026": "node scripts/import-cards.mjs --all --csv-dir '/Users/ac/Downloads/CSV 2025-2026'",
     "import:cards:csv-2025-2026:dry-run": "node scripts/import-cards.mjs --dry-run --all --csv-dir '/Users/ac/Downloads/CSV 2025-2026'",
     "import:classify-refunds": "node scripts/classify-refund-imports.mjs --apply",
-    "import:classify-refunds:dry-run": "node scripts/classify-refund-imports.mjs --dry-run"
+    "import:classify-refunds:dry-run": "node scripts/classify-refund-imports.mjs --dry-run",
+    "cleanup:ledger-dupes": "node scripts/cleanup-ledger-duplicates.mjs --apply",
+    "cleanup:ledger-dupes:dry-run": "node scripts/cleanup-ledger-duplicates.mjs --dry-run"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.17",

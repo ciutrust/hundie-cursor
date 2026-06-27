@@ -57,7 +57,7 @@ From [REVIEW-2026-06-26.md](./REVIEW-2026-06-26.md):
 - [x] RLS lockdown — `20260629140000`; committed and applied remote
 - [x] Auth guards: middleware `/reports` + `/settings`, server-action `getUser()`, category↔entity validation
 - [x] CSV export reconcile columns (`counts_as_expense`, `expense_amount`) + formula injection hardening
-- [x] `import_hash` disambiguation via issuer ref + source row index
+- [x] **Import dedupe fix** — stable `import_hash` (no row index) + business-key skip on re-import; Keller one-time cleanup (130 dupes removed Jun 2026)
 - [x] Vitest + core unit tests
 - [x] Suggestion chip count shows real match count, not blended score
 - [x] Review dashboard entity totals exclude backlog overlap (C8)

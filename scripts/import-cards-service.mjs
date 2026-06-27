@@ -11,7 +11,8 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { parseCardCsv, KNOWN_ACCOUNTS } from "./lib/card-parsers.mjs";
-import { buildTransactionHash } from "./lib/import-hash.mjs";
+import { buildTransactionHash, dedupeImportPlanRows } from "./lib/import-hash.mjs";
+import { filterRowsAgainstExisting } from "./lib/ledger-import.mjs";
 import { resolveEntitySlug } from "./lib/entity-resolver.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -100,7 +101,6 @@ for (const known of KNOWN_ACCOUNTS) {
       amount: tx.amount,
       description: tx.description,
       issuerReference: tx.issuerReference,
-      sourceRowIndex: tx.sourceRowIndex,
     });
     return {
       transaction: {
@@ -118,8 +118,18 @@ for (const known of KNOWN_ACCOUNTS) {
     };
   });
 
+  const { rows: dedupedRows } = dedupeImportPlanRows(account.id, rows);
+  const dates = dedupedRows.map((row) => row.transaction.transaction_date).sort();
+  const { rows: rowsToImport } = await filterRowsAgainstExisting(
+    supabase,
+    account.id,
+    dedupedRows,
+    dates[0] ?? null,
+    dates.at(-1) ?? null,
+  );
+
   let inserted = 0;
-  for (const batch of chunk(rows, 200)) {
+  for (const batch of chunk(rowsToImport, 200)) {
     const { data: upserted, error: txError } = await supabase
       .from("transactions")
       .upsert(
@@ -149,8 +159,7 @@ for (const known of KNOWN_ACCOUNTS) {
   }
 
   totalInserted += inserted;
-  const dates = parsed.map((t) => t.transactionDate).sort();
-  console.log(`${known.slug}: ${inserted} inserted (${parsed.length} parsed) ${dates[0] ?? "—"} → ${dates.at(-1) ?? "—"}`);
+  console.log(`${known.slug}: ${inserted} inserted (${rowsToImport.length} new of ${parsed.length} parsed) ${dates[0] ?? "—"} → ${dates.at(-1) ?? "—"}`);
 }
 
 console.log(`\nTotal inserted this run: ${totalInserted}`);
