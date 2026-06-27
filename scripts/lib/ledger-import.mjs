@@ -194,7 +194,11 @@ export function buildImportPlanFromTransactions(
   };
 }
 
-export async function importAccountPlan(supabase, plan, { dryRun = false, storeRaw = true } = {}) {
+export async function importAccountPlan(
+  supabase,
+  plan,
+  { dryRun = false, storeRaw = true, sourceType = "card_csv" } = {},
+) {
   const { account, csvPath, rows, dateMin, dateMax, rawRows } = plan;
 
   console.log(`\n${account.display_name} (${account.slug})`);
@@ -218,7 +222,7 @@ export async function importAccountPlan(supabase, plan, { dryRun = false, storeR
   const { data: batch, error: batchError } = await supabase
     .from("import_batches")
     .insert({
-      source_type: "card_csv",
+      source_type: sourceType,
       source_file: basename(csvPath),
       account_id: account.id,
       entity_id: account.default_entity_id,

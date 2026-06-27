@@ -7,6 +7,7 @@ import {
   CalendarCheck,
   CheckCircle2,
   FileSpreadsheet,
+  Landmark,
   LayoutGrid,
   Settings2,
 } from "lucide-react";
@@ -79,7 +80,13 @@ const SETUP_ITEMS: NavItem[] = [
     href: "/settings/accounts",
     label: "Accounts",
     icon: Settings2,
-    match: (path) => path.startsWith("/settings"),
+    match: (path) => path.startsWith("/settings/accounts"),
+  },
+  {
+    href: "/settings/connections",
+    label: "Connections",
+    icon: Landmark,
+    match: (path) => path.startsWith("/settings/connections"),
   },
 ];
 
