@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 /**
  * AES-256-GCM "secret box" for encrypting Plaid access tokens at rest.
@@ -27,6 +27,14 @@ export function encryptSecret(plaintext: string): string {
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([iv, tag, ciphertext]).toString("base64");
+}
+
+/**
+ * A non-secret fingerprint of the current key (sha256, truncated). Record it: if it ever changes,
+ * the stored tokens can no longer be decrypted and the banks must be removed and re-linked.
+ */
+export function keyFingerprint(): string {
+  return createHash("sha256").update(getKey()).digest("hex").slice(0, 12);
 }
 
 export function decryptSecret(payload: string): string {

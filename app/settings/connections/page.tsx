@@ -1,6 +1,8 @@
 import { Landmark } from "lucide-react";
+import { keyFingerprint } from "@/lib/crypto/secret-box";
 import { getConnections, getMappableAccounts, type ConnectionView } from "@/lib/queries/connections";
 import { ConnectBank } from "./connect-bank";
+import { ConnectionActions } from "./connection-actions";
 import { SyncNowButton } from "./sync-now-button";
 
 const STATUS_STYLES: Record<string, string> = {
@@ -18,6 +20,13 @@ export default async function ConnectionsPage() {
     configError = true;
   }
   const accounts = await getMappableAccounts();
+
+  let encFingerprint: string | null = null;
+  try {
+    encFingerprint = keyFingerprint();
+  } catch {
+    encFingerprint = null;
+  }
 
   return (
     <div className="space-y-8">
@@ -54,9 +63,9 @@ export default async function ConnectionsPage() {
         <div className="space-y-4">
           {connections.map((c) => (
             <div key={c.id} className="rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="font-semibold">{c.institution ?? "Bank"}</h2>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   {c.lastSyncedAt ? (
                     <span className="text-xs text-muted-foreground">
                       Synced {new Date(c.lastSyncedAt).toLocaleString()}
@@ -71,8 +80,15 @@ export default async function ConnectionsPage() {
                   >
                     {c.status.replace("_", " ")}
                   </span>
+                  <ConnectionActions connectionId={c.id} status={c.status} />
                 </div>
               </div>
+              {c.status === "needs_reauth" ? (
+                <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                  Your bank needs you to re-authenticate. Click <strong>Reconnect</strong> — your
+                  mappings and history are kept.
+                </p>
+              ) : null}
               <div className="mt-3 divide-y divide-border border-t border-border">
                 {c.links.length === 0 ? (
                   <p className="pt-3 text-sm text-muted-foreground">
@@ -99,6 +115,14 @@ export default async function ConnectionsPage() {
           ))}
         </div>
       )}
+
+      {encFingerprint ? (
+        <p className="text-xs text-muted-foreground">
+          Encryption-key fingerprint <code className="font-mono">{encFingerprint}</code> — record
+          this. If it ever changes, saved tokens can&apos;t be decrypted and banks must be removed
+          and re-linked.
+        </p>
+      ) : null}
     </div>
   );
 }

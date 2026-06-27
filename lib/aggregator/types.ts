@@ -54,6 +54,10 @@ export interface Aggregator {
   isConfigured(): boolean;
   /** Token/identifier used to open the vendor's link widget in the browser. */
   linkToken(userId: string): Promise<AggregatorResult<string>>;
+  /** Link token to re-authenticate an EXISTING connection (update mode) — keeps the access token. */
+  linkTokenForUpdate(accessToken: string): Promise<AggregatorResult<string>>;
+  /** Revoke the access token at the vendor (called on disconnect). */
+  removeItem(accessToken: string): Promise<AggregatorResult<void>>;
   /** Exchange the public token from the widget for an access token + item id. */
   exchange(
     publicToken: string,

@@ -95,7 +95,21 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
     };
 
     try {
-      const token = decryptSecret(conn.access_token_cipher);
+      let token: string;
+      try {
+        token = decryptSecret(conn.access_token_cipher);
+      } catch {
+        // GCM fails loudly on a wrong/changed key — never silent. Guide the operator to re-link.
+        await admin
+          .from("bank_connections")
+          .update({ status: "needs_reauth", updated_at: new Date().toISOString() })
+          .eq("id", conn.id);
+        result.status = "needs_reauth";
+        result.error =
+          "Could not decrypt the saved token (encryption key may have changed) — remove and re-link this bank.";
+        summary.connections.push(result);
+        continue;
+      }
       const synced = await aggregator.syncTransactions(token, conn.sync_cursor);
 
       if (!synced.ok) {

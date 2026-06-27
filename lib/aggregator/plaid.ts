@@ -87,6 +87,35 @@ export class PlaidAggregator implements Aggregator {
     }
   }
 
+  async linkTokenForUpdate(accessToken: string): Promise<AggregatorResult<string>> {
+    const plaid = client();
+    if (!plaid) return NOT_CONFIGURED;
+    try {
+      // Update mode: pass the existing access_token and OMIT products — re-auths the same item.
+      const res = await plaid.linkTokenCreate({
+        user: { client_user_id: "hundie-operator" },
+        client_name: "Hundie",
+        country_codes: [CountryCode.Us],
+        language: "en",
+        access_token: accessToken,
+      });
+      return { ok: true, data: res.data.link_token };
+    } catch (e) {
+      return { ok: false, error: errMsg(e) };
+    }
+  }
+
+  async removeItem(accessToken: string): Promise<AggregatorResult<void>> {
+    const plaid = client();
+    if (!plaid) return NOT_CONFIGURED;
+    try {
+      await plaid.itemRemove({ access_token: accessToken });
+      return { ok: true, data: undefined };
+    } catch (e) {
+      return { ok: false, error: errMsg(e) };
+    }
+  }
+
   async exchange(
     publicToken: string,
   ): Promise<AggregatorResult<{ accessToken: string; itemId: string }>> {
