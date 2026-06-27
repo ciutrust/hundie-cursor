@@ -34,6 +34,31 @@ export async function POST(request: Request) {
   if (valid.length === 0) return NextResponse.json({ linked: 0 });
 
   const admin = createServiceRoleClient();
+
+  // Defense-in-depth: confirm the connection exists and each target is an active seeded account,
+  // so a bad/stale payload can't link Plaid accounts to the wrong (or inactive) Hundie account.
+  const { data: conn } = await admin
+    .from("bank_connections")
+    .select("id")
+    .eq("id", body.connectionId)
+    .single();
+  if (!conn) return NextResponse.json({ error: "Unknown connection" }, { status: 400 });
+
+  const accountIds = [...new Set(valid.map((l) => l.accountId))];
+  const { data: accts } = await admin
+    .from("accounts")
+    .select("id")
+    .eq("is_active", true)
+    .in("id", accountIds);
+  const activeIds = new Set((accts ?? []).map((a) => a.id));
+  const unknown = accountIds.filter((id) => !activeIds.has(id));
+  if (unknown.length > 0) {
+    return NextResponse.json(
+      { error: "One or more target accounts are not active accounts" },
+      { status: 400 },
+    );
+  }
+
   const rows = valid.map((l) => ({
     connection_id: body.connectionId,
     account_id: l.accountId,

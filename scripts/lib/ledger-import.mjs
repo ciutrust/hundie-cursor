@@ -235,12 +235,8 @@ export async function importAccountPlan(
     throw new Error(`Failed to create import batch: ${batchError?.message}`);
   }
 
-  const { count: beforeCount } = await supabase
-    .from("transactions")
-    .select("*", { count: "exact", head: true })
-    .eq("account_id", account.id);
-
   let insertedClassifications = 0;
+  let inserted = 0;
 
   for (const batchRows of chunk(rows, 200)) {
     const txPayload = batchRows.map((row) => ({
@@ -248,13 +244,17 @@ export async function importAccountPlan(
       import_batch_id: batch.id,
     }));
 
-    const { error: txError } = await supabase
+    // ignoreDuplicates makes .select() return ONLY the newly-inserted rows — an exact, race-free
+    // count, unlike a before/after COUNT(*) diff.
+    const { data: newRows, error: txError } = await supabase
       .from("transactions")
-      .upsert(txPayload, { onConflict: "account_id,import_hash", ignoreDuplicates: true });
+      .upsert(txPayload, { onConflict: "account_id,import_hash", ignoreDuplicates: true })
+      .select("id");
 
     if (txError) {
       throw new Error(`Transaction upsert failed: ${txError.message}`);
     }
+    inserted += (newRows ?? []).length;
 
     // Resolve transaction ids for EVERY row in the batch (newly-inserted AND already-existing), so a
     // prior partial run that inserted a transaction but not its classification self-heals here.
@@ -302,15 +302,14 @@ export async function importAccountPlan(
     }
   }
 
-  const { count: afterCount } = await supabase
-    .from("transactions")
-    .select("*", { count: "exact", head: true })
-    .eq("account_id", account.id);
-
-  const inserted = (afterCount ?? 0) - (beforeCount ?? 0);
   const skipped = rows.length - inserted;
 
-  if (storeRaw && rawRows.length > 0) {
+  // A re-sync with nothing new leaves an empty batch behind — drop it so they don't accumulate.
+  if (inserted === 0) {
+    await supabase.from("import_batches").delete().eq("id", batch.id);
+  }
+
+  if (inserted > 0 && storeRaw && rawRows.length > 0) {
     let rowNumber = 0;
     for (const rawBatch of chunk(rawRows, 200)) {
       const payload = rawBatch.map((raw) => {
