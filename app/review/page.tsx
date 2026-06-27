@@ -3,7 +3,7 @@ import Link from "next/link";
 import { DormantEntitiesCard } from "@/components/review/dormant-entities-card";
 import { PeriodPicker } from "@/components/review/period-picker";
 import { ReviewKpiStrip } from "@/components/review/review-kpi-strip";
-import { getDormantEntities, getReviewDashboardStats } from "@/lib/queries/review";
+import { getCategorizationProgress, getDormantEntities, getReviewDashboardStats } from "@/lib/queries/review";
 import { activeMonthPeriod, parsePeriodParams } from "@/lib/period";
 import { formatCurrency } from "@/lib/utils";
 
@@ -15,13 +15,16 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
   const params = await searchParams;
   const period = parsePeriodParams(params, activeMonthPeriod());
 
-  const [stats, dormantEntities] = await Promise.all([
+  const [stats, dormantEntities, progress] = await Promise.all([
     getReviewDashboardStats(period),
     getDormantEntities(),
+    getCategorizationProgress(),
   ]);
 
   const summaries = stats.summaries;
   const entities = summaries.filter((s) => s.slug !== "unclassified");
+  const progressPct = progress.total > 0 ? Math.round((100 * progress.categorized) / progress.total) : 0;
+  const aiRatePct = progress.aiAcceptRate != null ? Math.round(progress.aiAcceptRate * 100) : null;
 
   return (
     <div className="space-y-8">
@@ -49,6 +52,50 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
       </div>
 
       <ReviewKpiStrip stats={stats} />
+
+      <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Categorization progress</h2>
+            <p className="text-sm text-muted-foreground">All transactions, all time</p>
+          </div>
+          <Link href="/reports/ai-suggestions" className="text-sm font-medium text-primary hover:underline">
+            AI suggestion report →
+          </Link>
+        </div>
+
+        <div className="mt-4">
+          <div className="flex items-end justify-between gap-3">
+            <p className="text-2xl font-semibold tabular-nums">
+              {progress.categorized.toLocaleString()}{" "}
+              <span className="text-base font-normal text-muted-foreground">
+                / {progress.total.toLocaleString()} categorized
+              </span>
+            </p>
+            <p className="text-2xl font-semibold tabular-nums">{progressPct}%</p>
+          </div>
+          <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progressPct}%` }} />
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border border-border bg-muted/30 p-3">
+            <p className="text-xs text-muted-foreground">Accepted from AI</p>
+            <p className="text-xl font-semibold tabular-nums text-violet-600 dark:text-violet-400">
+              {progress.aiAccepted.toLocaleString()}
+            </p>
+          </div>
+          <div className="rounded-lg border border-border bg-muted/30 p-3">
+            <p className="text-xs text-muted-foreground">AI accept rate</p>
+            <p className="text-xl font-semibold tabular-nums">{aiRatePct != null ? `${aiRatePct}%` : "—"}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-muted/30 p-3">
+            <p className="text-xs text-muted-foreground">From the engine</p>
+            <p className="text-xl font-semibold tabular-nums">{progress.deterministicAccepted.toLocaleString()}</p>
+          </div>
+        </div>
+      </section>
 
       <section className="space-y-4">
         <div>

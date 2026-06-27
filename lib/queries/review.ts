@@ -183,6 +183,50 @@ export async function getClassifiableEntities() {
   return data ?? [];
 }
 
+export type CategorizationProgress = {
+  total: number;
+  categorized: number;
+  aiAccepted: number;
+  aiAcceptRate: number | null;
+  deterministicAccepted: number;
+};
+
+/** Cumulative, all-time categorization progress + how much came from accepting suggestions. */
+export async function getCategorizationProgress(): Promise<CategorizationProgress> {
+  const supabase = await createClient();
+
+  const [{ count: total }, { count: categorized }, { data: events }] = await Promise.all([
+    supabase.from("classifications").select("id", { count: "exact", head: true }),
+    supabase
+      .from("classifications")
+      .select("id", { count: "exact", head: true })
+      .not("category_id", "is", null),
+    supabase.from("suggestion_events").select("event_type, suggestion_source"),
+  ]);
+
+  const rows = (events ?? []) as Array<{ event_type: string | null; suggestion_source: string | null }>;
+  const DETERMINISTIC = new Set(["qb_training", "confirmed_history", "blended", "amount_match"]);
+  let aiAccepted = 0;
+  let aiRejected = 0;
+  let deterministicAccepted = 0;
+  for (const event of rows) {
+    if (event.suggestion_source === "ai_llm") {
+      if (event.event_type === "accept") aiAccepted += 1;
+      else if (event.event_type === "reject") aiRejected += 1;
+    } else if (event.event_type === "accept" && DETERMINISTIC.has(event.suggestion_source ?? "")) {
+      deterministicAccepted += 1;
+    }
+  }
+
+  return {
+    total: total ?? 0,
+    categorized: categorized ?? 0,
+    aiAccepted,
+    aiAcceptRate: aiAccepted + aiRejected > 0 ? aiAccepted / (aiAccepted + aiRejected) : null,
+    deterministicAccepted,
+  };
+}
+
 export async function getEntitySummaries(period: PeriodRange): Promise<EntitySummary[]> {
   const supabase = await createClient();
   const { start, end, compareStart, compareEnd } = period;

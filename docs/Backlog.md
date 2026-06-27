@@ -129,10 +129,12 @@ is classifying expenses first), but capture the shape now.
 capital contribution / owner funding flow — kept OUT of the P&L. Surface in a funding view, not as income.
 
 **Design notes / open questions:**
-- **Sign convention:** in this ledger positive = outflow (charge), negative = inflow (deposit). Income is
-  the inflow (negative) side. The 2026-06-27 audit found almost no negative volume (Personal −$1.5k total),
-  so **first confirm the deposit-bearing accounts (checking, brokerage) are actually synced** — income may
-  not be in the data yet.
+- **Income was dropped at import (CONFIRMED, 2026-06-27 trace).** Positive = outflow (charge); income is the
+  inflow side. Every CSV parser skips payment rows, and for **checking/savings it drops ALL money-in**
+  (`wf-csv-parser.mjs` `if (rawAmount >= 0) continue`); the Plaid path mirrors it (`shouldImportPlaidTxn` /
+  `ledger-filter.ts` drop deposits for depository). **Re-importing will NOT recover income** — the rows were
+  never stored. To capture income: decide a policy (which credits/deposits to keep), change the parser +
+  Plaid filters, then re-import historical CSVs / re-sync Plaid. This is the first task for the income view.
 - **Category "kind":** give each category an explicit role — `expense | income | transfer | funding` — instead
   of the implicit `NON_EXPENSE` set, so totals split cleanly into spend / money-in / movement.
 - **Views:** a "Money in" breakdown mirroring the expense breakdown (gross in, by source, per entity) + a
