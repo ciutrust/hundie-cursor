@@ -21,6 +21,11 @@ create table if not exists bank_connections (
   external_item_id text unique,
   access_token_cipher text not null,
   sync_cursor text,
+  -- Plaid only imports transactions on/after this date, so it never re-pulls the CSV-backfilled
+  -- window (which would double-count, since CSV and Plaid rows hash differently). Defaults to the
+  -- connection date: CSV covers history, Plaid takes over going forward. Default applies on insert;
+  -- re-linking (upsert) omits this column so the original cutover is preserved.
+  sync_from_date date default current_date,
   status connection_status not null default 'healthy',
   last_synced_at timestamptz,
   created_at timestamptz not null default now(),

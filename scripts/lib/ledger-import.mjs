@@ -240,7 +240,7 @@ export async function importAccountPlan(
     .select("*", { count: "exact", head: true })
     .eq("account_id", account.id);
 
-  let updatedClassifications = 0;
+  let insertedClassifications = 0;
 
   for (const batchRows of chunk(rows, 200)) {
     const txPayload = batchRows.map((row) => ({
@@ -248,49 +248,57 @@ export async function importAccountPlan(
       import_batch_id: batch.id,
     }));
 
-    const { data: upserted, error: txError } = await supabase
+    const { error: txError } = await supabase
       .from("transactions")
-      .upsert(txPayload, { onConflict: "account_id,import_hash", ignoreDuplicates: true })
-      .select("id, import_hash");
+      .upsert(txPayload, { onConflict: "account_id,import_hash", ignoreDuplicates: true });
 
     if (txError) {
       throw new Error(`Transaction upsert failed: ${txError.message}`);
     }
 
-    const hashToRow = new Map(batchRows.map((row) => [row.transaction.import_hash, row]));
+    // Resolve transaction ids for EVERY row in the batch (newly-inserted AND already-existing), so a
+    // prior partial run that inserted a transaction but not its classification self-heals here.
+    const hashes = batchRows.map((row) => row.transaction.import_hash);
+    const { data: txRows, error: selError } = await supabase
+      .from("transactions")
+      .select("id, import_hash")
+      .eq("account_id", account.id)
+      .in("import_hash", hashes);
+    if (selError) throw new Error(`Transaction lookup failed: ${selError.message}`);
 
-    for (const tx of upserted ?? []) {
-      const row = hashToRow.get(tx.import_hash);
-      if (!row) continue;
+    const idByHash = new Map((txRows ?? []).map((t) => [t.import_hash, t.id]));
 
-      const { data: existing } = await supabase
+    // Which transactions already have a classification? Preserve them — never overwrite a human
+    // confirmation; only fill in the ones that are missing.
+    const classified = new Set();
+    const txIds = [...idByHash.values()];
+    for (const idBatch of chunk(txIds, 200)) {
+      const { data: existing, error: clsError } = await supabase
         .from("classifications")
-        .select("id")
-        .eq("transaction_id", tx.id)
-        .maybeSingle();
+        .select("transaction_id")
+        .in("transaction_id", idBatch);
+      if (clsError) throw new Error(`Classification lookup failed: ${clsError.message}`);
+      for (const c of existing ?? []) classified.add(c.transaction_id);
+    }
 
-      const payload = {
+    const toInsert = [];
+    for (const row of batchRows) {
+      const txId = idByHash.get(row.transaction.import_hash);
+      if (!txId || classified.has(txId)) continue;
+      toInsert.push({
+        transaction_id: txId,
         entity_id: row.classification.entity_id,
         category_id: row.classification.category_id,
         classified_by: row.classification.classified_by,
         notes: row.classification.notes,
         classified_at: new Date().toISOString(),
-      };
+      });
+    }
 
-      if (existing) {
-        const { error: updateError } = await supabase
-          .from("classifications")
-          .update(payload)
-          .eq("id", existing.id);
-        if (updateError) throw new Error(`Classification update failed: ${updateError.message}`);
-      } else {
-        const { error: insertError } = await supabase.from("classifications").insert({
-          transaction_id: tx.id,
-          ...payload,
-        });
-        if (insertError) throw new Error(`Classification insert failed: ${insertError.message}`);
-      }
-      updatedClassifications += 1;
+    for (const insBatch of chunk(toInsert, 200)) {
+      const { error: insError } = await supabase.from("classifications").insert(insBatch);
+      if (insError) throw new Error(`Classification insert failed: ${insError.message}`);
+      insertedClassifications += insBatch.length;
     }
   }
 
@@ -323,8 +331,8 @@ export async function importAccountPlan(
     }
   }
 
-  console.log(`  Inserted: ${inserted}, skipped (dupes): ${skipped}, classifications: ${updatedClassifications}`);
-  return { inserted, updated: updatedClassifications, skipped, batchId: batch.id };
+  console.log(`  Inserted: ${inserted}, skipped (dupes): ${skipped}, classifications: ${insertedClassifications}`);
+  return { inserted, updated: insertedClassifications, skipped, batchId: batch.id };
 }
 
 export function loadEnvFile(envPath) {

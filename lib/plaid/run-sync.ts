@@ -1,5 +1,6 @@
 import { aggregator, type AggregatorTransaction } from "@/lib/aggregator";
 import { decryptSecret } from "@/lib/crypto/secret-box";
+import { shouldImportPlaidTxn } from "@/lib/plaid/ledger-filter";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 // The proven CSV write path (dedupe via import_hash, entity routing, classification upsert).
 // Plain JS — reused verbatim so Plaid is "just another import source".
@@ -14,6 +15,7 @@ type AccountRow = {
   id: string;
   slug: string;
   display_name: string;
+  account_type: string;
   default_entity_id: string;
   date_rules: unknown;
   default_entity: { slug: string } | null;
@@ -49,7 +51,7 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
   ] = await Promise.all([
     admin
       .from("bank_connections")
-      .select("id, institution, access_token_cipher, sync_cursor, status"),
+      .select("id, institution, access_token_cipher, sync_cursor, status, sync_from_date"),
     admin.from("plaid_account_links").select("plaid_account_id, account_id, connection_id"),
     admin.from("entities").select("id, slug"),
   ]);
@@ -72,7 +74,7 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
     const { data: accounts, error: aErr } = await admin
       .from("accounts")
       .select(
-        "id, slug, display_name, default_entity_id, date_rules, default_entity:entities!accounts_default_entity_id_fkey(slug)",
+        "id, slug, display_name, account_type, default_entity_id, date_rules, default_entity:entities!accounts_default_entity_id_fkey(slug)",
       )
       .in("id", [...linkedAccountIds]);
     if (aErr) throw aErr;
@@ -108,12 +110,19 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
         continue;
       }
 
-      // Posted-only: pending transactions can have their amount/description revised when they
-      // post, which would produce a second import_hash. Ingest once they settle.
-      const posted = synced.data.added.filter((t) => !t.pending);
+      // Ingest posted transactions from BOTH `added` and `modified`: a transaction that was
+      // pending on a prior sync settles into `modified` (same id, pending=false), not `added`.
+      // import_hash + UNIQUE(account_id, import_hash) make re-feeding a known row a safe no-op.
+      const incoming = [...synced.data.added, ...synced.data.modified];
+      if (synced.data.removedExternalIds.length > 0) {
+        // Don't auto-delete: a removed row may carry a human classification. Surface for review.
+        console.log(
+          `  Plaid reported ${synced.data.removedExternalIds.length} removed txn(s) for ${conn.id} (left in place)`,
+        );
+      }
 
       const byPlaidAccount = new Map<string, AggregatorTransaction[]>();
-      for (const t of posted) {
+      for (const t of incoming) {
         const arr = byPlaidAccount.get(t.accountExternalId) ?? [];
         arr.push(t);
         byPlaidAccount.set(t.accountExternalId, arr);
@@ -125,7 +134,12 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
         const account = accountById.get(accountId);
         if (!account) continue;
 
-        const parsed = txns.map((t) => ({
+        // Drop non-expense rows (card payments, $0 noise, checking deposits) — parity with the
+        // CSV parsers, so payments/income never enter the ledger as fake refunds.
+        const eligible = txns.filter((t) => shouldImportPlaidTxn(t, account.account_type));
+        if (eligible.length === 0) continue;
+
+        const parsed = eligible.map((t) => ({
           transactionDate: t.transactionDate,
           postedDate: t.postedDate,
           amount: t.amount,
@@ -136,7 +150,10 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
           sourceRowIndex: undefined,
         }));
 
-        const plan = buildImportPlanFromTransactions(account, `plaid:${conn.id}`, parsed, entityMap, {});
+        // sync_from_date bounds the pull so Plaid never re-imports the CSV-backfilled window.
+        const plan = buildImportPlanFromTransactions(account, `plaid:${conn.id}`, parsed, entityMap, {
+          dateFrom: conn.sync_from_date ?? null,
+        });
         const res = await importAccountPlan(admin, plan, { sourceType: "plaid_sync" });
         result.inserted += res.inserted;
         result.skipped += res.skipped;
