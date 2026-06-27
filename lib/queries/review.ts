@@ -1,5 +1,5 @@
 import type { PeriodRange } from "@/lib/period";
-import { isOperatingExpense } from "@/lib/category-expense";
+import { countsAsExpense, isOperatingExpense } from "@/lib/category-expense";
 import { CPA_REVIEW_CATEGORY_PATHS, isCpaReviewCategory } from "@/lib/category-review";
 import { createClient } from "@/lib/supabase/server";
 import type { MonthCloseCell } from "@/lib/month-close";
@@ -220,6 +220,19 @@ export async function getEntitySummaries(period: PeriodRange): Promise<EntitySum
       )
       .reduce((sum, tx) => sum + Number(tx.amount), 0);
 
+    const positive = entityTransactions.filter((tx) => Number(tx.amount) > 0);
+    const grossTotal = positive.reduce((sum, tx) => sum + Number(tx.amount), 0);
+    const excludedTotal = positive
+      .filter(
+        (tx) =>
+          !needsReviewCategory(tx.classification.category_id, cpaReviewIds) &&
+          !countsAsExpense(tx.classification.category?.full_path),
+      )
+      .reduce((sum, tx) => sum + Number(tx.amount), 0);
+    const unclassifiedTotal = positive
+      .filter((tx) => needsReviewCategory(tx.classification.category_id, cpaReviewIds))
+      .reduce((sum, tx) => sum + Number(tx.amount), 0);
+
     return {
       slug: entity.slug,
       name: entity.name,
@@ -229,6 +242,9 @@ export async function getEntitySummaries(period: PeriodRange): Promise<EntitySum
       unclassifiedCount: entityTransactions.filter((tx) =>
         needsReviewCategory(tx.classification.category_id, cpaReviewIds),
       ).length,
+      grossTotal,
+      excludedTotal,
+      unclassifiedTotal,
     };
   });
 
@@ -255,6 +271,9 @@ export async function getEntitySummaries(period: PeriodRange): Promise<EntitySum
     previousMonthTotal: previousUnclassifiedTotal,
     transactionCount: unclassifiedCount,
     unclassifiedCount: unclassifiedCount,
+    grossTotal: unclassifiedTotal,
+    excludedTotal: 0,
+    unclassifiedTotal,
   });
 
   return summaries;

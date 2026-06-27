@@ -601,6 +601,12 @@ export type EntitySummary = {
   previousMonthTotal: number | null
   transactionCount: number
   unclassifiedCount: number
+  /** Gross positive spend (operating + excluded + still-to-classify) so the total reconciles. */
+  grossTotal: number
+  /** Categorized but non-expense (transfers, refunds, redirects) — excluded from `total`. */
+  excludedTotal: number
+  /** Positive amount still uncategorized / AMA — the "$ remaining to classify". */
+  unclassifiedTotal: number
 }
 
 export type ReviewDashboardStats = {

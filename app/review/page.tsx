@@ -67,12 +67,31 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
               className="rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:bg-muted/30"
             >
               <p className="font-medium">{summary.name}</p>
-              <p className="mt-2 text-xl font-semibold tabular-nums">{formatCurrency(summary.total)}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {summary.unclassifiedCount > 0
-                  ? `${summary.unclassifiedCount} uncategorized`
-                  : "All classified"}
-              </p>
+              <p className="mt-2 text-2xl font-semibold tabular-nums">{formatCurrency(summary.total)}</p>
+              <p className="text-xs text-muted-foreground">expenses</p>
+              <div className="mt-3 space-y-1 border-t border-border pt-2 text-xs text-muted-foreground">
+                <div className="flex items-center justify-between">
+                  <span>Gross spend</span>
+                  <span className="tabular-nums">{formatCurrency(summary.grossTotal)}</span>
+                </div>
+                {summary.excludedTotal > 0 ? (
+                  <div className="flex items-center justify-between">
+                    <span>Excluded</span>
+                    <span className="tabular-nums">{formatCurrency(summary.excludedTotal)}</span>
+                  </div>
+                ) : null}
+                {summary.unclassifiedTotal > 0 ? (
+                  <div className="flex items-center justify-between font-medium text-amber-600 dark:text-amber-400">
+                    <span>To classify ({summary.unclassifiedCount})</span>
+                    <span className="tabular-nums">{formatCurrency(summary.unclassifiedTotal)}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between text-primary">
+                    <span>All classified</span>
+                    <span>✓</span>
+                  </div>
+                )}
+              </div>
             </Link>
           ))}
         </div>
