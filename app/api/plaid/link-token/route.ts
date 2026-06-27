@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { aggregator } from "@/lib/aggregator";
 import { createClient } from "@/lib/supabase/server";
+import { requireMfaStepUp } from "@/lib/plaid/require-mfa";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,9 @@ export async function POST() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+  const mfaError = await requireMfaStepUp(supabase);
+  if (mfaError) return mfaError;
 
   const result = await aggregator.linkToken("hundie-operator");
   if (!result.ok) {

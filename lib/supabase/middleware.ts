@@ -45,19 +45,23 @@ export async function updateSession(request: NextRequest) {
     return supabaseResponse;
   }
 
-  // Authenticated. If a verified second factor exists but this session is still single-factor
-  // (aal1), require the MFA challenge before anything else.
+  // Authenticated. A verified second factor exists but this session is still single-factor (aal1)?
   const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   const needsMfa = aal?.currentLevel === "aal1" && aal?.nextLevel === "aal2";
 
-  if (needsMfa && path !== "/mfa") {
+  // MFA step-up is only required for the bank-connection screen — the highest-sensitivity area
+  // (access tokens, account linking). Day-to-day classifying stays single-factor and un-gated.
+  const requiresStepUp = path.startsWith("/settings/connections");
+
+  if (needsMfa && requiresStepUp && path !== "/mfa") {
     const url = request.nextUrl.clone();
     url.pathname = "/mfa";
-    if (isProtectedRoute) url.searchParams.set("redirect", path + request.nextUrl.search);
+    url.searchParams.set("redirect", path + request.nextUrl.search);
     return NextResponse.redirect(url);
   }
 
-  if (!needsMfa && (path === "/mfa" || path === "/login")) {
+  // Don't strand an authenticated user on /login, and don't sit on /mfa when there's no step-up to do.
+  if (path === "/login" || (path === "/mfa" && !needsMfa)) {
     const url = request.nextUrl.clone();
     url.pathname = "/review";
     return NextResponse.redirect(url);
