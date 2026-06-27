@@ -80,12 +80,15 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-lg border border-border bg-muted/30 p-3">
+          <Link
+            href="/reports/ai-suggestions"
+            className="rounded-lg border border-border bg-muted/30 p-3 transition-colors hover:bg-muted/50"
+          >
             <p className="text-xs text-muted-foreground">Accepted from AI</p>
             <p className="text-xl font-semibold tabular-nums text-violet-600 dark:text-violet-400">
               {progress.aiAccepted.toLocaleString()}
             </p>
-          </div>
+          </Link>
           <div className="rounded-lg border border-border bg-muted/30 p-3">
             <p className="text-xs text-muted-foreground">AI accept rate</p>
             <p className="text-xl font-semibold tabular-nums">{aiRatePct != null ? `${aiRatePct}%` : "—"}</p>
@@ -108,30 +111,40 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {entities.map((summary) => (
-            <Link
+            <div
               key={summary.slug}
-              href={`/review/${summary.slug}`}
-              className="rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:bg-muted/30"
+              className="rounded-xl border border-border bg-card p-4 shadow-sm"
             >
-              <p className="font-medium">{summary.name}</p>
-              <p className="mt-2 text-2xl font-semibold tabular-nums">{formatCurrency(summary.total)}</p>
-              <p className="text-xs text-muted-foreground">expenses</p>
+              <Link href={`/review/${summary.slug}`} className="block transition-opacity hover:opacity-80">
+                <p className="font-medium">{summary.name}</p>
+                <p className="mt-2 text-2xl font-semibold tabular-nums">{formatCurrency(summary.total)}</p>
+                <p className="text-xs text-muted-foreground">expenses</p>
+              </Link>
               <div className="mt-3 space-y-1 border-t border-border pt-2 text-xs text-muted-foreground">
-                <div className="flex items-center justify-between">
+                <Link
+                  href={`/reports/category-breakdown?entity=${summary.slug}`}
+                  className="flex items-center justify-between hover:text-foreground hover:underline"
+                >
                   <span>Gross spend</span>
                   <span className="tabular-nums">{formatCurrency(summary.grossTotal)}</span>
-                </div>
+                </Link>
                 {summary.excludedTotal > 0 ? (
-                  <div className="flex items-center justify-between">
+                  <Link
+                    href={`/reports/category-breakdown?entity=${summary.slug}`}
+                    className="flex items-center justify-between hover:text-foreground hover:underline"
+                  >
                     <span>Excluded</span>
                     <span className="tabular-nums">{formatCurrency(summary.excludedTotal)}</span>
-                  </div>
+                  </Link>
                 ) : null}
                 {summary.unclassifiedTotal > 0 ? (
-                  <div className="flex items-center justify-between font-medium text-amber-600 dark:text-amber-400">
+                  <Link
+                    href={`/review/${summary.slug}/uncategorized`}
+                    className="flex items-center justify-between font-medium text-amber-600 hover:underline dark:text-amber-400"
+                  >
                     <span>To classify ({summary.unclassifiedCount})</span>
                     <span className="tabular-nums">{formatCurrency(summary.unclassifiedTotal)}</span>
-                  </div>
+                  </Link>
                 ) : (
                   <div className="flex items-center justify-between text-primary">
                     <span>All classified</span>
@@ -139,7 +152,7 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
                   </div>
                 )}
               </div>
-            </Link>
+            </div>
           ))}
         </div>
       </section>

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
+  ArrowLeftRight,
   Brain,
   CalendarCheck,
   CheckCircle2,
@@ -13,6 +14,7 @@ import {
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
+  PieChart,
   Settings2,
   ShieldCheck,
   X,
@@ -79,7 +81,19 @@ const REPORT_ITEMS: NavItem[] = [
     href: "/reports",
     label: "Reports & export",
     icon: FileSpreadsheet,
-    match: (path) => path.startsWith("/reports"),
+    match: (path) => path === "/reports",
+  },
+  {
+    href: "/reports/spending-by-category",
+    label: "Spending by category",
+    icon: PieChart,
+    match: (path) => path.startsWith("/reports/spending-by-category"),
+  },
+  {
+    href: "/reports/intercompany",
+    label: "Intercompany",
+    icon: ArrowLeftRight,
+    match: (path) => path.startsWith("/reports/intercompany"),
   },
 ];
 
