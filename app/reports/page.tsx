@@ -17,6 +17,7 @@ const REPORT_LINKS = [
   { href: "/reports/yoy-comparison", label: "Year-over-year comparison" },
   { href: "/reports/reconcile", label: "GBSL checking reconciliation" },
   { href: "/reports/intercompany", label: "Intercompany review" },
+  { href: "/reports/income", label: "Money in (income by source)" },
   { href: "/reports/business-expenses-personal-cards", label: "Business expenses on personal cards" },
   { href: "/reports/funding", label: "Funding" },
   { href: "/reports/ai-suggestions", label: "AI suggestions stats" },

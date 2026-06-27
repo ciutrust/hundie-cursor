@@ -17,6 +17,7 @@ import {
   PieChart,
   Settings2,
   ShieldCheck,
+  TrendingUp,
   X,
 } from "lucide-react";
 import { SidebarEntitiesNav } from "@/components/layout/sidebar-entities-nav";
@@ -94,6 +95,12 @@ const REPORT_ITEMS: NavItem[] = [
     label: "Intercompany",
     icon: ArrowLeftRight,
     match: (path) => path.startsWith("/reports/intercompany"),
+  },
+  {
+    href: "/reports/income",
+    label: "Money in",
+    icon: TrendingUp,
+    match: (path) => path.startsWith("/reports/income"),
   },
 ];
 
