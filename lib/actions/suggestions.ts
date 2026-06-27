@@ -212,4 +212,28 @@ export async function getBulkCategorySuggestions(
   });
 }
 
+/**
+ * Top suggestion per vendor, for the inline one-click pills on the Classify list.
+ * The caller dedupes to unique vendor keys (ordered by frequency); we cap the fan-out so a huge
+ * backlog can't fire hundreds of queries. Rows without a pill still classify via the dialog.
+ */
+export async function getInlineCategorySuggestions(input: {
+  entitySlug: string;
+  vendors: Array<{ vendorKey: string; description: string; vendor: string | null; amount: number }>;
+}): Promise<{ suggestions: Record<string, CategorySuggestion | null> }> {
+  const top = input.vendors.slice(0, 50);
+  const entries = await Promise.all(
+    top.map(async (vendor) => {
+      const result = await getCategorySuggestions({
+        description: vendor.description,
+        vendor: vendor.vendor,
+        entitySlug: input.entitySlug,
+        amount: vendor.amount,
+      });
+      return [vendor.vendorKey, result.suggestions[0] ?? null] as const;
+    }),
+  );
+  return { suggestions: Object.fromEntries(entries) };
+}
+
 export { extractVendorSearchKey };

@@ -24,7 +24,11 @@ import { TransactionSearchBar } from "@/components/review/transaction-search-bar
 import { bulkReclassifyTransactions, reclassifyTransaction } from "@/lib/actions/reclassify";
 import type { SuggestionOutcome } from "@/lib/actions/suggestion-events";
 import { getAiCategorySuggestion } from "@/lib/actions/ai-category-suggestion";
-import { getBulkCategorySuggestions, getCategorySuggestions } from "@/lib/actions/suggestions";
+import {
+  getBulkCategorySuggestions,
+  getCategorySuggestions,
+  getInlineCategorySuggestions,
+} from "@/lib/actions/suggestions";
 import type { CategorySuggestion } from "@/lib/suggestions/category-suggestions";
 import type { Category, Entity, TransactionWithDetails } from "@/lib/types/database";
 import {
@@ -39,6 +43,15 @@ import {
 import { cn, formatCurrency } from "@/lib/utils";
 
 type EntityCategory = Pick<Category, "id" | "full_path">;
+
+/** Entities whose category charts feed the suggestion engine (mirrors the dialog gating). */
+const SUGGESTION_ENTITIES = new Set(["gbsl", "personal", "acaa-austin", "pflugerville", "keller"]);
+
+/** Last segment of a category path, for the compact one-click pill. */
+function shortCategoryName(fullPath: string): string {
+  const parts = fullPath.split(/\s*[›/]\s*/);
+  return parts[parts.length - 1] ?? fullPath;
+}
 
 type TransactionListProps = {
   transactions: TransactionWithDetails[];
@@ -67,6 +80,11 @@ export function TransactionList({
 
   const [sortKey, setSortKey] = useState<"date" | "name" | "amount">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  const router = useRouter();
+  const [, startQuick] = useTransition();
+  const [quickClassifyingId, setQuickClassifyingId] = useState<string | null>(null);
+  const [inlineSuggestions, setInlineSuggestions] = useState<Record<string, CategorySuggestion | null>>({});
 
   const filteredTransactions = useMemo(
     () => filterTransactions(transactions, filters),
@@ -133,6 +151,84 @@ export function TransactionList({
     [transactions],
   );
   const reviewBacklogFilterActive = filters.reviewBacklogOnly;
+
+  const supportsSuggestions = SUGGESTION_ENTITIES.has(entitySlug);
+
+  // Unique still-unclassified vendors (most frequent first) to fetch one-click suggestions for.
+  const vendorReps = useMemo(() => {
+    if (!supportsSuggestions) return [];
+    const map = new Map<
+      string,
+      { vendorKey: string; description: string; vendor: string | null; amount: number; count: number }
+    >();
+    for (const tx of transactions) {
+      if (tx.classification.category_id) continue;
+      const key = transactionVendorKey(tx);
+      if (!key) continue;
+      const existing = map.get(key);
+      if (existing) existing.count += 1;
+      else
+        map.set(key, {
+          vendorKey: key,
+          description: tx.description,
+          vendor: tx.vendor,
+          amount: Number(tx.amount),
+          count: 1,
+        });
+    }
+    return [...map.values()].sort((a, b) => b.count - a.count);
+  }, [transactions, supportsSuggestions]);
+
+  useEffect(() => {
+    if (vendorReps.length === 0) {
+      setInlineSuggestions({});
+      return;
+    }
+    let cancelled = false;
+    getInlineCategorySuggestions({
+      entitySlug,
+      vendors: vendorReps.map(({ vendorKey, description, vendor, amount }) => ({
+        vendorKey,
+        description,
+        vendor,
+        amount,
+      })),
+    })
+      .then((result) => {
+        if (!cancelled) setInlineSuggestions(result.suggestions);
+      })
+      .catch(() => {
+        if (!cancelled) setInlineSuggestions({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [entitySlug, vendorReps]);
+
+  function quickClassify(tx: TransactionWithDetails, suggestion: CategorySuggestion) {
+    setQuickClassifyingId(tx.id);
+    startQuick(async () => {
+      const result = await reclassifyTransaction({
+        classificationId: tx.classification.id,
+        entityId: tx.classification.entity_id,
+        categoryId: suggestion.categoryId,
+        notes: tx.classification.notes ?? "",
+        month,
+        entitySlug,
+        suggestionOutcome: {
+          transactionId: tx.id,
+          classificationId: tx.classification.id,
+          entityId: tx.classification.entity_id,
+          description: tx.description,
+          vendor: tx.vendor,
+          chosenCategoryId: suggestion.categoryId,
+          suggestionsShown: [{ categoryId: suggestion.categoryId, source: suggestion.source }],
+        },
+      });
+      setQuickClassifyingId(null);
+      if (!result.error) router.refresh();
+    });
+  }
 
   function toggleOne(id: string) {
     setSelectedIds((current) => {
@@ -277,29 +373,32 @@ export function TransactionList({
       <div className="divide-y divide-border rounded-lg border border-border bg-card">
         {sortedTransactions.map((tx) => {
           const isSelected = selectedIds.has(tx.id);
+          const isUnclassified = !tx.classification.category_id;
+          const suggestion = isUnclassified ? inlineSuggestions[transactionVendorKey(tx)] ?? null : null;
+          const isQuickClassifying = quickClassifyingId === tx.id;
 
           return (
             <div
               key={tx.id}
               className={cn(
-                "flex items-start gap-3 px-4 py-3",
-                isSelected && "bg-accent/40",
+                "flex flex-col gap-2 px-4 py-3 transition-colors sm:flex-row sm:items-center sm:gap-4",
+                isSelected ? "bg-accent/40" : "hover:bg-muted/30",
               )}
             >
-              <input
-                type="checkbox"
-                checked={isSelected}
-                onChange={() => toggleOne(tx.id)}
-                aria-label={`Select ${tx.description}`}
-                className="mt-1 h-4 w-4 shrink-0 rounded border-border accent-primary"
-              />
-              <button
-                type="button"
-                onClick={() => setDetailTransaction(tx)}
-                className="flex min-w-0 flex-1 items-start justify-between gap-4 text-left hover:opacity-80"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="flex items-center gap-2 truncate font-medium">
+              <div className="flex min-w-0 flex-1 items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => toggleOne(tx.id)}
+                  aria-label={`Select ${tx.description}`}
+                  className="mt-1 h-4 w-4 shrink-0 rounded border-border accent-primary"
+                />
+                <button
+                  type="button"
+                  onClick={() => setDetailTransaction(tx)}
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <p className="flex items-center gap-2 font-medium">
                     <span className="truncate">{tx.description}</span>
                     {aiSuggestionTxIds?.has(tx.id) ? (
                       <span
@@ -310,23 +409,46 @@ export function TransactionList({
                       </span>
                     ) : null}
                   </p>
-                  <p className="mt-0.5 text-sm text-muted-foreground">
+                  <p className="mt-0.5 truncate text-sm text-muted-foreground">
                     {tx.transaction_date} · {tx.account.display_name}
                     {tx.classification.category
                       ? ` · ${tx.classification.category.full_path}`
                       : " · Unclassified"}
                   </p>
-                </div>
-                <span className="shrink-0 font-medium">{formatCurrency(Number(tx.amount))}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => findSimilar(tx)}
-                title="Select all transactions from this vendor for bulk assign"
-                className="mt-1 shrink-0 self-center rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                Find similar
-              </button>
+                </button>
+              </div>
+              <div className="flex items-center gap-2 pl-7 sm:pl-0">
+                <span className="mr-auto font-medium tabular-nums sm:mr-0 sm:w-24 sm:text-right">
+                  {formatCurrency(Number(tx.amount))}
+                </span>
+                {suggestion ? (
+                  <button
+                    type="button"
+                    onClick={() => quickClassify(tx, suggestion)}
+                    disabled={isQuickClassifying}
+                    title={`One-click classify as ${suggestion.fullPath}`}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+                  >
+                    {isQuickClassifying ? (
+                      "Saving…"
+                    ) : (
+                      <>
+                        <span aria-hidden>+</span>
+                        <span className="max-w-[10rem] truncate">{shortCategoryName(suggestion.fullPath)}</span>
+                        {suggestion.source === "ai_llm" ? <span className="opacity-70">· AI</span> : null}
+                      </>
+                    )}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => findSimilar(tx)}
+                  title="Select all transactions from this vendor for bulk assign"
+                  className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  Similar
+                </button>
+              </div>
             </div>
           );
         })}
