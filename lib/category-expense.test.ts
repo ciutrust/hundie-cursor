@@ -21,10 +21,10 @@ describe("category-expense", () => {
 
   it("matches seeded non-expense paths byte-for-byte", () => {
     const seeded = [
+      // transfer
       "Credit card payment",
       "Transfer / Zelle (personal)",
       "Refund / credit",
-      "Intercompany — pending",
       "Security deposit movement",
       "→ GBSL business expense",
       "→ Keller business expense",
@@ -32,6 +32,17 @@ describe("category-expense", () => {
       "→ Pflugerville rental",
       "→ Personal (mis-posted)",
       "Mixed / pending allocation",
+      "Sales Tax Payable",
+      // funding
+      "Intercompany — pending",
+      "Owner Contribution",
+      "Owner Distribution",
+      "Owners Equity",
+      "Owners Equity:Owner Distribution",
+      // capital
+      "Leasehold improvements",
+      "Tenant improvement allowance",
+      "Property purchase",
     ];
     expect([...NON_EXPENSE_CATEGORY_PATHS].sort()).toEqual(seeded.sort());
   });

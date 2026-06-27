@@ -21,16 +21,35 @@ const TRANSFER_PATHS = new Set<string>([
   "→ Pflugerville rental",
   "→ Personal (mis-posted)",
   "Mixed / pending allocation",
+  "Sales Tax Payable",
 ]);
 
 /** Equity / capital financing between Alex's own entities — kept off the P&L. */
-const FUNDING_PATHS = new Set<string>(["Intercompany — pending"]);
+const FUNDING_PATHS = new Set<string>([
+  "Intercompany — pending",
+  "Owner Contribution",
+  "Owner Distribution",
+  "Owners Equity",
+  "Owners Equity:Owner Distribution",
+]);
 
-/** Fixed-asset flows, both directions (Phase 2: leasehold improvements, TI allowance, property). */
-const CAPITAL_PATHS = new Set<string>([]);
+/** Fixed-asset flows, both directions (leasehold improvements, TI allowance, property purchase). */
+const CAPITAL_PATHS = new Set<string>([
+  "Leasehold improvements",
+  "Tenant improvement allowance",
+  "Property purchase",
+]);
 
-/** Operating income by source (Phase 2: membership revenue, rent income, salary, etc.). */
-const INCOME_PATHS = new Set<string>([]);
+/** Operating income by source. Income lands as an inflow (negative amount). */
+const INCOME_PATHS = new Set<string>([
+  "Membership Income",
+  "Membership revenue",
+  "Salary & wages",
+  "Investment proceeds",
+  "Interest income",
+  "Other income",
+  "Rent income",
+]);
 
 export function categoryKind(fullPath: string | null | undefined): CategoryKind {
   if (!fullPath) return "expense";
