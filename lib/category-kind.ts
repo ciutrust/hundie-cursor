@@ -22,6 +22,7 @@ const TRANSFER_PATHS = new Set<string>([
   "→ Personal (mis-posted)",
   "Mixed / pending allocation",
   "Sales Tax Payable",
+  "Credit card rewards / cash back",
 ]);
 
 /** Equity / capital financing between Alex's own entities — kept off the P&L. */

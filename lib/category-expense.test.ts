@@ -33,6 +33,7 @@ describe("category-expense", () => {
       "→ Personal (mis-posted)",
       "Mixed / pending allocation",
       "Sales Tax Payable",
+      "Credit card rewards / cash back",
       // funding
       "Intercompany — pending",
       "Owner Contribution",

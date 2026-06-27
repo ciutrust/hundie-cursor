@@ -283,8 +283,9 @@ export async function getEntitySummaries(period: PeriodRange): Promise<EntitySum
       total: expenseTotal,
       previousMonthTotal: previousEntityTransactions.length > 0 ? previousExpenseTotal : 0,
       transactionCount: entityTransactions.length,
-      unclassifiedCount: entityTransactions.filter((tx) =>
-        needsReviewCategory(tx.classification.category_id, cpaReviewIds),
+      unclassifiedCount: entityTransactions.filter(
+        (tx) =>
+          needsReviewCategory(tx.classification.category_id, cpaReviewIds) && Number(tx.amount) > 0,
       ).length,
       grossTotal,
       excludedTotal,
@@ -630,6 +631,8 @@ export async function getEntityTransactions(
   period: PeriodRange,
   entitySlug: string,
   categoryFilter?: string | null,
+  /** Which side of the backlog: outflows (expense, default) or inflows (income to classify). */
+  flow: "outflow" | "inflow" = "outflow",
 ): Promise<{ groups: CategoryGroup[]; transactions: TransactionWithDetails[] }> {
   const supabase = await createClient();
   const { start, end } = period;
@@ -657,8 +660,10 @@ export async function getEntityTransactions(
     if (entitySlug === "unclassified") {
       transactions = await fetchPeriodTransactionDetails(supabase, start, end);
     }
-    transactions = transactions.filter((tx) =>
-      needsReviewCategory(tx.classification.category_id, cpaReviewIds),
+    transactions = transactions.filter(
+      (tx) =>
+        needsReviewCategory(tx.classification.category_id, cpaReviewIds) &&
+        (flow === "inflow" ? Number(tx.amount) < 0 : Number(tx.amount) > 0),
     );
   }
   const groupMap = new Map<string, CategoryGroup>();
