@@ -24,7 +24,6 @@ describe("category-expense", () => {
       "Transfer / Zelle (personal)",
       "Refund / credit",
       "Intercompany — pending",
-      "Mortgage principal payment",
       "Security deposit movement",
       "→ GBSL business expense",
       "→ Keller business expense",
