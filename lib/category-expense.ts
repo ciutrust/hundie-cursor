@@ -4,7 +4,6 @@ export const NON_EXPENSE_CATEGORY_PATHS = new Set([
   "Transfer / Zelle (personal)",
   "Refund / credit",
   "Intercompany — pending",
-  "Mortgage principal payment",
   "Security deposit movement",
   "→ GBSL business expense",
   "→ Keller business expense",
