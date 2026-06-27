@@ -115,10 +115,21 @@ Each phase ships independently. The risky step (4) lands last, after the foundat
 - **5 kinds vs 4** → keep `capital` distinct (matches how Alex thinks about buildout/TI vs. intercompany);
   can collapse into `funding` later if it's noise.
 
+## Decisions & deferrals
+
+- **QBO income names:** "Membership revenue" (Keller) / existing "Membership Income" (GBSL) — confirmed 2026-06-27.
+- **Backfill CSVs:** `~/Downloads/CSV 2025-2026/` (2025 + 2026), the same files imported before — confirmed.
+- **Income sign — DECIDED (2026-06-27):** income is identified by **kind**, not sign. The money-in view sums
+  `kind = income` rows by absolute value, so it works regardless of sign. We do **not** rewrite recorded
+  amounts. New imports (Phase 3/4) still land inflows as negative so the uncategorized backlog separates
+  inflows from outflows by sign.
+- **DEFERRED (revisit later):** the 28 GBSL "Membership Income" rows from the QBO backfill are stored
+  **positive** (mis-signed). They're correctly excluded from expense and counted as income via kind, but for
+  a fully sign-consistent ledger we'd flip them to negative. That's an amount edit (blocked by the safety
+  layer by default) — revisit when Alex wants to authorize it. Low priority; numbers are already correct.
+
 ## Open questions
 
-- Exact QBO income category names for GBSL and Keller (Alex provides / we pull).
-- Which historical CSVs carry the deposit history (which accounts, what date range).
 - Should net-P&L appear on the dashboard now, or stay in Reports? (Expense-first leans Reports for v1.)
 
 ## Testing
