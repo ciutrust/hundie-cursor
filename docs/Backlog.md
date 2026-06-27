@@ -109,6 +109,36 @@ AI Review override loop, find-similar, mortgage/HELOC categories, dashboard perf
 - [ ] QuickBooks Online API read (GBSL)
 - [ ] Plaid sync
 - [ ] Entity detail pages (compliance — EINs stay local)
+- [ ] Weekly email nudge — count of transactions still to categorize (per entity + total), soft re-engagement, link to `/review` (captured 2026-06-27)
+
+---
+
+## Later — Income & funding view (captured 2026-06-27)
+
+Today the app is expense-only. Alex wants to see **where money comes in**, per entity, and to treat
+intercompany transfers as **funding (capital injection)** — not income, not expense. Later work (Alex
+is classifying expenses first), but capture the shape now.
+
+**Income sources to break out, by entity:**
+- **Personal** — salary (W-2), stock (dividends / capital gains / RSU vesting), interest, other
+- **GBSL** — revenue by location: **GB Southlake** vs **GB Coppell**
+- **Keller** — **JRoots** gym revenue
+- **Austin ACAA + Pflugerville** — **rent income**; intercompany transfers in
+
+**Intercompany transfers → "money injection / funding":** money moving between Alex's own entities is a
+capital contribution / owner funding flow — kept OUT of the P&L. Surface in a funding view, not as income.
+
+**Design notes / open questions:**
+- **Sign convention:** in this ledger positive = outflow (charge), negative = inflow (deposit). Income is
+  the inflow (negative) side. The 2026-06-27 audit found almost no negative volume (Personal −$1.5k total),
+  so **first confirm the deposit-bearing accounts (checking, brokerage) are actually synced** — income may
+  not be in the data yet.
+- **Category "kind":** give each category an explicit role — `expense | income | transfer | funding` — instead
+  of the implicit `NON_EXPENSE` set, so totals split cleanly into spend / money-in / movement.
+- **Views:** a "Money in" breakdown mirroring the expense breakdown (gross in, by source, per entity) + a
+  **Funding** view (capital injections / intercompany). Build on the existing (hidden) `/reports/intercompany`,
+  which already tags intercompany legs; the old `/reports/funding` is a deprecated redirect to reuse the slug.
+- Supersedes the Icebox "income / P&L" line.
 
 ---
 
