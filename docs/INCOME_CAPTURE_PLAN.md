@@ -1,5 +1,11 @@
 # Income Capture — Plan / Spec (2026-06-27)
 
+**STATUS: shipped 2026-06-27.** Phases 1–5 done. 521 income inflows backfilled from the final CSV import
+and audited clean (0 dupes, 0 Plaid/CSV collisions, signs correct, expense totals intact). 28 GBSL
+qb-backfill Membership Income rows deleted (CSV is the source). Now Plaid-only going forward, with a guard
+that drops credit-card transactions Plaid mis-tags as INCOME (the Citi mis-sign). Remaining = operator
+classifies the imported income inflows (income lane, per entity).
+
 ## Why
 
 Hundie drops every bank deposit at import — the importer keeps only outflows, so income was never
