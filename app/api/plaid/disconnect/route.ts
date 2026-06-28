@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { aggregator } from "@/lib/aggregator";
 import { decryptSecret } from "@/lib/crypto/secret-box";
 import { createClient } from "@/lib/supabase/server";
-import { requireMfaStepUp } from "@/lib/plaid/require-mfa";
+import { requireMfaStepUp, requireSameOrigin } from "@/lib/plaid/require-mfa";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 
 export const runtime = "nodejs";
@@ -12,6 +12,9 @@ export const runtime = "nodejs";
  * (cascades plaid_account_links). Already-imported transactions are kept — only future syncing stops.
  */
 export async function POST(request: Request) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const supabase = await createClient();
   const {
     data: { user },

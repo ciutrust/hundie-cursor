@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { requireMfaStepUp } from "@/lib/plaid/require-mfa";
+import { requireMfaStepUp, requireSameOrigin } from "@/lib/plaid/require-mfa";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 
 export const runtime = "nodejs";
@@ -15,6 +15,9 @@ type LinkInput = {
 
 /** Save the operator-confirmed Plaid account → Hundie account links. */
 export async function POST(request: Request) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const supabase = await createClient();
   const {
     data: { user },

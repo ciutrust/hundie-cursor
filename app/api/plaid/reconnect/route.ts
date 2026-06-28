@@ -2,13 +2,16 @@ import { NextResponse } from "next/server";
 import { aggregator } from "@/lib/aggregator";
 import { decryptSecret } from "@/lib/crypto/secret-box";
 import { createClient } from "@/lib/supabase/server";
-import { requireMfaStepUp } from "@/lib/plaid/require-mfa";
+import { requireMfaStepUp, requireSameOrigin } from "@/lib/plaid/require-mfa";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 
 export const runtime = "nodejs";
 
 /** Start a Plaid update-mode re-auth for an existing connection (keeps the same access token). */
 export async function POST(request: Request) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const supabase = await createClient();
   const {
     data: { user },

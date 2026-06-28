@@ -1,5 +1,6 @@
 "use server";
 
+import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
 import {
   rankAmountAwareMatches,
@@ -175,6 +176,10 @@ async function fetchBlendedSuggestions(
 export async function getCategorySuggestions(
   input: CategorySuggestionInput,
 ): Promise<{ suggestions: CategorySuggestion[]; error?: string }> {
+  // SEC-05: explicit auth guard (defense-in-depth on top of RLS).
+  const { error: authError } = await requireUser();
+  if (authError) return { suggestions: [], error: authError };
+
   if (!shouldSuggestCategories(input)) {
     return { suggestions: [] };
   }
@@ -191,6 +196,10 @@ export async function getCategorySuggestions(
 export async function getBulkCategorySuggestions(
   input: BulkCategorySuggestionInput,
 ): Promise<{ suggestions: CategorySuggestion[]; error?: string }> {
+  // SEC-05: explicit auth guard (defense-in-depth on top of RLS).
+  const { error: authError } = await requireUser();
+  if (authError) return { suggestions: [], error: authError };
+
   if (!shouldSuggestBulkCategories(input)) {
     return { suggestions: [] };
   }
@@ -221,6 +230,11 @@ export async function getInlineCategorySuggestions(input: {
   entitySlug: string;
   vendors: Array<{ vendorKey: string; description: string; vendor: string | null; amount: number }>;
 }): Promise<{ suggestions: Record<string, CategorySuggestion | null> }> {
+  // SEC-05: explicit auth guard (defense-in-depth on top of RLS). The return
+  // shape has no error field, so fail closed to an empty suggestion map.
+  const { error: authError } = await requireUser();
+  if (authError) return { suggestions: {} };
+
   const top = input.vendors.slice(0, 50);
   const entries = await Promise.all(
     top.map(async (vendor) => {
