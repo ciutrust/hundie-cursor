@@ -60,16 +60,40 @@ describe("category-kind", () => {
     expect(categoryKind("Intercompany — pending")).toBe("funding");
   });
 
-  it("defaults real and unknown categories (and null) to expense", () => {
+  it("defaults real and unknown non-null categories to expense", () => {
     expect(categoryKind("Software")).toBe("expense");
     expect(categoryKind("Rent Expense")).toBe("expense");
-    expect(categoryKind(null)).toBe("expense");
-    expect(categoryKind(undefined)).toBe("expense");
+  });
+
+  it("treats null/blank categories as unclassified, not expense (ACCT-02)", () => {
+    expect(categoryKind(null)).toBe("unclassified");
+    expect(categoryKind(undefined)).toBe("unclassified");
+    expect(categoryKind("")).toBe("unclassified");
+    expect(categoryKind("   ")).toBe("unclassified");
+  });
+
+  it("ignores whitespace drift so non-expense paths don't leak into expense (BUG-08)", () => {
+    expect(categoryKind("  Credit card payment  ")).toBe("transfer");
+    expect(categoryKind("Credit card  payment")).toBe("transfer");
+    expect(categoryKind(" Owner Distribution ")).toBe("funding");
+    expect(categoryKind("Intercompany —  pending")).toBe("funding");
   });
 
   it("every non-expense path resolves to a non-expense kind", () => {
     for (const path of NON_EXPENSE_CATEGORY_PATHS) {
       expect(categoryKind(path)).not.toBe("expense");
     }
+  });
+});
+
+describe("uncategorized rows are excluded from operating expense (ACCT-02)", () => {
+  it("a positive null-category row is not an operating expense", () => {
+    expect(isOperatingExpense(100, null)).toBe(false);
+    expect(isOperatingExpense(100, undefined)).toBe(false);
+    expect(countsAsExpense(null)).toBe(false);
+  });
+
+  it("a positive real-expense row still counts", () => {
+    expect(isOperatingExpense(100, "Software")).toBe(true);
   });
 });

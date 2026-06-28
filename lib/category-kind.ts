@@ -1,13 +1,20 @@
 /**
  * Every category has a "kind" that determines how it rolls up. Expense is king — income, transfer,
- * funding, and capital are additive lenses. Anything not explicitly listed below is an operating expense.
+ * funding, and capital are additive lenses. A non-null category not explicitly listed below is an
+ * operating expense; a null/blank category is "unclassified" (NOT expense — see below).
  *
  * Phase 1 (foundation): this only relabels the existing non-expense categories into transfer/funding, so
  * expense totals stay byte-for-byte unchanged. Income and capital categories are populated in Phase 2.
  *
  * See docs/INCOME_CAPTURE_PLAN.md.
  */
-export type CategoryKind = "expense" | "income" | "transfer" | "funding" | "capital";
+export type CategoryKind =
+  | "expense"
+  | "income"
+  | "transfer"
+  | "funding"
+  | "capital"
+  | "unclassified";
 
 /** Money movement that is neither spend nor income — card payments, transfers, refunds, redirects. */
 const TRANSFER_PATHS = new Set<string>([
@@ -53,11 +60,18 @@ const INCOME_PATHS = new Set<string>([
 ]);
 
 export function categoryKind(fullPath: string | null | undefined): CategoryKind {
-  if (!fullPath) return "expense";
-  if (TRANSFER_PATHS.has(fullPath)) return "transfer";
-  if (FUNDING_PATHS.has(fullPath)) return "funding";
-  if (CAPITAL_PATHS.has(fullPath)) return "capital";
-  if (INCOME_PATHS.has(fullPath)) return "income";
+  // No category assigned yet → "unclassified", never "expense". Defaulting null to expense inflated
+  // every P&L (52% of the ledger was uncategorized — ACCT-02); unclassified rows are excluded from
+  // expense totals and surfaced as the review queue instead.
+  if (!fullPath) return "unclassified";
+  // Collapse path drift (leading/trailing or doubled whitespace) before matching, so a stray space
+  // can't make a transfer/funding/capital path fall through to "expense" and leak into the P&L (BUG-08).
+  const path = fullPath.trim().replace(/\s+/g, " ");
+  if (!path) return "unclassified";
+  if (TRANSFER_PATHS.has(path)) return "transfer";
+  if (FUNDING_PATHS.has(path)) return "funding";
+  if (CAPITAL_PATHS.has(path)) return "capital";
+  if (INCOME_PATHS.has(path)) return "income";
   return "expense";
 }
 
