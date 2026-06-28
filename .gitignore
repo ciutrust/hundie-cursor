@@ -31,5 +31,8 @@ scripts/.*-qb-*.mjs
 scripts/archive/
 *.csv
 
+# Overnight / scratch working docs (kept local)
+docs/overnight/
+
 # TypeScript incremental build cache
 *.tsbuildinfo
