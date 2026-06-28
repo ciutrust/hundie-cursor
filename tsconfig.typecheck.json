@@ -1,0 +1,6 @@
+{
+  "//": "Dedicated config for `npm run typecheck`. Next auto-manages the base tsconfig's include (re-adding .next/dev/types, which can hold stale route validators). This config typechecks source only; `next build` validates generated route types.",
+  "extends": "./tsconfig.json",
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", "scripts/**/*.ts", ".next/**"]
+}

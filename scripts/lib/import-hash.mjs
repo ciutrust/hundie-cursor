@@ -22,6 +22,7 @@ export function buildTransactionDedupeKey({
 /**
  * Idempotent import key stored on transactions.import_hash.
  * Matches dedupe key; appends issuer reference when present (Plaid id, check #, etc.).
+ * @param {{ accountId: string, transactionDate: string, amount: number | string, description: string, issuerReference?: string | number | null, sourceRowIndex?: number }} input
  */
 export function buildTransactionHash({
   accountId,

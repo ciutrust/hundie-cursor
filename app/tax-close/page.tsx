@@ -61,7 +61,7 @@ export default async function TaxClosePage({ searchParams }: Props) {
       ) : (
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm">
           <strong>{summary.closed} of {summary.active}</strong> months closed · {summary.open} still
-          open. Click a cell to clear an entity's month.
+          open. Click a cell to clear an entity&apos;s month.
         </div>
       )}
 
