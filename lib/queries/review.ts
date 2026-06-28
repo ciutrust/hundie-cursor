@@ -9,6 +9,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import type { MonthCloseCell } from "@/lib/month-close";
 import { getAiPreclassifiedCount } from "@/lib/queries/ai-suggestions";
+import { fetchPeriodTransactions } from "@/lib/queries/fetch-period-transactions";
 import { paginateAll } from "@/lib/supabase/paginate";
 import type { CategoryGroup, EntitySummary, MonthlyCategoryRow, MonthlyEntityRow, ReviewDashboardStats, TransactionWithDetails } from "@/lib/types/database";
 const TRANSACTION_SELECT = `
@@ -46,85 +47,49 @@ const SUMMARY_TRANSACTION_SELECT = `
   )
 `;
 
-const PAGE_SIZE = 1000;
+type SummaryTransaction = {
+  id: string;
+  amount: number;
+  classification: {
+    entity_id: string;
+    category_id: string | null;
+    category?: { full_path: string } | null;
+  };
+};
 
-async function fetchPeriodSummaryTransactions(
+function fetchPeriodSummaryTransactions(
   supabase: Awaited<ReturnType<typeof createClient>>,
   start: string,
   end: string,
   options?: { entityId?: string },
-) {
-  const all: Array<{
-    id: string;
-    amount: number;
-    classification: {
-      entity_id: string;
-      category_id: string | null;
-      category?: { full_path: string } | null;
-    };
-  }> = [];
-  let from = 0;
-
-  while (true) {
-    let query = supabase
-      .from("transactions")
-      .select(SUMMARY_TRANSACTION_SELECT)
-      .gte("transaction_date", start)
-      .lt("transaction_date", end)
-      .order("transaction_date", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + PAGE_SIZE - 1);
-
-    if (options?.entityId) {
-      query = query.eq("classification.entity_id", options.entityId);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-    const page = data ?? [];
-    all.push(...page);
-    if (page.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-
-  return all;
+): Promise<SummaryTransaction[]> {
+  // OPT-08: same select/filters/ascending order as before, now via the shared fetcher.
+  return fetchPeriodTransactions<SummaryTransaction>({
+    supabase,
+    select: SUMMARY_TRANSACTION_SELECT,
+    start,
+    end,
+    entityId: options?.entityId,
+    order: "asc",
+  });
 }
 
-async function fetchPeriodTransactionDetails(
+function fetchPeriodTransactionDetails(
   supabase: Awaited<ReturnType<typeof createClient>>,
   start: string,
   end: string,
   options?: { entityId?: string; categoryId?: string },
-) {
-  const all: TransactionWithDetails[] = [];
-  let from = 0;
-
-  while (true) {
-    let query = supabase
-      .from("transactions")
-      .select(TRANSACTION_SELECT)
-      .gte("transaction_date", start)
-      .lt("transaction_date", end)
-      .order("transaction_date", { ascending: false })
-      .order("id", { ascending: false })
-      .range(from, from + PAGE_SIZE - 1);
-
-    if (options?.entityId) {
-      query = query.eq("classification.entity_id", options.entityId);
-    }
-    if (options?.categoryId) {
-      query = query.eq("classification.category_id", options.categoryId);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-    const page = (data ?? []) as unknown as TransactionWithDetails[];
-    all.push(...page);
-    if (page.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-
-  return all;
+): Promise<TransactionWithDetails[]> {
+  // OPT-08: descending order is load-bearing — getEntityTransactions returns this array to the UI.
+  return fetchPeriodTransactions<TransactionWithDetails>({
+    supabase,
+    select: TRANSACTION_SELECT,
+    start,
+    end,
+    entityId: options?.entityId,
+    categoryId: options?.categoryId,
+    order: "desc",
+  });
 }
 
 function isNullCategory(categoryId: string | null | undefined) {
@@ -233,21 +198,12 @@ export async function getCategorizationProgress(): Promise<CategorizationProgres
   };
 }
 
-export async function getEntitySummaries(period: PeriodRange): Promise<EntitySummary[]> {
-  const supabase = await createClient();
-  const { start, end, compareStart, compareEnd } = period;
-
-  const [cpaReviewIds, entitiesResult, transactions, previousTransactions] = await Promise.all([
-    getCpaReviewCategoryIdSet(supabase),
-    supabase.from("entities").select("id, name, slug, display_order").eq("is_classifiable", true).order("display_order"),
-    fetchPeriodSummaryTransactions(supabase, start, end),
-    fetchPeriodSummaryTransactions(supabase, compareStart, compareEnd),
-  ]);
-
-  if (entitiesResult.error) throw entitiesResult.error;
-
-  const entities = entitiesResult.data ?? [];
-
+function buildEntitySummaries(
+  entities: Array<{ id: string; name: string; slug: string }>,
+  transactions: SummaryTransaction[],
+  previousTransactions: SummaryTransaction[],
+  cpaReviewIds: Set<string>,
+): EntitySummary[] {
   const summaries = entities.map((entity) => {
     const entityTransactions = transactions.filter(
       (tx) => tx.classification.entity_id === entity.id,
@@ -328,17 +284,48 @@ export async function getEntitySummaries(period: PeriodRange): Promise<EntitySum
   return summaries;
 }
 
+export async function getEntitySummaries(period: PeriodRange): Promise<EntitySummary[]> {
+  const supabase = await createClient();
+  const { start, end, compareStart, compareEnd } = period;
+
+  const [cpaReviewIds, entitiesResult, transactions, previousTransactions] = await Promise.all([
+    getCpaReviewCategoryIdSet(supabase),
+    supabase.from("entities").select("id, name, slug, display_order").eq("is_classifiable", true).order("display_order"),
+    fetchPeriodSummaryTransactions(supabase, start, end),
+    fetchPeriodSummaryTransactions(supabase, compareStart, compareEnd),
+  ]);
+
+  if (entitiesResult.error) throw entitiesResult.error;
+
+  return buildEntitySummaries(entitiesResult.data ?? [], transactions, previousTransactions, cpaReviewIds);
+}
+
 export async function getReviewDashboardStats(
   period: PeriodRange,
 ): Promise<ReviewDashboardStats & { summaries: EntitySummary[] }> {
   const supabase = await createClient();
-  const { start, end } = period;
-  const [cpaReviewIds, summaries, transactions, aiPreclassifiedCount] = await Promise.all([
-    getCpaReviewCategoryIdSet(supabase),
-    getEntitySummaries(period),
-    fetchPeriodSummaryTransactions(supabase, start, end),
-    getAiPreclassifiedCount(),
-  ]);
+  const { start, end, compareStart, compareEnd } = period;
+
+  // OPT-05: fetch the current period ONCE and reuse it for both the per-entity summaries
+  // and the dashboard counts (the old code fetched it twice, plus cpaReviewIds twice).
+  const [cpaReviewIds, entitiesResult, transactions, previousTransactions, aiPreclassifiedCount] =
+    await Promise.all([
+      getCpaReviewCategoryIdSet(supabase),
+      supabase.from("entities").select("id, name, slug, display_order").eq("is_classifiable", true).order("display_order"),
+      fetchPeriodSummaryTransactions(supabase, start, end),
+      fetchPeriodSummaryTransactions(supabase, compareStart, compareEnd),
+      getAiPreclassifiedCount(),
+    ]);
+
+  if (entitiesResult.error) throw entitiesResult.error;
+
+  const summaries = buildEntitySummaries(
+    entitiesResult.data ?? [],
+    transactions,
+    previousTransactions,
+    cpaReviewIds,
+  );
+
   return {
     ...buildReviewDashboardStats(summaries, transactions, cpaReviewIds, aiPreclassifiedCount),
     summaries,
@@ -382,48 +369,27 @@ function monthFromDate(date: string) {
   return Number(date.slice(5, 7));
 }
 
+const MATRIX_SELECT = `
+  amount,
+  transaction_date,
+  classification:classifications!inner(
+    entity_id,
+    category_id,
+    category:categories(id, full_path)
+  )
+`;
+
 async function fetchYearMatrixTransactions(year: number, entityId?: string): Promise<MatrixTransaction[]> {
   const supabase = await createClient();
-  const yearStart = `${year}-01-01`;
-  const yearEnd = `${year + 1}-01-01`;
-  const pageSize = 1000;
-  const all: MatrixTransaction[] = [];
-  let from = 0;
-
-  while (true) {
-    let query = supabase
-      .from("transactions")
-      .select(
-        `
-        amount,
-        transaction_date,
-        classification:classifications!inner(
-          entity_id,
-          category_id,
-          category:categories(id, full_path)
-        )
-      `,
-      )
-      .gte("transaction_date", yearStart)
-      .lt("transaction_date", yearEnd)
-      .order("transaction_date", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + pageSize - 1);
-
-    if (entityId) {
-      query = query.eq("classification.entity_id", entityId);
-    }
-
-    const { data, error } = await query;
-
-    if (error) throw error;
-    const page = (data ?? []) as MatrixTransaction[];
-    all.push(...page);
-    if (page.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return all;
+  // OPT-08: same select/filters/ascending order over the [year, year+1) window.
+  return fetchPeriodTransactions<MatrixTransaction>({
+    supabase,
+    select: MATRIX_SELECT,
+    start: `${year}-01-01`,
+    end: `${year + 1}-01-01`,
+    entityId,
+    order: "asc",
+  });
 }
 
 export function buildMonthlyRow(
@@ -711,6 +677,8 @@ export async function getTransactionById(id: string): Promise<TransactionWithDet
   const { data, error } = await supabase.from("transactions").select(TRANSACTION_SELECT).eq("id", id).maybeSingle();
 
   if (error) throw error;
+  // OPT-11: one intentional narrow cast. PostgREST types embedded to-one joins as arrays,
+  // but the runtime shape of the shared TRANSACTION_SELECT literal matches TransactionWithDetails.
   return (data as unknown as TransactionWithDetails | null) ?? null;
 }
 

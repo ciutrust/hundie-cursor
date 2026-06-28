@@ -25,8 +25,58 @@ export function recencyWeight(isoDate: string, reference = new Date()): number {
   return 1;
 }
 
-const AMOUNT_EXACT_WEIGHT = 6;
-const AMOUNT_NEAREST_WEIGHT = 4;
+// Per-occurrence score weights. Amount signals dominate because a matching prior amount
+// for the same vendor is the strongest evidence we have. For context, the other sources
+// are weighted (× recency, recency ∈ {1,2,3}): qb training = 1, ledger history = 1.5,
+// suggestion-event accept/override = 2.5 (see mergeWeightedSuggestions below).
+const AMOUNT_EXACT_WEIGHT = 6; // exact prior-amount match for this vendor (strongest amount signal)
+const AMOUNT_NEAREST_WEIGHT = 4; // closest prior amount when there is no exact hit
+
+/**
+ * OPT-09: which source label a ranked entry gets. Extracted verbatim from the former
+ * nested ternary (same branch order) — amount dominance first, then ledger, then events,
+ * then the qb/blended fallbacks. Pure; the caller applies the confirmed_history→blended
+ * remap afterwards.
+ */
+export function resolvePrimarySource(
+  e: Pick<WeightedCategoryEntry, "qbScore" | "ledgerScore" | "eventScore" | "amountScore">,
+): SuggestionSourceKind {
+  if (
+    e.amountScore > 0 &&
+    e.amountScore >= e.qbScore &&
+    e.amountScore >= e.ledgerScore &&
+    e.amountScore >= e.eventScore
+  ) {
+    return "amount_match";
+  }
+  if (e.ledgerScore >= e.qbScore && e.ledgerScore >= e.eventScore) return "confirmed_history";
+  if (e.eventScore > e.qbScore) return "confirmed_history";
+  if (e.qbScore > 0 && e.ledgerScore > 0) return "blended";
+  if (e.qbScore > 0) return "qb_training";
+  return "confirmed_history";
+}
+
+/**
+ * OPT-09: confidence bucket for a ranked entry. Extracted verbatim from the former
+ * if/else-if chain (same branch order). Only the top entry (index 0) can be "high".
+ */
+export function resolveConfidence(
+  e: Pick<WeightedCategoryEntry, "score" | "amountScore" | "amountMatchType">,
+  index: number,
+  share: number,
+): CategorySuggestion["confidence"] {
+  if (
+    index === 0 &&
+    e.amountScore > 0 &&
+    e.amountMatchType === "exact" &&
+    e.amountScore >= AMOUNT_EXACT_WEIGHT * 2
+  ) {
+    return "high";
+  }
+  if (index === 0 && e.score >= 4 && share >= 0.45) return "high";
+  if (e.score >= 2 && share >= 0.25) return "medium";
+  return "low";
+}
 
 export function mergeWeightedSuggestions(
   qbRows: Array<{ category_id: string | null; category_name: string }>,
@@ -136,38 +186,12 @@ export function mergeWeightedSuggestions(
   const totalScore = ranked.reduce((sum, entry) => sum + entry.score, 0);
 
   return ranked.map((entry, index) => {
-    const primarySource: SuggestionSourceKind =
-      entry.amountScore > 0 &&
-      entry.amountScore >= entry.qbScore &&
-      entry.amountScore >= entry.ledgerScore &&
-      entry.amountScore >= entry.eventScore
-        ? "amount_match"
-        : entry.ledgerScore >= entry.qbScore && entry.ledgerScore >= entry.eventScore
-          ? "confirmed_history"
-          : entry.eventScore > entry.qbScore
-            ? "confirmed_history"
-            : entry.qbScore > 0 && entry.ledgerScore > 0
-              ? "blended"
-              : entry.qbScore > 0
-                ? "qb_training"
-                : "confirmed_history";
+    const primarySource = resolvePrimarySource(entry);
 
     const displayCount = Math.max(1, entry.matchCount);
     const share = entry.score / Math.max(totalScore, 1);
 
-    let confidence: CategorySuggestion["confidence"] = "low";
-    if (
-      index === 0 &&
-      entry.amountScore > 0 &&
-      entry.amountMatchType === "exact" &&
-      entry.amountScore >= AMOUNT_EXACT_WEIGHT * 2
-    ) {
-      confidence = "high";
-    } else if (index === 0 && entry.score >= 4 && share >= 0.45) {
-      confidence = "high";
-    } else if (entry.score >= 2 && share >= 0.25) {
-      confidence = "medium";
-    }
+    const confidence = resolveConfidence(entry, index, share);
 
     const source =
       primarySource === "confirmed_history" && entry.qbScore > 0 && entry.amountScore === 0

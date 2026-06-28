@@ -220,11 +220,6 @@ export function sanitizeOrToken(token: string): string {
   return token.replace(/[%_\\(),.]/g, "");
 }
 
-/** @deprecated Use sanitizeOrToken — kept for call-site compatibility. */
-export function escapeIlikePattern(token: string): string {
-  return sanitizeOrToken(token);
-}
-
 export function computeSuggestionConfidence(
   count: number,
   totalMatches: number,

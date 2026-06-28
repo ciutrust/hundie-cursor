@@ -235,7 +235,9 @@ export async function getAiSuggestionForTransaction(transactionId: string) {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("ai_suggestions")
-    .select("*")
+    // OPT-12: the sole consumer reads exactly these 5 columns; transaction_id/is_current
+    // are WHERE filters, not needed in the projection.
+    .select("suggested_category_id, suggested_category_path, confidence, rationale, entity_slug")
     .eq("transaction_id", transactionId)
     .eq("is_current", true)
     .maybeSingle();

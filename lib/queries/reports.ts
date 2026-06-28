@@ -2,7 +2,33 @@ import type { PeriodRange } from "@/lib/period";
 import { rowsToCsv } from "@/lib/csv";
 import { isBookedOperatingExpense } from "@/lib/category-expense";
 import { createClient } from "@/lib/supabase/server";
-import { paginateAll } from "@/lib/supabase/paginate";
+import { fetchPeriodTransactions } from "@/lib/queries/fetch-period-transactions";
+
+const REPORT_SELECT = `
+  transaction_date,
+  description,
+  vendor,
+  amount,
+  account:accounts!inner(display_name),
+  classification:classifications!inner(
+    notes,
+    entity:entities!inner(name, slug),
+    category:categories(full_path)
+  )
+`;
+
+type ReportTxRow = {
+  transaction_date: string;
+  description: string;
+  vendor: string | null;
+  amount: number;
+  account: { display_name: string };
+  classification: {
+    notes: string | null;
+    entity: { name: string; slug: string };
+    category: { full_path: string } | null;
+  };
+};
 
 export type ReportTransactionRow = {
   transaction_date: string;
@@ -23,37 +49,15 @@ export async function getReportTransactions(
   entitySlug?: string,
 ): Promise<ReportTransactionRow[]> {
   const supabase = await createClient();
-  const { start, end } = period;
 
-  const rows = await paginateAll(async (from, pageSize) => {
-    let query = supabase
-      .from("transactions")
-      .select(
-        `
-        transaction_date,
-        description,
-        vendor,
-        amount,
-        account:accounts!inner(display_name),
-        classification:classifications!inner(
-          notes,
-          entity:entities!inner(name, slug),
-          category:categories(full_path)
-        )
-      `,
-      )
-      .gte("transaction_date", start)
-      .lt("transaction_date", end)
-      .order("transaction_date", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + pageSize - 1);
-
-    if (entitySlug) {
-      query = query.eq("classification.entity.slug", entitySlug);
-    }
-
-    const { data, error } = await query;
-    return { data: data ?? [], error };
+  // OPT-08: same select/filters/ascending order via the shared period fetcher.
+  const rows = await fetchPeriodTransactions<ReportTxRow>({
+    supabase,
+    select: REPORT_SELECT,
+    start: period.start,
+    end: period.end,
+    entitySlug,
+    order: "asc",
   });
 
   return rows.map((row) => {

@@ -31,7 +31,6 @@
     "import:qb-2025:dry-run": "node scripts/apply-qb-categories-to-ledger.mjs --dry-run --from 2025-01-01 --to 2026-01-01",
     "import:qb-quicksilver": "node scripts/apply-qb-categories-to-ledger.mjs --apply --account cap-one-quicksilver-claudia --qb-source \"Capital One\" --from 2025-07-01 --to 2026-07-01",
     "import:qb-quicksilver:dry-run": "node scripts/apply-qb-categories-to-ledger.mjs --dry-run --account cap-one-quicksilver-claudia --qb-source \"Capital One\" --from 2025-07-01 --to 2026-07-01",
-    "import:cards:sql": "node scripts/generate-card-import-sql.mjs && node scripts/combine-card-import-sql.mjs && node scripts/split-card-import-sql.mjs && node scripts/batch-card-import-sql.mjs",
     "import:cards:csv-2025-2026": "node scripts/import-cards.mjs --all --csv-dir '/Users/ac/Downloads/CSV 2025-2026'",
     "import:cards:csv-2025-2026:dry-run": "node scripts/import-cards.mjs --dry-run --all --csv-dir '/Users/ac/Downloads/CSV 2025-2026'",
     "import:classify-refunds": "node scripts/classify-refund-imports.mjs --apply",

@@ -9,10 +9,10 @@ import {
 } from "@/lib/suggestions/amount-aware-ranking";
 import { mergeWeightedSuggestions } from "@/lib/suggestions/blend-ranking";
 import {
-  escapeIlikePattern,
   extractSearchTokens,
   extractSearchTokensFromTransactions,
   extractVendorSearchKey,
+  sanitizeOrToken,
   shouldSuggestBulkCategories,
   shouldSuggestCategories,
   type BulkCategorySuggestionInput,
@@ -20,25 +20,25 @@ import {
   type CategorySuggestionInput,
 } from "@/lib/suggestions/category-suggestions";
 
+type ServerClient = Awaited<ReturnType<typeof createClient>>;
+
 type LedgerRow = AmountHistoryRow & {
   transaction_date: string;
   description: string;
   vendor: string | null;
 };
 
-async function getEntityId(slug: string) {
-  const supabase = await createClient();
+async function getEntityId(supabase: ServerClient, slug: string) {
   const { data, error } = await supabase.from("entities").select("id").eq("slug", slug).single();
   if (error || !data) return null;
   return data.id;
 }
 
-async function fetchQbTrainingRows(entityId: string, tokens: string[]) {
-  const supabase = await createClient();
+async function fetchQbTrainingRows(supabase: ServerClient, entityId: string, tokens: string[]) {
   if (tokens.length === 0) return [];
 
   const orFilters = tokens.flatMap((token) => {
-    const pattern = escapeIlikePattern(token);
+    const pattern = sanitizeOrToken(token);
     return [`vendor_name.ilike.%${pattern}%`, `description.ilike.%${pattern}%`];
   });
 
@@ -52,12 +52,15 @@ async function fetchQbTrainingRows(entityId: string, tokens: string[]) {
   return data ?? [];
 }
 
-async function fetchLedgerRows(entityId: string, tokens: string[]): Promise<LedgerRow[]> {
-  const supabase = await createClient();
+async function fetchLedgerRows(
+  supabase: ServerClient,
+  entityId: string,
+  tokens: string[],
+): Promise<LedgerRow[]> {
   if (tokens.length === 0) return [];
 
   const orFilters = tokens.flatMap((token) => {
-    const pattern = escapeIlikePattern(token);
+    const pattern = sanitizeOrToken(token);
     return [`vendor.ilike.%${pattern}%`, `description.ilike.%${pattern}%`];
   });
 
@@ -94,8 +97,7 @@ async function fetchLedgerRows(entityId: string, tokens: string[]): Promise<Ledg
   );
 }
 
-async function fetchSuggestionEventRows(entityId: string, tokens: string[]) {
-  const supabase = await createClient();
+async function fetchSuggestionEventRows(supabase: ServerClient, entityId: string, tokens: string[]) {
   if (tokens.length === 0) return [];
 
   const { data, error } = await supabase
@@ -134,20 +136,21 @@ function filterLedgerRowsByVendorKey(ledgerRows: LedgerRow[], vendorKey: string)
 }
 
 async function fetchBlendedSuggestions(
+  supabase: ServerClient,
   entitySlug: string,
+  entityId: string | null,
   tokens: string[],
   options?: { amount?: number; vendorKey?: string },
 ) {
-  const entityId = await getEntityId(entitySlug);
   if (!entityId) {
     return { suggestions: [], error: `${entitySlug} entity not found` };
   }
 
   try {
     const [qbRows, ledgerRows, eventRows] = await Promise.all([
-      entitySlug === "gbsl" ? fetchQbTrainingRows(entityId, tokens) : Promise.resolve([]),
-      fetchLedgerRows(entityId, tokens),
-      fetchSuggestionEventRows(entityId, tokens),
+      entitySlug === "gbsl" ? fetchQbTrainingRows(supabase, entityId, tokens) : Promise.resolve([]),
+      fetchLedgerRows(supabase, entityId, tokens),
+      fetchSuggestionEventRows(supabase, entityId, tokens),
     ]);
 
     const vendorKey = options?.vendorKey ?? "";
@@ -173,13 +176,16 @@ async function fetchBlendedSuggestions(
   }
 }
 
-export async function getCategorySuggestions(
+/**
+ * OPT-03: already-authed core for a single suggestion request. Takes the batch's client +
+ * pre-resolved entityId so callers can share one requireUser() and one slug lookup. Keeps the
+ * same guard-then-compute order as before, so output is identical.
+ */
+async function computeCategorySuggestions(
+  supabase: ServerClient,
+  entityId: string | null,
   input: CategorySuggestionInput,
 ): Promise<{ suggestions: CategorySuggestion[]; error?: string }> {
-  // SEC-05: explicit auth guard (defense-in-depth on top of RLS).
-  const { error: authError } = await requireUser();
-  if (authError) return { suggestions: [], error: authError };
-
   if (!shouldSuggestCategories(input)) {
     return { suggestions: [] };
   }
@@ -187,7 +193,30 @@ export async function getCategorySuggestions(
   const tokens = extractSearchTokens(input.description, input.vendor);
   const vendorKey = extractVendorSearchKey(input.description, input.vendor);
 
-  return fetchBlendedSuggestions(input.entitySlug, tokens, {
+  return fetchBlendedSuggestions(supabase, input.entitySlug, entityId, tokens, {
+    amount: input.amount,
+    vendorKey,
+  });
+}
+
+export async function getCategorySuggestions(
+  input: CategorySuggestionInput,
+): Promise<{ suggestions: CategorySuggestion[]; error?: string }> {
+  // SEC-05: explicit auth guard (defense-in-depth on top of RLS).
+  const { error: authError, supabase } = await requireUser();
+  if (authError) return { suggestions: [], error: authError };
+
+  if (!shouldSuggestCategories(input)) {
+    return { suggestions: [] };
+  }
+
+  // Resolve after the guard to preserve the previous guard-before-lookup order.
+  const entityId = await getEntityId(supabase, input.entitySlug);
+
+  const tokens = extractSearchTokens(input.description, input.vendor);
+  const vendorKey = extractVendorSearchKey(input.description, input.vendor);
+
+  return fetchBlendedSuggestions(supabase, input.entitySlug, entityId, tokens, {
     amount: input.amount,
     vendorKey,
   });
@@ -197,12 +226,14 @@ export async function getBulkCategorySuggestions(
   input: BulkCategorySuggestionInput,
 ): Promise<{ suggestions: CategorySuggestion[]; error?: string }> {
   // SEC-05: explicit auth guard (defense-in-depth on top of RLS).
-  const { error: authError } = await requireUser();
+  const { error: authError, supabase } = await requireUser();
   if (authError) return { suggestions: [], error: authError };
 
   if (!shouldSuggestBulkCategories(input)) {
     return { suggestions: [] };
   }
+
+  const entityId = await getEntityId(supabase, input.entitySlug);
 
   const tokens = extractSearchTokensFromTransactions(input.transactions);
   const sample = input.transactions[0];
@@ -215,7 +246,7 @@ export async function getBulkCategorySuggestions(
       .filter((amount): amount is number => amount != null),
   );
 
-  return fetchBlendedSuggestions(input.entitySlug, tokens, {
+  return fetchBlendedSuggestions(supabase, input.entitySlug, entityId, tokens, {
     amount: bulkAmount,
     vendorKey,
   });
@@ -225,6 +256,10 @@ export async function getBulkCategorySuggestions(
  * Top suggestion per vendor, for the inline one-click pills on the Classify list.
  * The caller dedupes to unique vendor keys (ordered by frequency); we cap the fan-out so a huge
  * backlog can't fire hundreds of queries. Rows without a pill still classify via the dialog.
+ *
+ * OPT-03 + WS-C: ONE requireUser() and ONE entity-slug resolution for the whole batch (was 51
+ * auth checks + ~150 client creations for a 50-vendor load). Each inner computation reuses the
+ * shared client + entityId, so security is preserved with a single auth check.
  */
 export async function getInlineCategorySuggestions(input: {
   entitySlug: string;
@@ -232,13 +267,15 @@ export async function getInlineCategorySuggestions(input: {
 }): Promise<{ suggestions: Record<string, CategorySuggestion | null> }> {
   // SEC-05: explicit auth guard (defense-in-depth on top of RLS). The return
   // shape has no error field, so fail closed to an empty suggestion map.
-  const { error: authError } = await requireUser();
+  const { error: authError, supabase } = await requireUser();
   if (authError) return { suggestions: {} };
+
+  const entityId = await getEntityId(supabase, input.entitySlug);
 
   const top = input.vendors.slice(0, 50);
   const entries = await Promise.all(
     top.map(async (vendor) => {
-      const result = await getCategorySuggestions({
+      const result = await computeCategorySuggestions(supabase, entityId, {
         description: vendor.description,
         vendor: vendor.vendor,
         entitySlug: input.entitySlug,

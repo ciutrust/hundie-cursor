@@ -3,7 +3,7 @@ import { isBookedOperatingExpense } from "@/lib/category-expense";
 import { getCpaReviewCategoryIdSet, needsReviewCategory } from "@/lib/category-review";
 import { extractVendorSearchKey } from "@/lib/suggestions/category-suggestions";
 import { createClient } from "@/lib/supabase/server";
-import { paginateAll } from "@/lib/supabase/paginate";
+import { fetchPeriodTransactions as fetchPeriodTransactionsBase } from "@/lib/queries/fetch-period-transactions";
 
 type TxRow = {
   id: string;
@@ -26,43 +26,35 @@ export function uncategorizedDaysOld(transactionDate: string, now: Date = new Da
   return Math.max(0, Math.floor((now.getTime() - txDate.getTime()) / (1000 * 60 * 60 * 24)));
 }
 
-async function fetchPeriodTransactions(
+const ANALYTICS_SELECT = `
+  id,
+  amount,
+  transaction_date,
+  description,
+  vendor,
+  account:accounts!inner(slug, display_name),
+  classification:classifications!inner(
+    entity_id,
+    category_id,
+    entity:entities!inner(slug, name),
+    category:categories(full_path)
+  )
+`;
+
+function fetchPeriodTransactions(
   supabase: Awaited<ReturnType<typeof createClient>>,
   start: string,
   end: string,
   entitySlug?: string,
-) {
-  return paginateAll(async (from, pageSize) => {
-    let query = supabase
-      .from("transactions")
-      .select(
-        `
-        id,
-        amount,
-        transaction_date,
-        description,
-        vendor,
-        account:accounts!inner(slug, display_name),
-        classification:classifications!inner(
-          entity_id,
-          category_id,
-          entity:entities!inner(slug, name),
-          category:categories(full_path)
-        )
-      `,
-      )
-      .gte("transaction_date", start)
-      .lt("transaction_date", end)
-      .order("transaction_date")
-      .order("id")
-      .range(from, from + pageSize - 1);
-
-    if (entitySlug) {
-      query = query.eq("classification.entity.slug", entitySlug);
-    }
-
-    const { data, error } = await query;
-    return { data: data as TxRow[] | null, error };
+): Promise<TxRow[]> {
+  // OPT-08: same select/filters/ascending order via the shared period fetcher.
+  return fetchPeriodTransactionsBase<TxRow>({
+    supabase,
+    select: ANALYTICS_SELECT,
+    start,
+    end,
+    entitySlug,
+    order: "asc",
   });
 }
 
