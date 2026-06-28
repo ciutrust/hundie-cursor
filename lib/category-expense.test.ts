@@ -44,8 +44,15 @@ describe("category-expense", () => {
       "Owners Equity:Owner Distribution",
       // capital
       "Leasehold improvements",
+      "Leasehold Improvements",
       "Tenant improvement allowance",
       "Property purchase",
+      // liability
+      "Mortgage principal payment",
+      "Mortgage principal — primary home",
+      "Ford Motor Credit - F150:Principal",
+      // non_deductible
+      "Tax Penalty",
     ];
     expect([...NON_EXPENSE_CATEGORY_PATHS].sort()).toEqual(seeded.sort());
   });
@@ -85,6 +92,35 @@ describe("category-kind", () => {
     for (const path of NON_EXPENSE_CATEGORY_PATHS) {
       expect(categoryKind(path)).not.toBe("expense");
     }
+  });
+
+  it("treats loan principal paydown as liability, off the P&L (ACCT-08/11)", () => {
+    expect(categoryKind("Mortgage principal payment")).toBe("liability");
+    expect(categoryKind("Mortgage principal — primary home")).toBe("liability");
+    expect(categoryKind("Ford Motor Credit - F150:Principal")).toBe("liability");
+    expect(isBookedOperatingExpense("Mortgage principal payment")).toBe(false);
+    expect(isBookedOperatingExpense("Ford Motor Credit - F150:Principal")).toBe(false);
+    // the matching interest line is still a deductible expense
+    expect(categoryKind("Mortgage interest")).toBe("expense");
+    expect(categoryKind("Ford Motor Credit - F150:Interest")).toBe("expense");
+  });
+
+  it("treats Tax Penalty as non_deductible, excluded from the deductible total (TAX-18)", () => {
+    expect(categoryKind("Tax Penalty")).toBe("non_deductible");
+    expect(countsAsExpense("Tax Penalty")).toBe(false);
+    expect(isBookedOperatingExpense("Tax Penalty")).toBe(false);
+  });
+
+  it("maps the GBSL capital-I Leasehold Improvements to capital (ACCT-13)", () => {
+    expect(categoryKind("Leasehold Improvements")).toBe("capital");
+    expect(categoryKind("Leasehold improvements")).toBe("capital"); // lowercase variant unchanged
+  });
+
+  it("maps the ACAA 136-Anita income leg to income (ACCT-07)", () => {
+    expect(categoryKind("Intercompany — 136 Anita (income)")).toBe("income");
+    expect(countsAsExpense("Intercompany — 136 Anita (income)")).toBe(false);
+    // the GBSL expense leg keeps the default expense kind (real deductible rent on GBSL's books)
+    expect(categoryKind("Intercompany — 136 Anita")).toBe("expense");
   });
 });
 

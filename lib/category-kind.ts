@@ -14,6 +14,8 @@ export type CategoryKind =
   | "transfer"
   | "funding"
   | "capital"
+  | "liability"
+  | "non_deductible"
   | "unclassified";
 
 /** Money movement that is neither spend nor income — card payments, transfers, refunds, redirects. */
@@ -44,8 +46,28 @@ const FUNDING_PATHS = new Set<string>([
 /** Fixed-asset flows, both directions (leasehold improvements, TI allowance, property purchase). */
 const CAPITAL_PATHS = new Set<string>([
   "Leasehold improvements",
+  "Leasehold Improvements", // GBSL QB chart variant (capital I) — ACCT-13
   "Tenant improvement allowance",
   "Property purchase",
+]);
+
+/**
+ * Debt principal paydown — a balance-sheet liability reduction, NOT an expense. The matching
+ * INTEREST line stays "expense" (deductible). ACCT-08 / ACCT-11, TAX-02 / TAX-06. Excluded from
+ * the deductible-expense total (countsAsExpense=false), so principal leaves the P&L.
+ */
+const LIABILITY_PATHS = new Set<string>([
+  "Mortgage principal payment", // acaa-austin / pflugerville rentals
+  "Mortgage principal — primary home", // personal primary residence (em-dash U+2014)
+  "Ford Motor Credit - F150:Principal", // GBSL vehicle loan (QB subaccount of the combined loan)
+]);
+
+/**
+ * Real cash out that is NOT tax-deductible (IRC §162(f) fines & penalties). Excluded from the
+ * deductible-expense total (countsAsExpense=false), so it leaves the P&L. TAX-18.
+ */
+const NON_DEDUCTIBLE_PATHS = new Set<string>([
+  "Tax Penalty", // GBSL
 ]);
 
 /** Operating income by source. Income lands as an inflow (negative amount). */
@@ -57,6 +79,7 @@ const INCOME_PATHS = new Set<string>([
   "Interest income",
   "Other income",
   "Rent income",
+  "Intercompany — 136 Anita (income)", // Austin ACAA receives the GBSL lease — ACCT-07 (em-dash U+2014)
 ]);
 
 export function categoryKind(fullPath: string | null | undefined): CategoryKind {
@@ -71,13 +94,21 @@ export function categoryKind(fullPath: string | null | undefined): CategoryKind 
   if (TRANSFER_PATHS.has(path)) return "transfer";
   if (FUNDING_PATHS.has(path)) return "funding";
   if (CAPITAL_PATHS.has(path)) return "capital";
+  if (LIABILITY_PATHS.has(path)) return "liability";
+  if (NON_DEDUCTIBLE_PATHS.has(path)) return "non_deductible";
   if (INCOME_PATHS.has(path)) return "income";
   return "expense";
 }
 
-/** Backward-compatible set of every path that is not an operating expense (transfer + funding + capital). */
+/**
+ * Backward-compatible set of every path that is not an operating expense
+ * (transfer + funding + capital + liability + non_deductible). Income stays excluded from this
+ * union by convention — income is an additive lens, not a "non-expense" exclusion path.
+ */
 export const NON_EXPENSE_CATEGORY_PATHS = new Set<string>([
   ...TRANSFER_PATHS,
   ...FUNDING_PATHS,
   ...CAPITAL_PATHS,
+  ...LIABILITY_PATHS,
+  ...NON_DEDUCTIBLE_PATHS,
 ]);

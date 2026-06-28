@@ -30,4 +30,27 @@ describe("flagIntercompanyMatches", () => {
     const rows = [row("gbsl", "2026-03-01", 2500), row("acaa-austin", "2026-04-01", 999)];
     expect(flagIntercompanyMatches(rows).some((r) => r.potentialMirror)).toBe(false);
   });
+
+  test("nets the 136 Anita lease across GBSL expense and ACAA income legs (ACCT-07)", () => {
+    // The two legs carry DIFFERENT category paths (expense leg vs income leg) but the same
+    // date + |amount| across DIFFERENT entities, so both come back flagged as a potential mirror.
+    const rows = [
+      {
+        entitySlug: "gbsl",
+        transactionDate: "2026-03-01",
+        amount: 2500,
+        categoryPath: "Intercompany — 136 Anita",
+        description: "lease to ACAA",
+      },
+      {
+        entitySlug: "acaa-austin",
+        transactionDate: "2026-03-01",
+        amount: -2500,
+        categoryPath: "Intercompany — 136 Anita (income)",
+        description: "lease from GBSL",
+      },
+    ];
+    const flagged = flagIntercompanyMatches(rows);
+    expect(flagged.every((r) => r.potentialMirror)).toBe(true);
+  });
 });
