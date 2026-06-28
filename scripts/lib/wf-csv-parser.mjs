@@ -25,16 +25,14 @@ export function parseWellsFargoCsv(csvText, { accountType = "credit_card" } = {}
     if (PAYMENT_PATTERN.test(description)) continue;
     if (rawAmount === 0) continue; // $0 noise rows (auth holds); parity with other parsers
 
-    let amount = null;
-
-    if (accountType === "credit_card") {
-      // Charge posts negative; refund/credit posts positive -> store negative (C2).
-      amount = rawAmount < 0 ? Math.abs(rawAmount) : -rawAmount;
-    } else {
-      // Checking/savings: outflow (negative in export) -> positive expense;
-      // deposit/income (positive in export) -> negative inflow (captured for income classification).
-      amount = rawAmount < 0 ? Math.abs(rawAmount) : -rawAmount;
-    }
+    // WF posts the SAME sign convention for every export type (credit-card AND checking/savings):
+    // outflows/charges are negative, refunds/deposits positive. The ledger stores the inverse
+    // (charge positive, money-in negative), so the rule is identical regardless of accountType —
+    // one expression, no per-type branch (BUG-12: the two branches were byte-identical, a dead branch
+    // / latent sign trap). Income capture is preserved: checking deposits (positive in export) become
+    // negative inflows here for kind=income classification. accountType is retained on the signature
+    // for callers / future per-type logic.
+    const amount = rawAmount < 0 ? Math.abs(rawAmount) : -rawAmount;
 
     const checkNumber = row["CHECK #"]?.trim();
     transactions.push({

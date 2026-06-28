@@ -23,6 +23,14 @@ const eslintConfig = [
       "react-hooks/set-state-in-effect": "warn",
     },
   },
+  {
+    // Test mocks (e.g. the fake Supabase client) stand in for large third-party types and use `any`
+    // deliberately; enforcing full typing there is noise that catches no shipped bug.
+    files: ["**/*.test.ts", "**/*.test.tsx", "tests/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
 ];
 
 export default eslintConfig;

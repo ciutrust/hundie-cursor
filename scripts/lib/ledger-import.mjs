@@ -29,9 +29,21 @@ export function inDateRange(isoDate, from, to) {
   return true;
 }
 
-async function loadExistingBusinessKeys(supabase, accountId, dateMin, dateMax) {
-  const keys = new Set();
-  if (!dateMin || !dateMax) return keys;
+/**
+ * Load the existing ledger rows in [dateMin, dateMax] for an account, indexed two ways:
+ *  - `hashes`: a Set of import_hash — an exact identity match means a true re-import → idempotent skip.
+ *  - `keyCounts`: a Map of business-key → count — catches rows already present under a LEGACY/different
+ *    import_hash (e.g. imported before issuerReference was folded into the hash); the COUNT keeps the
+ *    cross-batch dedup occurrence-aware so genuine same-key duplicates are not over-collapsed (BUG-03).
+ *
+ * BUG-05: paginate with a STABLE .order("id") BEFORE .range(); without an explicit order, Postgres may
+ * return rows in an unstable order across pages, so on >1000-row windows a page could skip keys and a
+ * duplicate would slip through. The Stage-2 backfill creates exactly such >1000-row windows.
+ */
+async function loadExistingLedgerIndex(supabase, accountId, dateMin, dateMax) {
+  const hashes = new Set();
+  const keyCounts = new Map();
+  if (!dateMin || !dateMax) return { hashes, keyCounts };
 
   const pageSize = 1000;
   let offset = 0;
@@ -39,10 +51,11 @@ async function loadExistingBusinessKeys(supabase, accountId, dateMin, dateMax) {
   while (true) {
     const { data, error } = await supabase
       .from("transactions")
-      .select("transaction_date, amount, description")
+      .select("id, transaction_date, amount, description, import_hash")
       .eq("account_id", accountId)
       .gte("transaction_date", dateMin)
       .lte("transaction_date", dateMax)
+      .order("id")
       .range(offset, offset + pageSize - 1);
 
     if (error) {
@@ -52,46 +65,159 @@ async function loadExistingBusinessKeys(supabase, accountId, dateMin, dateMax) {
     if (!data?.length) break;
 
     for (const tx of data) {
-      keys.add(
-        buildTransactionDedupeKey({
-          accountId,
-          transactionDate: tx.transaction_date,
-          amount: tx.amount,
-          description: tx.description,
-        }),
-      );
+      if (tx.import_hash) hashes.add(tx.import_hash);
+      const key = buildTransactionDedupeKey({
+        accountId,
+        transactionDate: tx.transaction_date,
+        amount: tx.amount,
+        description: tx.description,
+      });
+      keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
     }
 
     if (data.length < pageSize) break;
     offset += pageSize;
   }
 
-  return keys;
+  return { hashes, keyCounts };
 }
 
-/** Skip rows that already exist under a legacy import_hash or a prior batch. */
+/**
+ * Skip rows already present in the ledger while PRESERVING genuine duplicates (BUG-03).
+ *
+ * Two phases:
+ *  1. Exact identity — a row whose import_hash is already in the ledger is a true re-import → skip.
+ *     This keeps re-imports idempotent for BOTH Plaid (whose hash carries the per-txn id) and CSV
+ *     (whose occurrence-suffixed hashes reproduce exactly on a re-run).
+ *  2. Legacy budget — for the remaining candidates WITHOUT a stable external id, an existing ledger
+ *     row of the same business key that was NOT matched by an exact hash is presumed to be the same
+ *     logical transaction stored under a legacy/different hash, so that many candidates are skipped.
+ *     The COUNT (not a boolean) is what preserves genuinely-distinct same-key charges: incoming N,
+ *     existing E → insert max(0, N - E). Candidates carrying an external_id (Plaid) have a reliable
+ *     identity, so they skip the legacy budget entirely — a brand-new Plaid charge that merely shares
+ *     date+amount+merchant with an existing row is kept, not collapsed.
+ */
 export async function filterRowsAgainstExisting(supabase, accountId, rows, dateMin, dateMax) {
-  const existingKeys = await loadExistingBusinessKeys(supabase, accountId, dateMin, dateMax);
-  const seen = new Set(existingKeys);
-  const filtered = [];
-  let skipped = 0;
+  const { hashes: existingHashes, keyCounts } = await loadExistingLedgerIndex(
+    supabase,
+    accountId,
+    dateMin,
+    dateMax,
+  );
 
-  for (const row of rows) {
-    const key = buildTransactionDedupeKey({
+  const keyOf = (row) =>
+    buildTransactionDedupeKey({
       accountId,
       transactionDate: row.transaction.transaction_date,
       amount: row.transaction.amount,
       description: row.transaction.description,
     });
-    if (seen.has(key)) {
+
+  // Phase 1: exact import_hash matches are already in the ledger (idempotent re-import).
+  const exactMatchByKey = new Map();
+  const candidates = [];
+  let skipped = 0;
+  for (const row of rows) {
+    const hash = row.transaction.import_hash;
+    if (hash && existingHashes.has(hash)) {
+      skipped++;
+      const key = keyOf(row);
+      exactMatchByKey.set(key, (exactMatchByKey.get(key) ?? 0) + 1);
+      continue;
+    }
+    candidates.push(row);
+  }
+
+  // Phase 2: legacy business-key budget over only the existing rows NOT already matched by hash.
+  const legacyBudget = new Map();
+  for (const [key, count] of keyCounts) {
+    legacyBudget.set(key, count - (exactMatchByKey.get(key) ?? 0));
+  }
+  const filtered = [];
+  for (const row of candidates) {
+    if (row.transaction.external_id) {
+      filtered.push(row); // stable Plaid identity → never collapse on business key
+      continue;
+    }
+    const key = keyOf(row);
+    const remaining = legacyBudget.get(key) ?? 0;
+    if (remaining > 0) {
+      legacyBudget.set(key, remaining - 1);
       skipped++;
       continue;
     }
-    seen.add(key);
     filtered.push(row);
   }
 
   return { rows: filtered, skipped };
+}
+
+/**
+ * Split plan rows into {existing, fresh} by whether (account_id, external_id) is already in the
+ * ledger. Rows without an external_id (all CSV rows) are always `fresh`. Plaid routing uses this so a
+ * known external_id — whether arriving as `modified` OR re-labeled `added` on a cursor reset — goes
+ * to UPDATE-in-place (BUG-01) instead of inserting a duplicate.
+ */
+export async function partitionRowsByExistingExternalId(supabase, accountId, rows) {
+  const ids = [...new Set(rows.map((r) => r.transaction.external_id).filter(Boolean))];
+  const existingIds = new Set();
+  for (const idBatch of chunk(ids, 500)) {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("external_id")
+      .eq("account_id", accountId)
+      .in("external_id", idBatch);
+    if (error) throw new Error(`external_id lookup failed: ${error.message}`);
+    for (const r of data ?? []) existingIds.add(r.external_id);
+  }
+  const existing = [];
+  const fresh = [];
+  for (const r of rows) {
+    const ext = r.transaction.external_id;
+    if (ext && existingIds.has(ext)) existing.push(r);
+    else fresh.push(r);
+  }
+  return { existing, fresh };
+}
+
+/**
+ * Apply rows keyed on (account_id, external_id) as UPDATEs to the transactions row ONLY — the
+ * classifications row is never read or written, so any human classification is preserved (BUG-01).
+ * import_hash is recomputed by the caller and updated so it stays consistent with the new amount/desc
+ * (keeps a later `added` re-feed a clean onConflict no-op). Rows whose external_id is not present yet
+ * are returned in `unmatched` for the caller to INSERT. The UPDATE deliberately omits import_batch_id,
+ * created_at and id, so the original batch lineage and insert timestamp are preserved.
+ *
+ * @returns {Promise<{ updated: number, unmatched: any[] }>}
+ */
+export async function updateTransactionsByExternalId(supabase, accountId, rows) {
+  let updated = 0;
+  const unmatched = [];
+  for (const row of rows) {
+    const externalId = row.transaction.external_id;
+    if (!externalId) {
+      unmatched.push(row); // no stable id → can't update safely; insert instead
+      continue;
+    }
+    const { data, error } = await supabase
+      .from("transactions")
+      .update({
+        transaction_date: row.transaction.transaction_date,
+        posted_date: row.transaction.posted_date,
+        amount: row.transaction.amount,
+        description: row.transaction.description,
+        vendor: row.transaction.vendor,
+        raw_category: row.transaction.raw_category,
+        import_hash: row.transaction.import_hash,
+      })
+      .eq("account_id", accountId)
+      .eq("external_id", externalId)
+      .select("id");
+    if (error) throw new Error(`Plaid modify update failed: ${error.message}`);
+    if (data && data.length > 0) updated += data.length;
+    else unmatched.push(row); // external_id not in ledger yet → insert it
+  }
+  return { updated, unmatched };
 }
 
 export function buildImportPlan(
@@ -157,6 +283,7 @@ export function buildImportPlan(
         vendor: tx.vendor,
         raw_category: tx.rawCategory,
         import_hash: importHash,
+        external_id: tx.externalId ?? null, // BUG-01: CSV has none → null (shape symmetry only)
       },
       classification: dryRun
         ? { entity_slug: entitySlug, category_id: categoryId, classified_by: classifiedBy, notes }
@@ -178,6 +305,13 @@ export function buildImportPlan(
   };
 }
 
+/**
+ * @param {any} account
+ * @param {string} sourceLabel
+ * @param {any[]} transactions
+ * @param {Map<string, string>} entityMap
+ * @param {{ dryRun?: boolean, dateFrom?: string | null, dateTo?: string | null, resolveRow?: ((tx: any) => any) | null }} [options]
+ */
 export function buildImportPlanFromTransactions(
   account,
   sourceLabel,
@@ -234,6 +368,7 @@ export function buildImportPlanFromTransactions(
         vendor: tx.vendor ?? null,
         raw_category: tx.rawCategory ?? null,
         import_hash: importHash,
+        external_id: tx.externalId ?? null, // BUG-01: Plaid transaction_id (CSV → null)
       },
       classification: dryRun
         ? {
@@ -321,6 +456,7 @@ export async function importAccountPlan(
     console.log(`  Existing ledger dupes skipped: ${existingDupes}`);
   }
 
+  // PASS 1 — INSERT only new transactions (business keys not already in the ledger).
   for (const batchRows of chunk(rowsToImport, 200)) {
     const txPayload = batchRows.map((row) => ({
       ...row.transaction,
@@ -338,9 +474,17 @@ export async function importAccountPlan(
       throw new Error(`Transaction upsert failed: ${txError.message}`);
     }
     inserted += (newRows ?? []).length;
+  }
 
-    // Resolve transaction ids for EVERY row in the batch (newly-inserted AND already-existing), so a
-    // prior partial run that inserted a transaction but not its classification self-heals here.
+  // PASS 2 — HEAL classifications over the FULL deduped set (BUG-02).
+  // filterRowsAgainstExisting drops rows whose business key already exists, so a transaction inserted
+  // on a PRIOR run whose classification insert failed (an orphan — invisible to every
+  // classifications!inner report) never reached the old heal loop. Iterating `rows` (every deduped
+  // row, INCLUDING ones filtered out of the insert) resolves each tx id by import_hash and inserts any
+  // MISSING classification. Existing classifications (human or import) are preserved — never
+  // overwritten. Rows whose import_hash isn't found (legacy rows stored under a different hash) are
+  // skipped: we only heal rows we can match exactly by identity.
+  for (const batchRows of chunk(rows, 200)) {
     const hashes = batchRows.map((row) => row.transaction.import_hash);
     const { data: txRows, error: selError } = await supabase
       .from("transactions")
