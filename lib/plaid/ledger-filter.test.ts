@@ -57,4 +57,22 @@ describe("shouldImportPlaidTxn — mirrors the CSV parsers' non-expense drop rul
   test("drops a pending transaction", () => {
     expect(shouldImportPlaidTxn({ ...base, pending: true }, "credit_card")).toBe(false);
   });
+
+  test("drops a credit-card charge Plaid mis-tagged as INCOME (the Citi case)", () => {
+    expect(
+      shouldImportPlaidTxn(
+        { ...base, amount: -200, rawCategory: "INCOME", description: "06/25 ALPHA MENS HEALTH 200.00" },
+        "credit_card",
+      ),
+    ).toBe(false);
+  });
+
+  test("keeps depository INCOME (real income on checking, not a card)", () => {
+    expect(
+      shouldImportPlaidTxn(
+        { ...base, amount: -2000, rawCategory: "INCOME", description: "DIRECT DEP PAYROLL" },
+        "checking",
+      ),
+    ).toBe(true);
+  });
 });

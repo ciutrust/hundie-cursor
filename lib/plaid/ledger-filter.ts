@@ -18,15 +18,20 @@ const DROP_PFC = new Set(["LOAN_PAYMENTS"]);
 
 export function shouldImportPlaidTxn(
   t: Pick<AggregatorTransaction, "amount" | "description" | "rawCategory" | "pending">,
-  // accountType retained for the call signature / future per-type rules (currently account-agnostic).
-  _accountType: string,
+  accountType: string,
 ): boolean {
   if (t.pending) return false; // posted-only
   if (t.amount === 0) return false; // $0 auth-hold noise
   if (t.rawCategory && DROP_PFC.has(t.rawCategory.toUpperCase())) return false; // CC/loan payments
   if (PAYMENT_NAME_RE.test(t.description)) return false; // payments / autopay / thank-you
 
-  // Keep everything else: card charges (positive), refunds (negative), and now depository
+  // Guard: a credit-card transaction Plaid tags INCOME is almost always a mis-categorized, often
+  // mis-signed, unsettled charge — cards don't receive income (seen with Citi Strata: a $200 charge
+  // came through negative + tagged INCOME). Skip it; once settled, Plaid re-reports it correctly.
+  const isCard = accountType === "credit_card" || accountType === "credit";
+  if (isCard && t.rawCategory?.toUpperCase() === "INCOME") return false;
+
+  // Keep everything else: card charges (positive), refunds (negative), and depository
   // deposits/income (negative inflows) — classified after import.
   return true;
 }
