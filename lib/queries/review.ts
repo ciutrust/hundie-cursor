@@ -1,6 +1,11 @@
 import type { PeriodRange } from "@/lib/period";
-import { countsAsExpense, isOperatingExpense } from "@/lib/category-expense";
-import { CPA_REVIEW_CATEGORY_PATHS, isCpaReviewCategory } from "@/lib/category-review";
+import { countsAsExpense, isBookedOperatingExpense } from "@/lib/category-expense";
+import {
+  getCpaReviewCategoryIdSet,
+  isCpaReviewCategory,
+  needsReviewCategory,
+  reviewBacklogOrClause,
+} from "@/lib/category-review";
 import { createClient } from "@/lib/supabase/server";
 import type { MonthCloseCell } from "@/lib/month-close";
 import { getAiPreclassifiedCount } from "@/lib/queries/ai-suggestions";
@@ -122,15 +127,6 @@ async function fetchPeriodTransactionDetails(
   return all;
 }
 
-async function getCpaReviewCategoryIdSet(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const { data } = await supabase.from("categories").select("id").in("full_path", [...CPA_REVIEW_CATEGORY_PATHS]);
-  return new Set((data ?? []).map((row) => row.id));
-}
-
-function needsReviewCategory(categoryId: string | null | undefined, cpaReviewIds: Set<string>) {
-  return !categoryId || cpaReviewIds.has(categoryId);
-}
-
 function isNullCategory(categoryId: string | null | undefined) {
   return !categoryId;
 }
@@ -195,16 +191,26 @@ export type CategorizationProgress = {
 export async function getCategorizationProgress(): Promise<CategorizationProgress> {
   const supabase = await createClient();
 
-  const [{ count: total }, { count: categorized }, { data: events }] = await Promise.all([
+  const [{ count: total }, { count: categorized }, events] = await Promise.all([
     supabase.from("classifications").select("id", { count: "exact", head: true }),
     supabase
       .from("classifications")
       .select("id", { count: "exact", head: true })
       .not("category_id", "is", null),
-    supabase.from("suggestion_events").select("event_type, suggestion_source"),
+    // OPT-02: paginate the suggestion_events scan so it isn't silently truncated at 1000.
+    paginateAll<{ event_type: string | null; suggestion_source: string | null }>(
+      async (from, pageSize) => {
+        const { data, error } = await supabase
+          .from("suggestion_events")
+          .select("event_type, suggestion_source")
+          .order("id", { ascending: true })
+          .range(from, from + pageSize - 1);
+        return { data, error };
+      },
+    ),
   ]);
 
-  const rows = (events ?? []) as Array<{ event_type: string | null; suggestion_source: string | null }>;
+  const rows = events;
   const DETERMINISTIC = new Set(["qb_training", "confirmed_history", "blended", "amount_match"]);
   let aiAccepted = 0;
   let aiRejected = 0;
@@ -249,21 +255,19 @@ export async function getEntitySummaries(period: PeriodRange): Promise<EntitySum
     const previousEntityTransactions = previousTransactions.filter(
       (tx) => tx.classification.entity_id === entity.id,
     );
+    // BUG-04/QA-01: book by category kind (sign-independent) + SIGNED sum so a refund
+    // in an expense category nets its charge. Routes through the single shared predicate
+    // so /review and /reports agree. (Refunds > charges may make this legitimately negative.)
     const expenseTotal = entityTransactions
-      .filter(
-        (tx) =>
-          !needsReviewCategory(tx.classification.category_id, cpaReviewIds) &&
-          isOperatingExpense(tx.amount, tx.classification.category?.full_path),
-      )
+      .filter((tx) => isBookedOperatingExpense(tx.classification.category?.full_path))
       .reduce((sum, tx) => sum + Number(tx.amount), 0);
     const previousExpenseTotal = previousEntityTransactions
-      .filter(
-        (tx) =>
-          !needsReviewCategory(tx.classification.category_id, cpaReviewIds) &&
-          isOperatingExpense(tx.amount, tx.classification.category?.full_path),
-      )
+      .filter((tx) => isBookedOperatingExpense(tx.classification.category?.full_path))
       .reduce((sum, tx) => sum + Number(tx.amount), 0);
 
+    // NOTE: once refunds net (above), grossTotal (positive-only) no longer equals
+    // expenseTotal + excludedTotal + unclassifiedTotal. grossTotal reconciles the
+    // POSITIVE buckets; expenseTotal is the NET P&L number. This is correct.
     const positive = entityTransactions.filter((tx) => Number(tx.amount) > 0);
     const grossTotal = positive.reduce((sum, tx) => sum + Number(tx.amount), 0);
     const excludedTotal = positive
@@ -345,21 +349,15 @@ export async function getTotalBacklogCount(): Promise<number> {
   const supabase = await createClient();
   const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
 
-  const rows = await paginateAll(async (from, pageSize) => {
-    const result = await supabase
-      .from("transactions")
-      .select("classification:classifications!inner(category_id)")
-      .order("id", { ascending: true })
-      .range(from, from + pageSize - 1);
-    return { data: result.data, error: result.error };
-  });
+  // BUG-14/OPT-06: push the predicate into SQL with a head/count aggregate instead of
+  // streaming the entire transactions table into Node just to count it.
+  const { count, error } = await supabase
+    .from("transactions")
+    .select("id, classification:classifications!inner(category_id)", { count: "exact", head: true })
+    .or(reviewBacklogOrClause(cpaReviewIds));
 
-  return rows.filter((tx) =>
-    needsReviewCategory(
-      (tx.classification as { category_id: string | null }).category_id,
-      cpaReviewIds,
-    ),
-  ).length;
+  if (error) throw error;
+  return count ?? 0;
 }
 
 export async function getDormantEntities() {
@@ -428,7 +426,7 @@ async function fetchYearMatrixTransactions(year: number, entityId?: string): Pro
   return all;
 }
 
-function buildMonthlyRow(
+export function buildMonthlyRow(
   slug: string,
   name: string,
   transactions: MatrixTransaction[],
@@ -440,10 +438,14 @@ function buildMonthlyRow(
   let ytdCount = 0;
 
   for (const tx of transactions) {
-    if (options?.expenseOnly && !isOperatingExpense(tx.amount, tx.classification.category?.full_path)) {
+    if (options?.expenseOnly) {
+      // Expense row: book by category kind (sign-independent) + SIGNED sum so refunds net (BUG-04).
+      // AMA is a review category → excluded here, so it no longer double-counts with the backlog row (QA-04).
+      if (!isBookedOperatingExpense(tx.classification.category?.full_path)) continue;
+    } else if (Number(tx.amount) <= 0) {
+      // Review-backlog row: gross positive "$ to classify" (matches getEntitySummaries.unclassifiedTotal).
       continue;
     }
-    if (Number(tx.amount) <= 0) continue;
     const month = monthFromDate(tx.transaction_date);
     months[month] = (months[month] ?? 0) + Number(tx.amount);
     monthCounts[month] = (monthCounts[month] ?? 0) + 1;
@@ -494,7 +496,7 @@ function buildMonthlyCategoryRow(
   categoryId: string | null,
   categoryName: string,
   transactions: MatrixTransaction[],
-  options?: { isUnclassified?: boolean },
+  options?: { isUnclassified?: boolean; expenseOnly?: boolean },
 ): MonthlyCategoryRow {
   const months: Record<number, number> = {};
   const monthCounts: Record<number, number> = {};
@@ -502,7 +504,15 @@ function buildMonthlyCategoryRow(
   let ytdCount = 0;
 
   for (const tx of transactions) {
-    if (Number(tx.amount) <= 0) continue;
+    if (options?.expenseOnly) {
+      // Expense category row: book by kind (sign-independent) + SIGNED sum so refunds net, mirroring
+      // the entity expense rows in getMonthlyEntityMatrix so spending-by-category reconciles with
+      // spending-by-entity and non-expense kinds (transfers/income/funding/capital) are excluded (BUG-04/QA-01).
+      if (!isBookedOperatingExpense(tx.classification.category?.full_path)) continue;
+    } else if (Number(tx.amount) <= 0) {
+      // Uncategorized row: gross positive "$ to classify", matching the entity Review-backlog row.
+      continue;
+    }
     const month = monthFromDate(tx.transaction_date);
     months[month] = (months[month] ?? 0) + Number(tx.amount);
     monthCounts[month] = (monthCounts[month] ?? 0) + 1;
@@ -559,7 +569,9 @@ export async function getMonthlyCategoryMatrix(entitySlug: string, year: number)
   for (const [categoryId, categoryTransactions] of byCategory.entries()) {
     const name =
       categoryTransactions[0]?.classification.category?.full_path ?? "Unknown category";
-    categoryRows.push(buildMonthlyCategoryRow(categoryId, name, categoryTransactions));
+    const row = buildMonthlyCategoryRow(categoryId, name, categoryTransactions, { expenseOnly: true });
+    // A non-expense-kind category (transfer/income/funding/capital) nets to an empty expense row — drop it.
+    if (row.ytdCount > 0) categoryRows.push(row);
   }
 
   categoryRows.sort((a, b) => b.ytd - a.ytd);

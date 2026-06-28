@@ -134,6 +134,10 @@ export function ytdPeriod(): PeriodRange {
   const now = new Date();
   const year = now.getFullYear();
   const end = toIsoDate(addDays(now, 1));
+  // BUG-07: the prior comparison must span the SAME window in the prior year
+  // (Jan 1 .. same day last year), not the full prior year — otherwise a partial
+  // current YTD is compared against a full 12 months and shows a spurious drop.
+  const sameDayLastYear = new Date(year - 1, now.getMonth(), now.getDate());
   return {
     type: "year",
     start: `${year}-01-01`,
@@ -141,7 +145,7 @@ export function ytdPeriod(): PeriodRange {
     label: `${year} YTD`,
     at: String(year),
     compareStart: `${year - 1}-01-01`,
-    compareEnd: `${year}-01-01`,
+    compareEnd: toIsoDate(addDays(sameDayLastYear, 1)),
   };
 }
 

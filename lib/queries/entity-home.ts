@@ -1,6 +1,10 @@
 import type { PeriodRange } from "@/lib/period";
-import { isOperatingExpense } from "@/lib/category-expense";
-import { CPA_REVIEW_CATEGORY_PATHS } from "@/lib/category-review";
+import { isBookedOperatingExpense } from "@/lib/category-expense";
+import {
+  getCpaReviewCategoryIdSet,
+  needsReviewCategory,
+  reviewBacklogOrClause,
+} from "@/lib/category-review";
 import { createClient } from "@/lib/supabase/server";
 import { paginateAll } from "@/lib/supabase/paginate";
 
@@ -13,18 +17,6 @@ export type EntityHomeStats = {
   unclassifiedTotal: number;
   topCategory: { name: string; total: number } | null;
 };
-
-async function getCpaReviewCategoryIdSet(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const { data } = await supabase
-    .from("categories")
-    .select("id, full_path")
-    .in("full_path", [...CPA_REVIEW_CATEGORY_PATHS]);
-  return new Set((data ?? []).map((row) => row.id));
-}
-
-function needsReviewCategory(categoryId: string | null, cpaReviewIds: Set<string>) {
-  return categoryId == null || cpaReviewIds.has(categoryId);
-}
 
 async function fetchEntityPeriodTransactions(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -82,7 +74,8 @@ function buildStatsFromTransactions(
       continue;
     }
 
-    if (isOperatingExpense(tx.amount, categoryPath)) {
+    if (isBookedOperatingExpense(categoryPath)) {
+      // BUG-04: signed sum so a refund in an expense category nets its charge.
       expenseTotal += Number(tx.amount);
       if (categoryPath) {
         categoryTotals.set(categoryPath, (categoryTotals.get(categoryPath) ?? 0) + Number(tx.amount));
@@ -180,11 +173,7 @@ export async function getSidebarEntityNav(period: PeriodRange): Promise<SidebarE
   if (error) throw error;
 
   const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
-  const cpaList = [...cpaReviewIds];
-  const reviewOr =
-    cpaList.length === 0
-      ? "classification.category_id.is.null"
-      : `classification.category_id.is.null,classification.category_id.in.(${cpaList.join(",")})`;
+  const reviewOr = reviewBacklogOrClause(cpaReviewIds);
 
   const counts = await Promise.all(
     (entities ?? []).map(async (entity) => {

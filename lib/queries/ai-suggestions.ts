@@ -1,6 +1,7 @@
 import { AI_BACKLOG_END, AI_BACKLOG_START, AI_ENTITY_SLUG } from "@/lib/ai/config";
 import type { BacklogTransaction } from "@/lib/ai/vendor-groups";
 import { createClient } from "@/lib/supabase/server";
+import { paginateAll } from "@/lib/supabase/paginate";
 import { acceptanceBySource, type AcceptanceBySource } from "@/lib/suggestions/acceptance";
 
 function isMissingAiSuggestionsTable(error: { message?: string } | null) {
@@ -255,21 +256,30 @@ export type AiAcceptanceRow = {
 export async function getAiAcceptanceStats(): Promise<AiAcceptanceRow[]> {
   const supabase = await createClient();
 
-  const { data: events, error } = await supabase
-    .from("suggestion_events")
-    .select(
-      `
-      event_type,
-      entity:entities!suggestion_events_entity_id_fkey(slug),
-      transaction_id
-    `,
-    )
-    .eq("suggestion_source", "ai_llm")
-    .order("created_at", { ascending: false });
+  // OPT-02: paginate so the ai_llm event scan isn't silently truncated at 1000 rows.
+  type AiEventRow = {
+    event_type: string | null;
+    entity: { slug: string } | null;
+    transaction_id: string | null;
+  };
+  const events = await paginateAll<AiEventRow>(async (from, pageSize) => {
+    const { data, error } = await supabase
+      .from("suggestion_events")
+      .select(
+        `
+        event_type,
+        entity:entities!suggestion_events_entity_id_fkey(slug),
+        transaction_id
+      `,
+      )
+      .eq("suggestion_source", "ai_llm")
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, from + pageSize - 1);
+    return { data: data as AiEventRow[] | null, error };
+  });
 
-  if (error) throw error;
-
-  const txIds = [...new Set((events ?? []).map((e) => e.transaction_id).filter(Boolean))] as string[];
+  const txIds = [...new Set(events.map((e) => e.transaction_id).filter(Boolean))] as string[];
   const confidenceByTx = new Map<string, string>();
 
   if (txIds.length > 0) {
@@ -287,7 +297,7 @@ export async function getAiAcceptanceStats(): Promise<AiAcceptanceRow[]> {
 
   const buckets = new Map<string, { shown: number; accepted: number; rejected: number }>();
 
-  for (const event of events ?? []) {
+  for (const event of events) {
     const entitySlug = event.entity?.slug ?? "unknown";
     const confidence = confidenceByTx.get(event.transaction_id ?? "") ?? "unknown";
     const key = `${entitySlug}|${confidence}`;
@@ -354,17 +364,21 @@ export async function getAiSuggestionCoverage() {
 }
 
 export async function getSuggestionAcceptanceBySource(): Promise<AcceptanceBySource[]> {
-  try {
-    const supabase = await createClient();
-    const { data, error } = await supabase
-      .from("suggestion_events")
-      .select("event_type, suggestion_source");
-    if (error) throw error;
-    return acceptanceBySource(
-      (data ?? []) as { event_type: string; suggestion_source: string | null }[],
-    );
-  } catch (error) {
-    console.error("getSuggestionAcceptanceBySource failed:", error);
-    return [];
-  }
+  // QA-06: let errors propagate to the error boundary instead of swallowing them to [],
+  // which the page renders identically to a genuine empty dataset. OPT-02: paginate the scan.
+  const supabase = await createClient();
+  const events = await paginateAll<{ event_type: string; suggestion_source: string | null }>(
+    async (from, pageSize) => {
+      const { data, error } = await supabase
+        .from("suggestion_events")
+        .select("event_type, suggestion_source")
+        .order("id", { ascending: true })
+        .range(from, from + pageSize - 1);
+      return {
+        data: data as { event_type: string; suggestion_source: string | null }[] | null,
+        error,
+      };
+    },
+  );
+  return acceptanceBySource(events);
 }

@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { categoryKind } from "@/lib/category-kind";
-import { isOperatingExpense } from "@/lib/category-expense";
+import { isBookedOperatingExpense } from "@/lib/category-expense";
 import type { PeriodRange } from "@/lib/period";
 
 export type IncomeCategoryRow = { category: string; total: number; count: number };
@@ -63,8 +63,9 @@ export async function getIncomeSummary(period: PeriodRange): Promise<EntityIncom
       (r) => categoryKind(r.classifications?.categories?.full_path) === "income",
     );
     const incomeTotal = incomeRows.reduce((sum, r) => sum + Math.abs(Number(r.amount)), 0);
+    // BUG-04/QA-01: shared predicate (AMA + uncategorized excluded) + signed sum so refunds net.
     const expenseTotal = entityRows
-      .filter((r) => isOperatingExpense(r.amount, r.classifications?.categories?.full_path))
+      .filter((r) => isBookedOperatingExpense(r.classifications?.categories?.full_path))
       .reduce((sum, r) => sum + Number(r.amount), 0);
 
     const byCat = new Map<string, IncomeCategoryRow>();

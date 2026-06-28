@@ -1,5 +1,6 @@
 import type { PeriodRange } from "@/lib/period";
 import { createClient } from "@/lib/supabase/server";
+import { paginateAll } from "@/lib/supabase/paginate";
 
 export type ReconcileRow = {
   side: "ledger" | "qbo";
@@ -73,36 +74,44 @@ export async function getGbslCheckingReconciliation(
     };
   }
 
-  const [{ data: ledger }, { data: qbo }] = await Promise.all([
-    supabase
-      .from("transactions")
-      .select(
-        `
-        transaction_date,
-        amount,
-        description,
-        vendor,
-        classification:classifications!inner(
-          category:categories(full_path)
+  // OPT-02: paginate both sides so neither is silently truncated at 1000 rows.
+  const [ledgerRows, qboRows] = await Promise.all([
+    paginateAll(async (from, pageSize) => {
+      const { data, error } = await supabase
+        .from("transactions")
+        .select(
+          `
+          transaction_date,
+          amount,
+          description,
+          vendor,
+          classification:classifications!inner(
+            category:categories(full_path)
+          )
+        `,
         )
-      `,
-      )
-      .eq("account_id", checking.id)
-      .gte("transaction_date", start)
-      .lt("transaction_date", end)
-      .order("transaction_date"),
-    supabase
-      .from("qb_training_expenses")
-      .select("transaction_date, amount, description, vendor_name, category_name")
-      .eq("entity_id", gbsl.id)
-      .ilike("source_account", "%Navigate%Business%Checking%")
-      .gte("transaction_date", start)
-      .lt("transaction_date", end)
-      .order("transaction_date"),
+        .eq("account_id", checking.id)
+        .gte("transaction_date", start)
+        .lt("transaction_date", end)
+        .order("transaction_date")
+        .order("id")
+        .range(from, from + pageSize - 1);
+      return { data, error };
+    }),
+    paginateAll(async (from, pageSize) => {
+      const { data, error } = await supabase
+        .from("qb_training_expenses")
+        .select("id, transaction_date, amount, description, vendor_name, category_name")
+        .eq("entity_id", gbsl.id)
+        .ilike("source_account", "%Navigate%Business%Checking%")
+        .gte("transaction_date", start)
+        .lt("transaction_date", end)
+        .order("transaction_date")
+        .order("id")
+        .range(from, from + pageSize - 1);
+      return { data, error };
+    }),
   ]);
-
-  const ledgerRows = ledger ?? [];
-  const qboRows = qbo ?? [];
   const usedQbo = new Set<number>();
   const rows: ReconcileRow[] = [];
   let matchedCount = 0;

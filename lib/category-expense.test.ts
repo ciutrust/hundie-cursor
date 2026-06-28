@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   countsAsExpense,
+  isBookedOperatingExpense,
   isOperatingExpense,
   NON_EXPENSE_CATEGORY_PATHS,
+  sumBookedOperatingExpense,
 } from "@/lib/category-expense";
 import { categoryKind } from "@/lib/category-kind";
 
@@ -95,5 +97,58 @@ describe("uncategorized rows are excluded from operating expense (ACCT-02)", () 
 
   it("a positive real-expense row still counts", () => {
     expect(isOperatingExpense(100, "Software")).toBe(true);
+  });
+});
+
+describe("isBookedOperatingExpense (BUG-04/QA-01 shared predicate)", () => {
+  it("books real expense categories regardless of amount sign", () => {
+    expect(isBookedOperatingExpense("Software")).toBe(true);
+    expect(isBookedOperatingExpense("Rent Expense")).toBe(true);
+  });
+
+  it("excludes the AMA review category", () => {
+    expect(isBookedOperatingExpense("Ask My Accountant")).toBe(false);
+  });
+
+  it("excludes uncategorized (null/blank/undefined)", () => {
+    expect(isBookedOperatingExpense(null)).toBe(false);
+    expect(isBookedOperatingExpense("")).toBe(false);
+    expect(isBookedOperatingExpense(undefined)).toBe(false);
+  });
+
+  it("excludes non-expense kinds (transfer / income / funding)", () => {
+    expect(isBookedOperatingExpense("Credit card payment")).toBe(false);
+    expect(isBookedOperatingExpense("Membership Income")).toBe(false);
+    expect(isBookedOperatingExpense("Owner Distribution")).toBe(false);
+  });
+});
+
+describe("sumBookedOperatingExpense (BUG-04 signed netting)", () => {
+  it("nets a refund against its charge in the same category", () => {
+    expect(
+      sumBookedOperatingExpense([
+        { amount: 100, categoryFullPath: "Meals" },
+        { amount: -50, categoryFullPath: "Meals" },
+      ]),
+    ).toBe(50);
+  });
+
+  it("excludes uncategorized rows", () => {
+    expect(sumBookedOperatingExpense([{ amount: 100, categoryFullPath: null }])).toBe(0);
+  });
+
+  it("excludes AMA rows", () => {
+    expect(
+      sumBookedOperatingExpense([{ amount: 100, categoryFullPath: "Ask My Accountant" }]),
+    ).toBe(0);
+  });
+
+  it("does NOT clamp — a category can legitimately go negative when refunds exceed charges", () => {
+    expect(
+      sumBookedOperatingExpense([
+        { amount: 50, categoryFullPath: "Meals" },
+        { amount: -200, categoryFullPath: "Meals" },
+      ]),
+    ).toBe(-150);
   });
 });

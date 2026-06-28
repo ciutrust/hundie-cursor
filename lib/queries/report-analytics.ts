@@ -1,6 +1,6 @@
 import type { PeriodRange } from "@/lib/period";
-import { isOperatingExpense } from "@/lib/category-expense";
-import { CPA_REVIEW_CATEGORY_PATHS } from "@/lib/category-review";
+import { isBookedOperatingExpense } from "@/lib/category-expense";
+import { getCpaReviewCategoryIdSet, needsReviewCategory } from "@/lib/category-review";
 import { extractVendorSearchKey } from "@/lib/suggestions/category-suggestions";
 import { createClient } from "@/lib/supabase/server";
 import { paginateAll } from "@/lib/supabase/paginate";
@@ -20,16 +20,10 @@ type TxRow = {
   account: { slug: string; display_name: string };
 };
 
-async function getCpaReviewCategoryIdSet(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const { data } = await supabase
-    .from("categories")
-    .select("id, full_path")
-    .in("full_path", [...CPA_REVIEW_CATEGORY_PATHS]);
-  return new Set((data ?? []).map((row) => row.id));
-}
-
-function needsReviewCategory(categoryId: string | null, cpaReviewIds: Set<string>) {
-  return categoryId == null || cpaReviewIds.has(categoryId);
+/** Whole days a row has aged, clamped at 0 so same-day rows aren't negative (BUG-11). */
+export function uncategorizedDaysOld(transactionDate: string, now: Date = new Date()): number {
+  const txDate = new Date(transactionDate + "T12:00:00");
+  return Math.max(0, Math.floor((now.getTime() - txDate.getTime()) / (1000 * 60 * 60 * 24)));
 }
 
 async function fetchPeriodTransactions(
@@ -96,8 +90,8 @@ export async function getTopVendors(
   const buckets = new Map<string, TopVendorRow>();
 
   for (const tx of transactions) {
-    if (!isOperatingExpense(tx.amount, tx.classification.category?.full_path ?? null)) continue;
-    if (Number(tx.amount) <= 0) continue;
+    // BUG-04/QA-01: shared predicate (AMA + uncategorized excluded) + signed sum so refunds net per vendor.
+    if (!isBookedOperatingExpense(tx.classification.category?.full_path ?? null)) continue;
 
     const vendorKey = extractVendorSearchKey(tx.description, tx.vendor) || "(unknown)";
     const key = `${tx.classification.entity.slug}|${vendorKey}`;
@@ -147,8 +141,7 @@ export async function getUncategorizedAging(
   return transactions
     .filter((tx) => needsReviewCategory(tx.classification.category_id, cpaReviewIds))
     .map((tx) => {
-      const txDate = new Date(tx.transaction_date + "T12:00:00");
-      const daysOld = Math.floor((today.getTime() - txDate.getTime()) / (1000 * 60 * 60 * 24));
+      const daysOld = uncategorizedDaysOld(tx.transaction_date, today);
       return {
         id: tx.id,
         transaction_date: tx.transaction_date,
@@ -229,7 +222,8 @@ export async function getAccountSummary(
   const buckets = new Map<string, AccountSummaryRow>();
 
   for (const tx of transactions) {
-    if (!isOperatingExpense(tx.amount, tx.classification.category?.full_path ?? null)) continue;
+    // BUG-04/QA-01: shared predicate (AMA + uncategorized excluded) + signed sum so refunds net per account.
+    if (!isBookedOperatingExpense(tx.classification.category?.full_path ?? null)) continue;
     const key = `${tx.classification.entity.slug}|${tx.account.slug}`;
     const existing = buckets.get(key);
     if (existing) {
@@ -270,7 +264,8 @@ export async function getYoyEntityComparison(period: PeriodRange): Promise<YoyCo
   const sumByEntity = (rows: TxRow[]) => {
     const map = new Map<string, { name: string; total: number }>();
     for (const tx of rows) {
-      if (!isOperatingExpense(tx.amount, tx.classification.category?.full_path ?? null)) continue;
+      // BUG-04/QA-01: shared predicate so current/prior YoY totals match every other surface.
+      if (!isBookedOperatingExpense(tx.classification.category?.full_path ?? null)) continue;
       const slug = tx.classification.entity.slug;
       const entry = map.get(slug) ?? { name: tx.classification.entity.name, total: 0 };
       entry.total += Number(tx.amount);
