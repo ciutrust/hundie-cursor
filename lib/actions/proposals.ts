@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireUser } from "@/lib/auth/require-user";
-import { logSuggestionEvent } from "@/lib/actions/suggestion-events";
+import { extractVendorSearchKey } from "@/lib/suggestions/category-suggestions";
 
 // classification_proposals isn't in the generated DB types (no CLI to regen); access via an
 // untyped client view. classifications/entities stay on the typed client.
@@ -80,65 +80,95 @@ export async function commitApprovedProposals(
   if (catErr) return { error: catErr.message };
   const entityByCategory = new Map<string, string>((catRows ?? []).map((c) => [c.id, c.entity_id]));
 
-  let committed = 0;
+  // Build the valid commit set (skip no-category and category/entity mismatches).
+  type Plan = {
+    proposalId: string;
+    transactionId: string;
+    entityId: string;
+    categoryId: string;
+    rationale: string | null;
+    source: string;
+    description: string;
+    vendor: string | null;
+  };
+  const plan: Plan[] = [];
   let skipped = 0;
   for (const p of rows) {
     const entityId = p.chosen_entity_id ?? p.entity_id;
     const categoryId = p.chosen_category_id ?? p.proposed_category_id;
-    if (!categoryId) {
-      skipped += 1; // never commit an "unclassified" — leave it pending-ish
+    if (!categoryId || entityByCategory.get(categoryId) !== entityId) {
+      skipped += 1; // no category, or a reassigned category that doesn't belong to its entity
       continue;
     }
-    // Reassigned entity must own the chosen category (the UI enforces this; guard anyway).
-    if (entityByCategory.get(categoryId) !== entityId) {
-      skipped += 1;
-      continue;
-    }
+    plan.push({
+      proposalId: p.id,
+      transactionId: p.transaction_id,
+      entityId,
+      categoryId,
+      rationale: p.rationale,
+      source: p.source,
+      description: p.transactions?.description ?? "",
+      vendor: p.transactions?.vendor ?? null,
+    });
+  }
+  if (plan.length === 0) return { error: `Nothing valid to commit (${skipped} skipped)` };
 
-    const { data: cls, error: upErr } = await supabase
+  const now = new Date().toISOString();
+  const CHUNK = 500;
+
+  // 1) Bulk-upsert classifications (category + entity + provenance note) — a handful of batched
+  //    calls instead of one round-trip per transaction, so thousands commit without timing out.
+  const txToClass = new Map<string, string>();
+  for (let i = 0; i < plan.length; i += CHUNK) {
+    const payload = plan.slice(i, i + CHUNK).map((x) => ({
+      transaction_id: x.transactionId,
+      entity_id: x.entityId,
+      category_id: x.categoryId,
+      classified_by: createdBy,
+      classified_at: now,
+      notes: x.rationale ?? null,
+    }));
+    const { data: up, error: upErr } = await supabase
       .from("classifications")
-      .update({
-        entity_id: entityId,
-        category_id: categoryId,
-        classified_by: createdBy,
-        classified_at: new Date().toISOString(),
-        // preserve the "why" on the transaction itself (provenance for CPA/audit + your manual notes).
-        ...(p.rationale ? { notes: p.rationale } : {}),
-      })
-      .eq("transaction_id", p.transaction_id)
-      .select("id")
-      .single();
-    if (upErr) return { error: `classification update failed: ${upErr.message}` };
+      .upsert(payload, { onConflict: "transaction_id" })
+      .select("id, transaction_id");
+    if (upErr) return { error: `classification upsert failed: ${upErr.message}` };
+    for (const r of up ?? []) txToClass.set(r.transaction_id, r.id);
+  }
 
-    await db
+  // 2) Mark the proposals committed (bulk).
+  for (let i = 0; i < plan.length; i += CHUNK) {
+    const ids = plan.slice(i, i + CHUNK).map((x) => x.proposalId);
+    const { error: stErr } = await db
       .from("classification_proposals")
-      .update({ status: "committed", committed_at: new Date().toISOString() })
-      .eq("id", p.id);
+      .update({ status: "committed", committed_at: now })
+      .in("id", ids);
+    if (stErr) return { error: `proposal status update failed: ${stErr.message}` };
+  }
 
-    // Best-effort training signal (mirrors acceptAiSuggestions): records the proposal as the
-    // shown suggestion so keeping it = accept, overriding it = reject.
-    try {
-      await logSuggestionEvent(
-        {
-          transactionId: p.transaction_id,
-          classificationId: cls.id,
-          entityId,
-          description: p.transactions?.description ?? "",
-          vendor: p.transactions?.vendor ?? null,
-          chosenCategoryId: categoryId,
-          suggestionsShown: p.proposed_category_id
-            ? [{ categoryId: p.proposed_category_id, source: p.source }]
-            : [],
-        },
-        createdBy,
-      );
-    } catch {
-      // non-fatal: the classification is already written
+  // 3) Best-effort training signal (batched insert; never blocks the commit).
+  try {
+    const events = plan
+      .filter((x) => txToClass.has(x.transactionId))
+      .map((x) => ({
+        transaction_id: x.transactionId,
+        classification_id: txToClass.get(x.transactionId)!,
+        entity_id: x.entityId,
+        vendor_key: extractVendorSearchKey(x.description, x.vendor),
+        suggested_category_id: x.categoryId,
+        chosen_category_id: x.categoryId,
+        event_type: "accept" as const,
+        suggestion_source: x.source,
+        created_by: createdBy,
+      }));
+    for (let i = 0; i < events.length; i += CHUNK) {
+      await supabase.from("suggestion_events").insert(events.slice(i, i + CHUNK));
     }
-    committed += 1;
+  } catch {
+    // non-fatal — classifications are already written
   }
 
   revalidatePath("/review/proposals");
   revalidatePath("/review");
-  return { success: true, count: committed, skipped };
+  return { success: true, count: plan.length, skipped };
 }
