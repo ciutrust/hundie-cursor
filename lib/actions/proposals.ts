@@ -42,6 +42,7 @@ type ApprovedRow = {
   source: string;
   proposed_category_id: string | null;
   chosen_category_id: string | null;
+  rationale: string | null;
   transactions: { description: string; vendor: string | null } | null;
 };
 
@@ -62,7 +63,7 @@ export async function commitApprovedProposals(
   let query = db
     .from("classification_proposals")
     .select(
-      "id, transaction_id, entity_id, chosen_entity_id, source, proposed_category_id, chosen_category_id, transactions!inner(description, vendor)",
+      "id, transaction_id, entity_id, chosen_entity_id, source, proposed_category_id, chosen_category_id, rationale, transactions!inner(description, vendor)",
     )
     .eq("status", "approved");
   if (entitySlug) query = query.eq("entity_slug", entitySlug);
@@ -101,6 +102,8 @@ export async function commitApprovedProposals(
         category_id: categoryId,
         classified_by: createdBy,
         classified_at: new Date().toISOString(),
+        // preserve the "why" on the transaction itself (provenance for CPA/audit + your manual notes).
+        ...(p.rationale ? { notes: p.rationale } : {}),
       })
       .eq("transaction_id", p.transaction_id)
       .select("id")
