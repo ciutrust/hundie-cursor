@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeftRight,
+  BookOpen,
   Brain,
   CalendarCheck,
   CheckCircle2,
@@ -69,6 +70,12 @@ const CLASSIFY_ITEMS: NavItem[] = [
     label: "Proposals",
     icon: ClipboardCheck,
     match: (path) => path.startsWith("/review/proposals"),
+  },
+  {
+    href: "/categories",
+    label: "Categories",
+    icon: BookOpen,
+    match: (path) => path.startsWith("/categories"),
   },
 ];
 
