@@ -99,9 +99,12 @@ export default async function CategoriesPage({ searchParams }: PageProps) {
             </div>
             <ul className="divide-y divide-border rounded-lg border border-border bg-card">
               {byKind.get(k)!.map((c) => (
-                <li key={c.full_path} className="px-3 py-2">
-                  <p className="text-sm font-medium">{c.full_path}</p>
-                  {c.description ? <p className="mt-0.5 text-xs text-muted-foreground">{c.description}</p> : null}
+                <li
+                  key={c.full_path}
+                  className="flex flex-col gap-1 px-3 py-2 sm:flex-row sm:items-baseline sm:gap-4"
+                >
+                  <p className="text-sm font-medium sm:w-72 sm:shrink-0">{c.full_path}</p>
+                  <p className="text-xs text-muted-foreground sm:flex-1">{c.description ?? ""}</p>
                 </li>
               ))}
             </ul>
