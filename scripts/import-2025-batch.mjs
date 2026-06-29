@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 /**
- * Import 2025 bank/card CSVs from ~/Downloads (see lib/2025-import-manifest.mjs).
+ * Import 2025 bank/card CSVs (see lib/2025-import-manifest.mjs).
+ * Files resolve relative to ~/Downloads by default, or to --csv-dir if given.
  *
  * Usage:
  *   node scripts/import-2025-batch.mjs --dry-run
  *   node scripts/import-2025-batch.mjs --apply
+ *   node scripts/import-2025-batch.mjs --dry-run --csv-dir "/Users/ac/Downloads/CSV 2025-2026"
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync, existsSync } from "node:fs";
@@ -27,6 +29,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const args = process.argv.slice(2);
 const dryRun = !args.includes("--apply");
+const csvDirIdx = args.indexOf("--csv-dir");
+const csvDir = csvDirIdx !== -1 ? args[csvDirIdx + 1] : null;
+
+// Files resolve relative to --csv-dir when given, else ~/Downloads (resolveDownloadPath).
+function resolveCsv(file) {
+  return csvDir ? resolve(csvDir, file) : resolveDownloadPath(file);
+}
 
 async function loadAccounts(supabase) {
   const { data, error } = await supabase
@@ -86,12 +95,13 @@ const accountBySlug = new Map(accounts.map((a) => [a.slug, a]));
 
 console.log(`2025 batch import (${IMPORT_2025_FROM} → ${IMPORT_2025_TO})`);
 console.log(`Mode: ${dryRun ? "DRY RUN" : "APPLY"}`);
+if (csvDir) console.log(`CSV dir: ${csvDir}`);
 console.log(`Targets: ${IMPORT_2025_MANIFEST.length}`);
 
 let totalParsed = 0;
 
 for (const entry of IMPORT_2025_MANIFEST) {
-  const csvPath = resolveDownloadPath(entry.file);
+  const csvPath = resolveCsv(entry.file);
   if (!existsSync(csvPath)) {
     console.warn(`\nSkipping ${entry.slug} — not found: ${csvPath}`);
     continue;
@@ -108,7 +118,7 @@ for (const entry of IMPORT_2025_MANIFEST) {
   }
 
   const supplementalCsvTexts = (entry.supplementalFiles ?? [])
-    .map((file) => resolveDownloadPath(file))
+    .map((file) => resolveCsv(file))
     .filter((path) => existsSync(path))
     .map((path) => readFileSync(path, "utf8"));
 
