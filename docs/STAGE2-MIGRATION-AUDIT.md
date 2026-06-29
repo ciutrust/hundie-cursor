@@ -78,19 +78,20 @@ Apply all 28 **in filename order** via the MCP. Per-file `apply_migration` (reco
 - `node scripts/export-ledger-backup.mjs` → `~/hundie-backups/stage2-2026-06-29_05-12-13/` (outside the repo; financial data).
 - Full logical export of all 13 tables; integrity-checked twice (writer + independent on-disk parse). **28,498 wipe-table rows** + KEEP tables. Counts match live exactly. This fully reverses the Phase-4 wipe.
 
-## ⛔ Critical Phase-4 fix (discovered during Phase-2 prep)
-The runbook's Phase-4 statement `TRUNCATE … import_batches … RESTART IDENTITY CASCADE` is **unsafe as written**.
-`qb_training_expenses` (a KEEP table, 3,832 rows — **all** with `import_batch_id` set) is the **only** external FK into the wipe set (`qb_training_expenses_import_batch_id_fkey → import_batches`). `TRUNCATE … CASCADE` truncates every table that references the set, so it would **wipe `qb_training_expenses` entirely** — destroying all training data + the Phase-2 snapshot.
+## ⛔ Critical Phase-4 trap (and the fix that actually works)
+The runbook's `TRUNCATE … import_batches … CASCADE` is **unsafe**. `qb_training_expenses` (a KEEP table) is the only external FK into the wipe set (`qb_training_expenses_import_batch_id_fkey → import_batches`).
 
-**Required Phase-4 sequence:**
+**Important correction (proven by the Phase-4 dry-run):** `TRUNCATE … CASCADE` cascades by **FK constraint existence**, *not* by whether rows actually reference the table. So nulling `import_batch_id` does **NOT** save `qb_training_expenses` — the first dry-run still emptied it (7012 → 0). The constraint is what triggers the cascade.
+
+**The fix that works (used by `scripts/stage2/wipe.mjs`):** `DELETE` in FK-dependency order instead of TRUNCATE CASCADE. `DELETE` respects the `NO ACTION` FK and never touches `qb_training_expenses`. PKs are UUIDs, so `RESTART IDENTITY` is moot (no sequences).
 ```sql
-UPDATE qb_training_expenses SET import_batch_id = NULL;   -- remove the only external FK into the wipe set (recoverable from backup; those batches get wiped anyway)
-TRUNCATE transactions, classifications, classification_history,
-         ai_suggestions, suggestion_events, raw_import_rows, import_batches
-  RESTART IDENTITY CASCADE;                                -- now CASCADE has nothing extra to pull in
+UPDATE qb_training_expenses SET import_batch_id = NULL;     -- so DELETE FROM import_batches isn't restricted
+-- children → parents:
+DELETE FROM classification_history; DELETE FROM suggestion_events; DELETE FROM ai_suggestions;
+DELETE FROM classifications; DELETE FROM raw_import_rows; DELETE FROM transactions; DELETE FROM import_batches;
 UPDATE bank_connections SET sync_cursor = NULL;
 ```
-Phase-2 snapshot rows are already inserted with `import_batch_id = NULL`, so they are immune regardless.
+The script runs this in one transaction and asserts every KEEP table (incl. `qb_training_expenses`=7012, snapshot=3180) is unchanged before COMMIT — else it ROLLBACKs.
 
 ## Open items for later phases (not blocking Phase 3)
 - **Merge/deploy ordering:** apply migrations (Phase 3) → merge `stage1-overnight-fixes` → `main` + deploy (so the live app & Plaid sync route run fixed code against the new schema) → *then* Phase 4 wipe & re-import. New code must not deploy before its schema exists.
@@ -103,4 +104,19 @@ Phase-2 snapshot rows are already inserted with `import_batch_id = NULL`, so the
 - **Phase 1 — Backup:** `scripts/export-ledger-backup.mjs` → `~/hundie-backups/stage2-2026-06-29_05-12-13/` (13 tables, 28,498 wipe rows; double integrity-checked). Phase-7 baselines: `PHASE7-BASELINE.json` in that dir.
 - **Phase 2 — Snapshot:** `scripts/stage2/snapshot-training.sql` via MCP → 3,180 `hundie_snapshot` rows into `qb_training_expenses` (now 7,012), all `import_batch_id=NULL`.
 - **Phase 3 — Apply:** `scripts/stage2/apply-migrations.mjs --dry-run` (rolled back, clean) then `--apply` (COMMIT). All 28 ok. Verified: new cols/tables present, 211 categories all kinded, 0 orphans, `sync_from_date` NOT NULL, transactional data untouched.
-- **STOPPED before** the deploy (step 4) and Phase 4 (the wipe) per operator instruction.
+- **Merge + deploy:** PR #2 merged → `main` (`3f9838e`); Vercel production auto-deployed & READY on the fixed code (204 tests green, preview verified first).
+- **Phase-5 prep (importers):** added `--from`/`--to` (inclusive-lower / exclusive-upper) + `--export-json` to `import-cards.mjs`; added `--csv-dir` to `import-2025-batch.mjs`. Verified offline (dry-runs); 204 tests + 0 lint errors. June ground-truth exported to `~/hundie-backups/stage2-2026-06-29_05-12-13/june-ground-truth.json` (323 rows, Jun 1–24).
+- **STOPPED before** Phase 4 (the wipe) per operator instruction.
+
+## Phase 5 — re-import source-of-truth map (verified by offline dry-runs 2026-06-29)
+No account is double-sourced within a period; 2025 sources all end `2025-12-31`, card CSVs are 2026-only.
+
+| Period | Source | Command | Rows |
+|---|---|---|---|
+| 2025 (10 WF/CapOne accts) | `2025-WF-*` CSVs in `CSV 2025-2026/` | `import-2025-batch.mjs --apply --csv-dir "/Users/ac/Downloads/CSV 2025-2026"` | 2,591 |
+| 2025 (6 non-WF cards) | `~/Downloads/2025_Business_Expenses_Fixed.xlsx` | `npm run import:sheet` | (2025) |
+| 2026 Jan 1 – May 31 (17 accts) | card CSVs | `import-cards.mjs --all --csv-dir "…/CSV 2025-2026" --from 2026-01-01 --to 2026-06-01` | 2,114 |
+| June (ground truth, not imported) | card CSVs June slice | `import-cards.mjs --dry-run --all --csv-dir "…" --from 2026-06-01 --export-json …/june-ground-truth.json` | 323 |
+| June (imported) | Plaid sync after `sync_from_date=2026-06-01` | reconcile vs june-ground-truth.json | — |
+
+Notes: `--to` is EXCLUSIVE upper, so `2026-06-01` keeps through May 31. The stray `2025-12-31` row in CapOne-Alex's 2026 CSV is dropped by `--from 2026-01-01`. `cap-one-acaa-austin` has no 2025 history (opened Feb 2026).

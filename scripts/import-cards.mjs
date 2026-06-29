@@ -4,7 +4,8 @@ import { resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseCardCsv, KNOWN_ACCOUNTS } from "./lib/card-parsers.mjs";
 import { buildTransactionHash, dedupeImportPlanRows } from "./lib/import-hash.mjs";
-import { filterRowsAgainstExisting } from "./lib/ledger-import.mjs";
+import { filterRowsAgainstExisting, inDateRange } from "./lib/ledger-import.mjs";
+import { writeFileSync } from "node:fs";
 import { resolveEntitySlug } from "./lib/entity-resolver.mjs";
 import { rowsToObjects, parseCsv } from "./lib/csv-utils.mjs";
 import { SEED_ACCOUNTS, SEED_ACCOUNT_BY_SLUG } from "./lib/seed-accounts.mjs";
@@ -51,6 +52,9 @@ function parseArgs(argv) {
     filePath: null,
     verifyOnly: false,
     csvDir: null,
+    dateFrom: null, // inclusive lower bound (YYYY-MM-DD)
+    dateTo: null, // EXCLUSIVE upper bound (YYYY-MM-DD); --to 2026-06-01 keeps through May 31
+    exportJson: null, // path to write the filtered rows as JSON (no DB write needed)
   };
 
   for (let i = 2; i < argv.length; i++) {
@@ -60,6 +64,9 @@ function parseArgs(argv) {
     else if (arg === "--verify") args.verifyOnly = true;
     else if (arg === "--account") args.slug = argv[++i];
     else if (arg === "--csv-dir") args.csvDir = argv[++i];
+    else if (arg === "--from") args.dateFrom = argv[++i];
+    else if (arg === "--to") args.dateTo = argv[++i];
+    else if (arg === "--export-json") args.exportJson = resolve(argv[++i]);
     else if (!arg.startsWith("-")) args.filePath = resolve(arg);
   }
 
@@ -262,7 +269,7 @@ function buildDryRunEntityMap() {
   return map;
 }
 
-function buildImportPlan(account, csvPath, csvText, entityMap, { dryRun = false, supplementalCsvTexts = [] } = {}) {
+function buildImportPlan(account, csvPath, csvText, entityMap, { dryRun = false, supplementalCsvTexts = [], dateFrom = null, dateTo = null } = {}) {
   const parsed = parseCardCsv(csvText, account, { supplementalCsvTexts });
   const rows = [];
 
@@ -306,13 +313,22 @@ function buildImportPlan(account, csvPath, csvText, entityMap, { dryRun = false,
     });
   }
 
-  const { rows: dedupedRows, skipped: inFileDupes } = dedupeImportPlanRows(account.id, rows);
+  // Date window (inclusive lower / EXCLUSIVE upper, matching inDateRange). Applied before dedupe
+  // so out-of-window rows never reach the ledger. e.g. --to 2026-06-01 keeps through May 31.
+  const windowed =
+    dateFrom || dateTo
+      ? rows.filter((row) => inDateRange(row.transaction.transaction_date, dateFrom, dateTo))
+      : rows;
+  const outOfWindow = rows.length - windowed.length;
+
+  const { rows: dedupedRows, skipped: inFileDupes } = dedupeImportPlanRows(account.id, windowed);
   const dates = dedupedRows.map((row) => row.transaction.transaction_date).sort();
   return {
     account,
     csvPath,
     rows: dedupedRows,
     inFileDupes,
+    outOfWindow,
     dateMin: dates[0] ?? null,
     dateMax: dates.at(-1) ?? null,
     rawRows: rowsToObjects(parseCsv(csvText)),
@@ -320,11 +336,12 @@ function buildImportPlan(account, csvPath, csvText, entityMap, { dryRun = false,
 }
 
 async function importAccount(supabase, plan, { dryRun = false, storeRaw = true } = {}) {
-  const { account, csvPath, rows, dateMin, dateMax, rawRows, inFileDupes = 0 } = plan;
+  const { account, csvPath, rows, dateMin, dateMax, rawRows, inFileDupes = 0, outOfWindow = 0 } = plan;
 
   console.log(`\n${account.display_name} (${account.slug})`);
   console.log(`  File: ${basename(csvPath)}`);
   console.log(`  Parsed rows: ${rows.length}`);
+  if (outOfWindow > 0) console.log(`  Out-of-window skipped (date filter): ${outOfWindow}`);
   if (inFileDupes > 0) console.log(`  In-file dupes skipped: ${inFileDupes}`);
   const refundCount = rows.filter((row) => Number(row.transaction.amount) < 0).length;
   if (refundCount > 0) console.log(`  Refunds/credits (negative): ${refundCount}`);
@@ -490,10 +507,13 @@ if (args.dryRun) {
   const entityMap = buildDryRunEntityMap();
   console.log(`Import mode: dry-run (no database)`);
   if (args.csvDir) console.log(`CSV dir: ${args.csvDir}`);
+  if (args.dateFrom || args.dateTo)
+    console.log(`Date window: ${args.dateFrom ?? "(open)"} ≤ d < ${args.dateTo ?? "(open)"}`);
   console.log(`Targets: ${targets.length}`);
 
   let total = 0;
   let totalRefunds = 0;
+  const exportRows = [];
   for (const target of targets) {
     const csvText = readFileSync(target.csvPath, "utf8");
     const supplementalCsvTexts = resolveSupplementalCsvTexts(
@@ -504,13 +524,38 @@ if (args.dryRun) {
     const plan = buildImportPlan(target.account, target.csvPath, csvText, entityMap, {
       dryRun: true,
       supplementalCsvTexts,
+      dateFrom: args.dateFrom,
+      dateTo: args.dateTo,
     });
     const result = await importAccount(null, plan, { dryRun: true });
     total += plan.rows.length;
     totalRefunds += result.refundCount ?? 0;
+    if (args.exportJson) {
+      for (const row of plan.rows) {
+        exportRows.push({
+          account_slug: target.account.slug,
+          entity_slug: row.entitySlug,
+          transaction_date: row.transaction.transaction_date,
+          posted_date: row.transaction.posted_date,
+          amount: row.transaction.amount,
+          description: row.transaction.description,
+          vendor: row.transaction.vendor,
+          import_hash: row.transaction.import_hash,
+        });
+      }
+    }
   }
 
   console.log(`\nDone. Total rows: ${total} (${totalRefunds} refunds/credits)`);
+  if (args.exportJson) {
+    exportRows.sort(
+      (a, b) =>
+        a.account_slug.localeCompare(b.account_slug) ||
+        a.transaction_date.localeCompare(b.transaction_date),
+    );
+    writeFileSync(args.exportJson, JSON.stringify(exportRows, null, 2));
+    console.log(`Exported ${exportRows.length} rows → ${args.exportJson}`);
+  }
   process.exit(0);
 }
 
@@ -547,6 +592,8 @@ if (targets.length === 0) {
 
 console.log(`Import mode: ${args.dryRun ? "dry-run" : "write"}`);
 if (args.csvDir) console.log(`CSV dir: ${args.csvDir}`);
+if (args.dateFrom || args.dateTo)
+  console.log(`Date window: ${args.dateFrom ?? "(open)"} ≤ d < ${args.dateTo ?? "(open)"}`);
 console.log(`Targets: ${targets.length}`);
 
 const results = [];
@@ -561,6 +608,8 @@ for (const target of targets) {
   const plan = buildImportPlan(target.account, target.csvPath, csvText, entityMap, {
     dryRun: false,
     supplementalCsvTexts,
+    dateFrom: args.dateFrom,
+    dateTo: args.dateTo,
   });
   const result = await importAccount(supabase, plan, { dryRun: args.dryRun });
   results.push({

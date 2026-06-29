@@ -8,6 +8,7 @@ import {
   Brain,
   CalendarCheck,
   CheckCircle2,
+  ClipboardCheck,
   FileSpreadsheet,
   Landmark,
   LayoutGrid,
@@ -62,6 +63,12 @@ const CLASSIFY_ITEMS: NavItem[] = [
     label: "AI review",
     icon: Brain,
     match: (path) => path === "/review/ai" || path.startsWith("/review/ai/"),
+  },
+  {
+    href: "/review/proposals",
+    label: "Proposals",
+    icon: ClipboardCheck,
+    match: (path) => path.startsWith("/review/proposals"),
   },
 ];
 
