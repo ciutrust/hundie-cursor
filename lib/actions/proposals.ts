@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireUser } from "@/lib/auth/require-user";
+import { createServiceRoleClient } from "@/lib/supabase/service-role";
 import { extractVendorSearchKey } from "@/lib/suggestions/category-suggestions";
 
 // classification_proposals isn't in the generated DB types (no CLI to regen); access via an
@@ -59,8 +60,10 @@ export async function commitApprovedProposals(
   } = await supabase.auth.getUser();
   const createdBy = user?.email ?? user?.id ?? "proposal-review";
 
-  const db = supabase as unknown as SupabaseClient;
-  let query = db
+  // Writes go through the service-role client: classifications has no authenticated INSERT policy,
+  // so the bulk upsert (insert-or-update) must bypass RLS. The action is already auth-gated above.
+  const admin = createServiceRoleClient();
+  let query = admin
     .from("classification_proposals")
     .select(
       "id, transaction_id, entity_id, chosen_entity_id, source, proposed_category_id, chosen_category_id, rationale, transactions!inner(description, vendor)",
@@ -74,7 +77,7 @@ export async function commitApprovedProposals(
   if (rows.length === 0) return { error: "No approved proposals to commit" };
 
   // category -> entity map, to guard that a (possibly reassigned) category belongs to its entity.
-  const { data: catRows, error: catErr } = await supabase
+  const { data: catRows, error: catErr } = await admin
     .from("categories")
     .select("id, entity_id");
   if (catErr) return { error: catErr.message };
@@ -128,7 +131,7 @@ export async function commitApprovedProposals(
       classified_at: now,
       notes: x.rationale ?? null,
     }));
-    const { data: up, error: upErr } = await supabase
+    const { data: up, error: upErr } = await admin
       .from("classifications")
       .upsert(payload, { onConflict: "transaction_id" })
       .select("id, transaction_id");
@@ -139,7 +142,7 @@ export async function commitApprovedProposals(
   // 2) Mark the proposals committed (bulk).
   for (let i = 0; i < plan.length; i += CHUNK) {
     const ids = plan.slice(i, i + CHUNK).map((x) => x.proposalId);
-    const { error: stErr } = await db
+    const { error: stErr } = await admin
       .from("classification_proposals")
       .update({ status: "committed", committed_at: now })
       .in("id", ids);
@@ -162,7 +165,7 @@ export async function commitApprovedProposals(
         created_by: createdBy,
       }));
     for (let i = 0; i < events.length; i += CHUNK) {
-      await supabase.from("suggestion_events").insert(events.slice(i, i + CHUNK));
+      await admin.from("suggestion_events").insert(events.slice(i, i + CHUNK));
     }
   } catch {
     // non-fatal — classifications are already written
