@@ -29,9 +29,13 @@ export function parseChaseCsv(csvText) {
     if (type === "Return") {
       amount = -Math.abs(rawAmount); // refund -> negative (C2)
     } else if (rawAmount < 0) {
-      amount = Math.abs(rawAmount); // charge -> positive
+      amount = Math.abs(rawAmount); // charge (negative in Chase export) -> positive
     } else {
-      continue; // non-charge positive that is not a Return
+      // BUG-13: a positive, non-Payment, non-Return Chase row is a legit credit/adjustment
+      // (statement credit, reward redemption, reimbursement). Payments are already dropped above
+      // (`type === "Payment"`), so this is money-in. Previously DROPPED (silent transaction loss);
+      // now booked as a negative inflow, consistent with the sign convention.
+      amount = -Math.abs(rawAmount);
     }
 
     transactions.push({

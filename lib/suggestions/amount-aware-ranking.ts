@@ -19,6 +19,11 @@ export function roundAmount(amount: number): number {
   return Math.round(Math.abs(amount) * 100) / 100;
 }
 
+/** Signed rounding so refund buckets stay separate from charge buckets (BUG-10). */
+function signedRoundAmount(amount: number): number {
+  return Math.round(amount * 100) / 100;
+}
+
 type AmountCluster = {
   amount: number;
   totalCount: number;
@@ -33,7 +38,7 @@ function buildAmountClusters(rows: AmountHistoryRow[]): AmountCluster[] {
     const fullPath = row.category?.full_path;
     if (!categoryId || !fullPath) continue;
 
-    const amount = roundAmount(row.amount);
+    const amount = signedRoundAmount(row.amount);
     let cluster = byAmount.get(amount);
     if (!cluster) {
       cluster = { amount, totalCount: 0, categories: new Map() };
@@ -76,7 +81,7 @@ export function rankAmountAwareMatches(
   const clusters = buildAmountClusters(rows);
   if (clusters.length === 0) return [];
 
-  const target = roundAmount(targetAmount);
+  const target = signedRoundAmount(targetAmount);
 
   const exact = clusters.find((cluster) => Math.abs(cluster.amount - target) < AMOUNT_MATCH_TOLERANCE);
   if (exact && exact.totalCount >= minBucketCount) {

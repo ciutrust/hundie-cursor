@@ -48,7 +48,7 @@ const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!url || !serviceKey) {
   console.error("Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local");
-  console.error("Or run: node scripts/generate-card-import-sql.mjs && use Supabase MCP execute_sql on scripts/.card-import-sql/mcp-chunks/*.sql");
+  console.error("Or run: node scripts/archive/generate-card-import-sql.mjs && use Supabase MCP execute_sql on scripts/.card-import-sql/mcp-chunks/*.sql");
   process.exit(1);
 }
 

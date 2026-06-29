@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   countsAsExpense,
+  isBookedOperatingExpense,
   isOperatingExpense,
   NON_EXPENSE_CATEGORY_PATHS,
+  sumBookedOperatingExpense,
 } from "@/lib/category-expense";
 import { categoryKind } from "@/lib/category-kind";
 
@@ -42,8 +44,15 @@ describe("category-expense", () => {
       "Owners Equity:Owner Distribution",
       // capital
       "Leasehold improvements",
+      "Leasehold Improvements",
       "Tenant improvement allowance",
       "Property purchase",
+      // liability
+      "Mortgage principal payment",
+      "Mortgage principal — primary home",
+      "Ford Motor Credit - F150:Principal",
+      // non_deductible
+      "Tax Penalty",
     ];
     expect([...NON_EXPENSE_CATEGORY_PATHS].sort()).toEqual(seeded.sort());
   });
@@ -60,16 +69,122 @@ describe("category-kind", () => {
     expect(categoryKind("Intercompany — pending")).toBe("funding");
   });
 
-  it("defaults real and unknown categories (and null) to expense", () => {
+  it("defaults real and unknown non-null categories to expense", () => {
     expect(categoryKind("Software")).toBe("expense");
     expect(categoryKind("Rent Expense")).toBe("expense");
-    expect(categoryKind(null)).toBe("expense");
-    expect(categoryKind(undefined)).toBe("expense");
+  });
+
+  it("treats null/blank categories as unclassified, not expense (ACCT-02)", () => {
+    expect(categoryKind(null)).toBe("unclassified");
+    expect(categoryKind(undefined)).toBe("unclassified");
+    expect(categoryKind("")).toBe("unclassified");
+    expect(categoryKind("   ")).toBe("unclassified");
+  });
+
+  it("ignores whitespace drift so non-expense paths don't leak into expense (BUG-08)", () => {
+    expect(categoryKind("  Credit card payment  ")).toBe("transfer");
+    expect(categoryKind("Credit card  payment")).toBe("transfer");
+    expect(categoryKind(" Owner Distribution ")).toBe("funding");
+    expect(categoryKind("Intercompany —  pending")).toBe("funding");
   });
 
   it("every non-expense path resolves to a non-expense kind", () => {
     for (const path of NON_EXPENSE_CATEGORY_PATHS) {
       expect(categoryKind(path)).not.toBe("expense");
     }
+  });
+
+  it("treats loan principal paydown as liability, off the P&L (ACCT-08/11)", () => {
+    expect(categoryKind("Mortgage principal payment")).toBe("liability");
+    expect(categoryKind("Mortgage principal — primary home")).toBe("liability");
+    expect(categoryKind("Ford Motor Credit - F150:Principal")).toBe("liability");
+    expect(isBookedOperatingExpense("Mortgage principal payment")).toBe(false);
+    expect(isBookedOperatingExpense("Ford Motor Credit - F150:Principal")).toBe(false);
+    // the matching interest line is still a deductible expense
+    expect(categoryKind("Mortgage interest")).toBe("expense");
+    expect(categoryKind("Ford Motor Credit - F150:Interest")).toBe("expense");
+  });
+
+  it("treats Tax Penalty as non_deductible, excluded from the deductible total (TAX-18)", () => {
+    expect(categoryKind("Tax Penalty")).toBe("non_deductible");
+    expect(countsAsExpense("Tax Penalty")).toBe(false);
+    expect(isBookedOperatingExpense("Tax Penalty")).toBe(false);
+  });
+
+  it("maps the GBSL capital-I Leasehold Improvements to capital (ACCT-13)", () => {
+    expect(categoryKind("Leasehold Improvements")).toBe("capital");
+    expect(categoryKind("Leasehold improvements")).toBe("capital"); // lowercase variant unchanged
+  });
+
+  it("maps the ACAA 136-Anita income leg to income (ACCT-07)", () => {
+    expect(categoryKind("Intercompany — 136 Anita (income)")).toBe("income");
+    expect(countsAsExpense("Intercompany — 136 Anita (income)")).toBe(false);
+    // the GBSL expense leg keeps the default expense kind (real deductible rent on GBSL's books)
+    expect(categoryKind("Intercompany — 136 Anita")).toBe("expense");
+  });
+});
+
+describe("uncategorized rows are excluded from operating expense (ACCT-02)", () => {
+  it("a positive null-category row is not an operating expense", () => {
+    expect(isOperatingExpense(100, null)).toBe(false);
+    expect(isOperatingExpense(100, undefined)).toBe(false);
+    expect(countsAsExpense(null)).toBe(false);
+  });
+
+  it("a positive real-expense row still counts", () => {
+    expect(isOperatingExpense(100, "Software")).toBe(true);
+  });
+});
+
+describe("isBookedOperatingExpense (BUG-04/QA-01 shared predicate)", () => {
+  it("books real expense categories regardless of amount sign", () => {
+    expect(isBookedOperatingExpense("Software")).toBe(true);
+    expect(isBookedOperatingExpense("Rent Expense")).toBe(true);
+  });
+
+  it("excludes the AMA review category", () => {
+    expect(isBookedOperatingExpense("Ask My Accountant")).toBe(false);
+  });
+
+  it("excludes uncategorized (null/blank/undefined)", () => {
+    expect(isBookedOperatingExpense(null)).toBe(false);
+    expect(isBookedOperatingExpense("")).toBe(false);
+    expect(isBookedOperatingExpense(undefined)).toBe(false);
+  });
+
+  it("excludes non-expense kinds (transfer / income / funding)", () => {
+    expect(isBookedOperatingExpense("Credit card payment")).toBe(false);
+    expect(isBookedOperatingExpense("Membership Income")).toBe(false);
+    expect(isBookedOperatingExpense("Owner Distribution")).toBe(false);
+  });
+});
+
+describe("sumBookedOperatingExpense (BUG-04 signed netting)", () => {
+  it("nets a refund against its charge in the same category", () => {
+    expect(
+      sumBookedOperatingExpense([
+        { amount: 100, categoryFullPath: "Meals" },
+        { amount: -50, categoryFullPath: "Meals" },
+      ]),
+    ).toBe(50);
+  });
+
+  it("excludes uncategorized rows", () => {
+    expect(sumBookedOperatingExpense([{ amount: 100, categoryFullPath: null }])).toBe(0);
+  });
+
+  it("excludes AMA rows", () => {
+    expect(
+      sumBookedOperatingExpense([{ amount: 100, categoryFullPath: "Ask My Accountant" }]),
+    ).toBe(0);
+  });
+
+  it("does NOT clamp — a category can legitimately go negative when refunds exceed charges", () => {
+    expect(
+      sumBookedOperatingExpense([
+        { amount: 50, categoryFullPath: "Meals" },
+        { amount: -200, categoryFullPath: "Meals" },
+      ]),
+    ).toBe(-150);
   });
 });

@@ -12,7 +12,7 @@ import {
 } from "@/lib/queries/review";
 import { getPersonalAiBacklog } from "@/lib/queries/ai-suggestions";
 import { formatCurrency } from "@/lib/utils";
-import { isOperatingExpense } from "@/lib/category-expense";
+import { isExpenseAmount } from "@/lib/category-expense";
 
 export const maxDuration = 300;
 
@@ -47,7 +47,10 @@ export default async function EntityUncategorizedPage({ params, searchParams }: 
   const total = isIncome
     ? transactions.reduce((sum, tx) => sum + Math.abs(Number(tx.amount)), 0)
     : transactions
-        .filter((tx) => isOperatingExpense(tx.amount, tx.classification.category?.full_path))
+        // This page lists the uncategorized outflow backlog (rows that are by definition uncategorized
+        // or AMA); the header is the gross positive "$ to classify", not an operating-expense total —
+        // isBookedOperatingExpense would (correctly) exclude uncategorized and zero it out.
+        .filter((tx) => isExpenseAmount(tx.amount))
         .reduce((sum, tx) => sum + Number(tx.amount), 0);
 
   const aiSuggestionTxIds = new Set(

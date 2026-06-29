@@ -9,6 +9,7 @@ import {
 } from "@/lib/ai/vendor-group-classify";
 import type { BacklogTransaction } from "@/lib/ai/vendor-groups";
 import { logSuggestionEvent, type SuggestionOutcome } from "@/lib/actions/suggestion-events";
+import { requireUser } from "@/lib/auth/require-user";
 import {
   getEntityChartsForAi,
   getPersonalAiBacklog,
@@ -26,6 +27,10 @@ export type AiEstimateResult = {
 };
 
 export async function estimateAiRun(transactionIds: string[]): Promise<AiEstimateResult | { error: string }> {
+  // SEC-05: explicit auth guard (defense-in-depth on top of RLS) before reading the backlog.
+  const { error: authError } = await requireUser();
+  if (authError) return { error: authError };
+
   const backlog = await getPersonalAiBacklog();
   const allowed = new Set(backlog.map((tx) => tx.id));
   const eligibleIds = transactionIds.filter((id) => allowed.has(id));

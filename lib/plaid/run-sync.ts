@@ -7,6 +7,8 @@ import { createServiceRoleClient } from "@/lib/supabase/service-role";
 import {
   buildImportPlanFromTransactions,
   importAccountPlan,
+  partitionRowsByExistingExternalId,
+  updateTransactionsByExternalId,
 } from "@/scripts/lib/ledger-import.mjs";
 
 type Admin = ReturnType<typeof createServiceRoleClient>;
@@ -25,6 +27,7 @@ export type ConnectionSyncResult = {
   connectionId: string;
   institution: string | null;
   inserted: number;
+  updated: number;
   skipped: number;
   status: string;
   error?: string;
@@ -32,11 +35,55 @@ export type ConnectionSyncResult = {
 
 export type SyncSummary = {
   inserted: number;
+  updated: number;
   skipped: number;
   connections: ConnectionSyncResult[];
 };
 
 const REAUTH_RE = /ITEM_LOGIN_REQUIRED|login_required|reauth/i;
+
+/**
+ * BUG-06 guard: a NULL sync_from_date would let Plaid pull FULL history (dateFrom=null) and
+ * double-count the CSV-backfilled window (CSV and Plaid rows hash differently, so UNIQUE(account_id,
+ * import_hash) does not dedupe them). Until the column is backfilled + NOT NULL (Stage 2), fall back
+ * to `todayIso` so a null can never silently import history; surface a warning so the operator sets a
+ * real cutover date.
+ */
+export function resolveSyncFromDate(
+  syncFromDate: string | null | undefined,
+  todayIso: string,
+): { dateFrom: string; warning: string | null } {
+  if (syncFromDate) return { dateFrom: syncFromDate, warning: null };
+  return {
+    dateFrom: todayIso,
+    warning: `sync_from_date is null — falling back to ${todayIso} (no historical backfill). Set a cutover date for this connection.`,
+  };
+}
+
+/**
+ * BUG-09/DATA-02: stamp plaid_removed_at on transactions Plaid reported as removed, located by
+ * external_id (BUG-01). Idempotent (`.is("plaid_removed_at", null)` skips already-stamped rows).
+ * Never deletes — a removed row may carry a human classification, so it is surfaced for human review.
+ * Scoped to the connection's own linked accounts so a globally-unique Plaid id can't touch another
+ * connection. Returns the number of rows newly stamped.
+ */
+export async function stampRemovedTransactions(
+  admin: Admin,
+  accountIds: string[],
+  removedExternalIds: string[],
+  nowIso: string,
+): Promise<number> {
+  if (accountIds.length === 0 || removedExternalIds.length === 0) return 0;
+  const { data, error } = await admin
+    .from("transactions")
+    .update({ plaid_removed_at: nowIso })
+    .in("account_id", accountIds)
+    .in("external_id", removedExternalIds)
+    .is("plaid_removed_at", null)
+    .select("id");
+  if (error) throw new Error(`Failed to stamp removed transactions: ${error.message}`);
+  return (data ?? []).length;
+}
 
 /**
  * Pull every connection's transactions and import them through the existing ledger pipeline.
@@ -64,9 +111,15 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
 
   const accountIdByPlaid = new Map<string, string>();
   const linkedAccountIds = new Set<string>();
+  // BUG-09: a per-connection account list so removed-transaction stamping is scoped to the
+  // connection's own accounts (a globally-unique Plaid id must never touch another connection).
+  const accountIdsByConnection = new Map<string, string[]>();
   for (const l of links ?? []) {
     accountIdByPlaid.set(l.plaid_account_id, l.account_id);
     linkedAccountIds.add(l.account_id);
+    const arr = accountIdsByConnection.get(l.connection_id) ?? [];
+    if (!arr.includes(l.account_id)) arr.push(l.account_id);
+    accountIdsByConnection.set(l.connection_id, arr);
   }
 
   const accountById = new Map<string, AccountRow>();
@@ -83,13 +136,14 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
     for (const a of accounts ?? []) accountById.set(a.id, a as unknown as AccountRow);
   }
 
-  const summary: SyncSummary = { inserted: 0, skipped: 0, connections: [] };
+  const summary: SyncSummary = { inserted: 0, updated: 0, skipped: 0, connections: [] };
 
   for (const conn of connections ?? []) {
     const result: ConnectionSyncResult = {
       connectionId: conn.id,
       institution: conn.institution,
       inserted: 0,
+      updated: 0,
       skipped: 0,
       status: conn.status,
     };
@@ -124,16 +178,38 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
         continue;
       }
 
-      // Ingest posted transactions from BOTH `added` and `modified`: a transaction that was
-      // pending on a prior sync settles into `modified` (same id, pending=false), not `added`.
-      // import_hash + UNIQUE(account_id, import_hash) make re-feeding a known row a safe no-op.
-      const incoming = [...synced.data.added, ...synced.data.modified];
+      // BUG-01: a transaction may appear in BOTH `added` and `modified` within one sync window;
+      // the `modified` copy is the newer state, so it wins. De-overlap by externalId up front so the
+      // same id never produces two plan rows (which would collide on the external_id index). Routing
+      // by external_id EXISTENCE (below) then sends known ids to UPDATE-in-place and only genuinely
+      // new ids to INSERT — so a `modified` (or an `added` re-labeled on a cursor reset) never
+      // double-counts.
+      const modifiedIds = new Set(synced.data.modified.map((t) => t.externalId));
+      const incoming = [
+        ...synced.data.modified,
+        ...synced.data.added.filter((t) => !modifiedIds.has(t.externalId)),
+      ];
+
       if (synced.data.removedExternalIds.length > 0) {
-        // Don't auto-delete: a removed row may carry a human classification. Surface for review.
+        // BUG-09/DATA-02: don't auto-delete (a removed row may carry a human classification). Stamp
+        // plaid_removed_at (located by external_id) so the row is surfaced for human review instead
+        // of silently lingering.
+        const stamped = await stampRemovedTransactions(
+          admin,
+          accountIdsByConnection.get(conn.id) ?? [],
+          synced.data.removedExternalIds,
+          new Date().toISOString(),
+        );
         console.log(
-          `  Plaid reported ${synced.data.removedExternalIds.length} removed txn(s) for ${conn.id} (left in place)`,
+          `  Plaid reported ${synced.data.removedExternalIds.length} removed txn(s) for ${conn.id}; stamped ${stamped} for review (left in place)`,
         );
       }
+
+      const { dateFrom: syncFromDate, warning: syncWarning } = resolveSyncFromDate(
+        conn.sync_from_date,
+        new Date().toISOString().slice(0, 10),
+      );
+      if (syncWarning) console.warn(`  ${conn.id}: ${syncWarning}`);
 
       const byPlaidAccount = new Map<string, AggregatorTransaction[]>();
       for (const t of incoming) {
@@ -160,17 +236,42 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
           description: t.description,
           vendor: t.vendor,
           rawCategory: t.rawCategory,
-          issuerReference: t.externalId, // Plaid transaction_id → stable dedupe key
+          issuerReference: t.externalId, // → import_hash (per-txn-unique; keeps `added` idempotent)
+          externalId: t.externalId, // BUG-01: → transactions.external_id + modify routing
           sourceRowIndex: undefined,
         }));
 
-        // sync_from_date bounds the pull so Plaid never re-imports the CSV-backfilled window.
+        // sync_from_date bounds the pull so Plaid never re-imports the CSV-backfilled window
+        // (BUG-06: resolveSyncFromDate guarantees a non-null lower bound).
         const plan = buildImportPlanFromTransactions(account, `plaid:${conn.id}`, parsed, entityMap, {
-          dateFrom: conn.sync_from_date ?? null,
+          dateFrom: syncFromDate,
         });
-        const res = await importAccountPlan(admin, plan, { sourceType: "plaid_sync" });
-        result.inserted += res.inserted;
-        result.skipped += res.skipped;
+
+        // BUG-01: a known external_id UPDATEs in place (preserving its classification); only genuinely
+        // new external_ids insert. This routes `modified` events — and `added` re-labels on a cursor
+        // reset — to UPDATE instead of inserting a second row.
+        const { existing, fresh } = await partitionRowsByExistingExternalId(
+          admin,
+          account.id,
+          plan.rows,
+        );
+        const { updated, unmatched } = await updateTransactionsByExternalId(
+          admin,
+          account.id,
+          existing,
+        );
+        result.updated += updated;
+
+        const insertRows = [...fresh, ...unmatched];
+        if (insertRows.length > 0) {
+          const res = await importAccountPlan(
+            admin,
+            { ...plan, rows: insertRows },
+            { sourceType: "plaid_sync" },
+          );
+          result.inserted += res.inserted;
+          result.skipped += res.skipped;
+        }
       }
 
       await admin
@@ -197,6 +298,7 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
     }
 
     summary.inserted += result.inserted;
+    summary.updated += result.updated;
     summary.skipped += result.skipped;
     summary.connections.push(result);
   }

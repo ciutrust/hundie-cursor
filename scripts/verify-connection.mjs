@@ -59,3 +59,42 @@ for (const row of data) {
   const tag = row.is_classifiable ? "classifiable" : row.status;
   console.log(`  - ${row.name} (${row.slug}) [${tag}]`);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SEC-03 — Verify the anon-RLS lockdown on the LIVE database (READ-ONLY).
+//
+// This cannot run from the client above: createClient() speaks PostgREST, which
+// only exposes the `public` schema. pg_catalog (pg_policies / pg_class.relrowsecurity)
+// is unreachable from PostgREST, and adding a direct pg connection would require
+// DATABASE_URL credentials that are not part of this project's env contract
+// (.env.local.example defines only NEXT_PUBLIC_SUPABASE_URL, *_PUBLISHABLE_KEY,
+// and SUPABASE_SERVICE_ROLE_KEY). So this stays operator-run rather than folded
+// into `npm run verify:db`. Run the following in Supabase Studio → SQL editor
+// (or psql as the table owner / superuser):
+//
+//   -- 1. Every base table in `public` must have RLS enabled:
+//   select c.relname as table, c.relrowsecurity as rls_enabled,
+//          c.relforcerowsecurity as rls_forced
+//   from pg_class c
+//   join pg_namespace n on n.oid = c.relnamespace
+//   where n.nspname = 'public' and c.relkind = 'r'
+//   order by c.relname;
+//   -- Expect rls_enabled = true for every row. Any false = anon-readable table.
+//
+//   -- 2. No policy may grant `anon` (or `public`) SELECT access:
+//   select schemaname, tablename, policyname, roles, cmd, qual
+//   from pg_policies
+//   where schemaname = 'public'
+//   order by tablename, policyname;
+//   -- Expect: no row whose `roles` array contains `anon`/`public` with cmd = SELECT.
+//
+//   -- 3. RLS-enabled tables with zero policies = intended deny-all:
+//   select c.relname
+//   from pg_class c
+//   join pg_namespace n on n.oid = c.relnamespace
+//   left join pg_policies p
+//     on p.schemaname = n.nspname and p.tablename = c.relname
+//   where n.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity
+//   group by c.relname
+//   having count(p.policyname) = 0;
+// ─────────────────────────────────────────────────────────────────────────────

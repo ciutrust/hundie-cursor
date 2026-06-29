@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { aggregator } from "@/lib/aggregator";
 import { encryptSecret } from "@/lib/crypto/secret-box";
 import { createClient } from "@/lib/supabase/server";
-import { requireMfaStepUp } from "@/lib/plaid/require-mfa";
+import { requireMfaStepUp, requireSameOrigin } from "@/lib/plaid/require-mfa";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 
 export const runtime = "nodejs";
@@ -13,6 +13,9 @@ export const runtime = "nodejs";
  * ledger accounts or sync yet — mapping + Sync now are separate steps.
  */
 export async function POST(request: Request) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const supabase = await createClient();
   const {
     data: { user },

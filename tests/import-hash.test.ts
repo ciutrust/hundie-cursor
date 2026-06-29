@@ -57,21 +57,32 @@ describe("buildTransactionDedupeKey", () => {
 });
 
 describe("dedupeImportPlanRows", () => {
-  it("keeps the first row when two share a business key", () => {
+  // BUG-03 intentionally CHANGES the prior documented behavior: two rows that share a business key
+  // are no longer collapsed to one (that silently lost a genuine second identical charge). They are
+  // now BOTH kept, each with a distinct, deterministic import_hash.
+  it("preserves genuine same-business-key duplicates with distinct hashes (BUG-03)", () => {
     const row = (description: string) => ({
       transaction: {
         transaction_date: "2026-06-24",
         amount: 199,
         description,
+        import_hash: buildTransactionHash({
+          accountId: "acct-1",
+          transactionDate: "2026-06-24",
+          amount: 199,
+          description,
+        }),
       },
     });
 
+    // "SPARK MEMBERSHIP" and "spark membership" normalize to the same identity (same base hash).
     const { rows, skipped } = dedupeImportPlanRows("acct-1", [
       row("SPARK MEMBERSHIP"),
       row("spark membership"),
     ]);
 
-    expect(rows).toHaveLength(1);
-    expect(skipped).toBe(1);
+    expect(rows).toHaveLength(2);
+    expect(skipped).toBe(0);
+    expect(rows[0].transaction.import_hash).not.toBe(rows[1].transaction.import_hash);
   });
 });

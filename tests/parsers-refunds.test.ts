@@ -43,6 +43,14 @@ describe("Wells Fargo refunds", () => {
     expect(byDesc(txs, "OFFICE DEPOT")?.amount).toBe(40);
     expect(byDesc(txs, "THANK YOU")).toBeUndefined();
   });
+
+  test("BUG-12: credit_card and checking produce identical signs for the same rows (no dead branch divergence)", () => {
+    const cc = parseWellsFargoCsv(csv, { accountType: "credit_card" });
+    const chk = parseWellsFargoCsv(csv, { accountType: "checking" });
+    const sig = (txs: Array<{ description: string; amount: number }>) =>
+      txs.map((t) => [t.description, t.amount]).sort();
+    expect(sig(chk)).toEqual(sig(cc));
+  });
 });
 
 describe("Chase refunds", () => {
@@ -51,6 +59,7 @@ describe("Chase refunds", () => {
     "01/15/2026,01/16/2026,WALMART,Shopping,Sale,-20.00,",
     "01/16/2026,01/17/2026,WALMART REFUND,Shopping,Return,20.00,",
     "01/17/2026,01/18/2026,AUTOPAY PAYMENT,,Payment,500.00,",
+    "01/19/2026,01/20/2026,STATEMENT CREDIT,Fees & Adjustments,Adjustment,15.00,", // BUG-13
   ].join("\n");
 
   test("charge positive, return negative, payment dropped", () => {
@@ -59,6 +68,12 @@ describe("Chase refunds", () => {
     expect(byDesc(txs, "WALMART,")?.amount ?? byDesc(txs, "WALMART")?.amount).toBeDefined();
     expect(txs.find((t) => t.description.toUpperCase() === "WALMART")?.amount).toBe(20);
     expect(byDesc(txs, "AUTOPAY")).toBeUndefined();
+  });
+
+  test("BUG-13: positive non-Payment/non-Return row is booked as a negative credit, not dropped", () => {
+    const txs = parseChaseCsv(csv);
+    expect(byDesc(txs, "STATEMENT CREDIT")?.amount).toBe(-15);
+    expect(byDesc(txs, "AUTOPAY")).toBeUndefined(); // payment still dropped
   });
 });
 

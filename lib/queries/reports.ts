@@ -1,17 +1,33 @@
 import type { PeriodRange } from "@/lib/period";
 import { rowsToCsv } from "@/lib/csv";
-import { needsCategoryReview } from "@/lib/category-review";
-import { isOperatingExpense } from "@/lib/category-expense";
+import { isBookedOperatingExpense } from "@/lib/category-expense";
 import { createClient } from "@/lib/supabase/server";
-import { paginateAll } from "@/lib/supabase/paginate";
+import { fetchPeriodTransactions } from "@/lib/queries/fetch-period-transactions";
 
-export type ReportEntityRow = {
-  slug: string;
-  name: string;
-  total: number;
-  transactionCount: number;
-  unclassifiedCount: number;
-  unclassifiedTotal: number;
+const REPORT_SELECT = `
+  transaction_date,
+  description,
+  vendor,
+  amount,
+  account:accounts!inner(display_name),
+  classification:classifications!inner(
+    notes,
+    entity:entities!inner(name, slug),
+    category:categories(full_path)
+  )
+`;
+
+type ReportTxRow = {
+  transaction_date: string;
+  description: string;
+  vendor: string | null;
+  amount: number;
+  account: { display_name: string };
+  classification: {
+    notes: string | null;
+    entity: { name: string; slug: string };
+    category: { full_path: string } | null;
+  };
 };
 
 export type ReportTransactionRow = {
@@ -28,109 +44,27 @@ export type ReportTransactionRow = {
   expense_amount: number;
 };
 
-export async function getReportByEntity(period: PeriodRange): Promise<ReportEntityRow[]> {
-  const supabase = await createClient();
-  const { start, end } = period;
-
-  const [entitiesResult, transactions] = await Promise.all([
-    supabase.from("entities").select("id, name, slug, display_order").eq("is_classifiable", true).order("display_order"),
-    fetchPeriodSummaryTransactionsForReports(supabase, start, end),
-  ]);
-
-  if (entitiesResult.error) throw entitiesResult.error;
-
-  const entities = entitiesResult.data ?? [];
-
-  return entities.map((entity) => {
-    const entityTransactions = transactions.filter((tx) => tx.classification.entity_id === entity.id);
-    const unclassified = entityTransactions.filter((tx) =>
-      needsCategoryReview(tx.classification.category?.full_path),
-    );
-    return {
-      slug: entity.slug,
-      name: entity.name,
-      total: entityTransactions
-        .filter((tx) => isOperatingExpense(tx.amount, tx.classification.category?.full_path))
-        .reduce((sum, tx) => sum + Number(tx.amount), 0),
-      transactionCount: entityTransactions.length,
-      unclassifiedCount: unclassified.length,
-      unclassifiedTotal: unclassified
-        .filter((tx) => Number(tx.amount) > 0)
-        .reduce((sum, tx) => sum + Number(tx.amount), 0),
-    };
-  });
-}
-
-async function fetchPeriodSummaryTransactionsForReports(
-  supabase: Awaited<ReturnType<typeof import("@/lib/supabase/server").createClient>>,
-  start: string,
-  end: string,
-) {
-  return paginateAll(async (from, pageSize) => {
-    const { data, error } = await supabase
-      .from("transactions")
-      .select(
-        `
-        amount,
-        classification:classifications!inner(
-          entity_id,
-          category_id,
-          entity:entities!inner(name, slug),
-          category:categories(full_path)
-        )
-      `,
-      )
-      .gte("transaction_date", start)
-      .lt("transaction_date", end)
-      .order("transaction_date", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + pageSize - 1);
-
-    return { data: data ?? [], error };
-  });
-}
-
 export async function getReportTransactions(
   period: PeriodRange,
   entitySlug?: string,
 ): Promise<ReportTransactionRow[]> {
   const supabase = await createClient();
-  const { start, end } = period;
 
-  const rows = await paginateAll(async (from, pageSize) => {
-    let query = supabase
-      .from("transactions")
-      .select(
-        `
-        transaction_date,
-        description,
-        vendor,
-        amount,
-        account:accounts!inner(display_name),
-        classification:classifications!inner(
-          notes,
-          entity:entities!inner(name, slug),
-          category:categories(full_path)
-        )
-      `,
-      )
-      .gte("transaction_date", start)
-      .lt("transaction_date", end)
-      .order("transaction_date", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + pageSize - 1);
-
-    if (entitySlug) {
-      query = query.eq("classification.entity.slug", entitySlug);
-    }
-
-    const { data, error } = await query;
-    return { data: data ?? [], error };
+  // OPT-08: same select/filters/ascending order via the shared period fetcher.
+  const rows = await fetchPeriodTransactions<ReportTxRow>({
+    supabase,
+    select: REPORT_SELECT,
+    start: period.start,
+    end: period.end,
+    entitySlug,
+    order: "asc",
   });
 
   return rows.map((row) => {
     const categoryPath = row.classification.category?.full_path ?? null;
-    const countsAsExpense = isOperatingExpense(row.amount, categoryPath);
+    // BUG-04/QA-01: book by category kind (AMA + uncategorized excluded); signed expense_amount
+    // so a refund row exports -50, not 0, and the column sums to the netted entity total.
+    const isBooked = isBookedOperatingExpense(categoryPath);
     return {
       transaction_date: row.transaction_date,
       entity_name: row.classification.entity.name,
@@ -141,8 +75,8 @@ export async function getReportTransactions(
       amount: Number(row.amount),
       category_name: categoryPath ?? "Uncategorized",
       notes: row.classification.notes,
-      counts_as_expense: countsAsExpense,
-      expense_amount: countsAsExpense ? Number(row.amount) : 0,
+      counts_as_expense: isBooked,
+      expense_amount: isBooked ? Number(row.amount) : 0,
     };
   });
 }

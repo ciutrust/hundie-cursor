@@ -1,43 +1,62 @@
 import type { PeriodRange } from "@/lib/period";
 import { createClient } from "@/lib/supabase/server";
+import { paginateAll } from "@/lib/supabase/paginate";
 import { flagIntercompanyMatches, type FlaggedLeg } from "@/lib/intercompany";
 
+type IntercompanyTxRow = {
+  transaction_date: string;
+  amount: number;
+  description: string;
+  classification: { entity: { slug: string }; category: { full_path: string } | null };
+};
+
 /**
- * Categories that mark an intercompany leg. The GBSL→Austin ACAA (136 Anita) lease
- * is booked as a GBSL "Rent Expense"; the offsetting/mirror side is tagged with the
- * redirect or staging categories. Surfacing all of these together lets a human
- * confirm the lease is counted once and not double-counted across entities.
+ * Categories that mark the 136 Anita intercompany lease (ACCT-07). The lease is booked on BOTH
+ * sides under dedicated categories: a GBSL expense leg (kind "expense" — real deductible rent on
+ * GBSL's standalone books) and the offsetting Austin ACAA income leg (kind "income"). Surfacing
+ * both lets the pair be netted (a consolidation-level elimination, flagged via `potentialMirror`)
+ * and confirms the lease is counted once, not double-counted across the two entities.
+ *
+ * The legacy "→ Austin ACAA (136 Anita)" staging label and "Intercompany — pending" are kept so
+ * unresolved / not-yet-migrated legs still surface for triage. The over-broad "Rent Expense"
+ * anchor was dropped — it flagged every GBSL rent line, not just the 136 Anita lease (ACCT-10
+ * splits the rest into per-location subaccounts).
  */
 const INTERCOMPANY_CATEGORY_PATHS = new Set([
-  "Intercompany — pending",
-  "→ Austin ACAA (136 Anita)",
-  "Rent Expense",
+  "Intercompany — 136 Anita", // GBSL expense leg (lease paid to ACAA)
+  "Intercompany — 136 Anita (income)", // Austin ACAA income leg (rent from GBSL)
+  "Intercompany — pending", // unresolved intercompany — triage
+  "→ Austin ACAA (136 Anita)", // legacy staging label — triage
 ]);
 
 export async function getIntercompanyReview(period: PeriodRange): Promise<FlaggedLeg[]> {
   const supabase = await createClient();
   const { start, end } = period;
 
-  const { data, error } = await supabase
-    .from("transactions")
-    .select(
-      `
-      transaction_date,
-      amount,
-      description,
-      classification:classifications!inner(
-        entity:entities!inner(slug),
-        category:categories(full_path)
+  // OPT-02: paginate so the intercompany scan isn't silently truncated at 1000 rows.
+  const data = await paginateAll<IntercompanyTxRow>(async (from, pageSize) => {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select(
+        `
+        transaction_date,
+        amount,
+        description,
+        classification:classifications!inner(
+          entity:entities!inner(slug),
+          category:categories(full_path)
+        )
+      `,
       )
-    `,
-    )
-    .gte("transaction_date", start)
-    .lt("transaction_date", end)
-    .order("transaction_date", { ascending: true });
+      .gte("transaction_date", start)
+      .lt("transaction_date", end)
+      .order("transaction_date", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    return { data: data as IntercompanyTxRow[] | null, error };
+  });
 
-  if (error) throw error;
-
-  const rows = (data ?? [])
+  const rows = data
     .filter((row) => {
       const path = row.classification.category?.full_path;
       return path != null && INTERCOMPANY_CATEGORY_PATHS.has(path);

@@ -1,9 +1,15 @@
 import type { PeriodRange } from "@/lib/period";
-import { countsAsExpense, isOperatingExpense } from "@/lib/category-expense";
-import { CPA_REVIEW_CATEGORY_PATHS, isCpaReviewCategory } from "@/lib/category-review";
+import { countsAsExpense, isBookedOperatingExpense } from "@/lib/category-expense";
+import {
+  getCpaReviewCategoryIdSet,
+  isCpaReviewCategory,
+  needsReviewCategory,
+  reviewBacklogOrClause,
+} from "@/lib/category-review";
 import { createClient } from "@/lib/supabase/server";
 import type { MonthCloseCell } from "@/lib/month-close";
 import { getAiPreclassifiedCount } from "@/lib/queries/ai-suggestions";
+import { fetchPeriodTransactions } from "@/lib/queries/fetch-period-transactions";
 import { paginateAll } from "@/lib/supabase/paginate";
 import type { CategoryGroup, EntitySummary, MonthlyCategoryRow, MonthlyEntityRow, ReviewDashboardStats, TransactionWithDetails } from "@/lib/types/database";
 const TRANSACTION_SELECT = `
@@ -41,94 +47,49 @@ const SUMMARY_TRANSACTION_SELECT = `
   )
 `;
 
-const PAGE_SIZE = 1000;
+type SummaryTransaction = {
+  id: string;
+  amount: number;
+  classification: {
+    entity_id: string;
+    category_id: string | null;
+    category?: { full_path: string } | null;
+  };
+};
 
-async function fetchPeriodSummaryTransactions(
+function fetchPeriodSummaryTransactions(
   supabase: Awaited<ReturnType<typeof createClient>>,
   start: string,
   end: string,
   options?: { entityId?: string },
-) {
-  const all: Array<{
-    id: string;
-    amount: number;
-    classification: {
-      entity_id: string;
-      category_id: string | null;
-      category?: { full_path: string } | null;
-    };
-  }> = [];
-  let from = 0;
-
-  while (true) {
-    let query = supabase
-      .from("transactions")
-      .select(SUMMARY_TRANSACTION_SELECT)
-      .gte("transaction_date", start)
-      .lt("transaction_date", end)
-      .order("transaction_date", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + PAGE_SIZE - 1);
-
-    if (options?.entityId) {
-      query = query.eq("classification.entity_id", options.entityId);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-    const page = data ?? [];
-    all.push(...page);
-    if (page.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-
-  return all;
+): Promise<SummaryTransaction[]> {
+  // OPT-08: same select/filters/ascending order as before, now via the shared fetcher.
+  return fetchPeriodTransactions<SummaryTransaction>({
+    supabase,
+    select: SUMMARY_TRANSACTION_SELECT,
+    start,
+    end,
+    entityId: options?.entityId,
+    order: "asc",
+  });
 }
 
-async function fetchPeriodTransactionDetails(
+function fetchPeriodTransactionDetails(
   supabase: Awaited<ReturnType<typeof createClient>>,
   start: string,
   end: string,
   options?: { entityId?: string; categoryId?: string },
-) {
-  const all: TransactionWithDetails[] = [];
-  let from = 0;
-
-  while (true) {
-    let query = supabase
-      .from("transactions")
-      .select(TRANSACTION_SELECT)
-      .gte("transaction_date", start)
-      .lt("transaction_date", end)
-      .order("transaction_date", { ascending: false })
-      .order("id", { ascending: false })
-      .range(from, from + PAGE_SIZE - 1);
-
-    if (options?.entityId) {
-      query = query.eq("classification.entity_id", options.entityId);
-    }
-    if (options?.categoryId) {
-      query = query.eq("classification.category_id", options.categoryId);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-    const page = (data ?? []) as unknown as TransactionWithDetails[];
-    all.push(...page);
-    if (page.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-
-  return all;
-}
-
-async function getCpaReviewCategoryIdSet(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const { data } = await supabase.from("categories").select("id").in("full_path", [...CPA_REVIEW_CATEGORY_PATHS]);
-  return new Set((data ?? []).map((row) => row.id));
-}
-
-function needsReviewCategory(categoryId: string | null | undefined, cpaReviewIds: Set<string>) {
-  return !categoryId || cpaReviewIds.has(categoryId);
+): Promise<TransactionWithDetails[]> {
+  // OPT-08: descending order is load-bearing — getEntityTransactions returns this array to the UI.
+  return fetchPeriodTransactions<TransactionWithDetails>({
+    supabase,
+    select: TRANSACTION_SELECT,
+    start,
+    end,
+    entityId: options?.entityId,
+    categoryId: options?.categoryId,
+    order: "desc",
+  });
 }
 
 function isNullCategory(categoryId: string | null | undefined) {
@@ -195,16 +156,26 @@ export type CategorizationProgress = {
 export async function getCategorizationProgress(): Promise<CategorizationProgress> {
   const supabase = await createClient();
 
-  const [{ count: total }, { count: categorized }, { data: events }] = await Promise.all([
+  const [{ count: total }, { count: categorized }, events] = await Promise.all([
     supabase.from("classifications").select("id", { count: "exact", head: true }),
     supabase
       .from("classifications")
       .select("id", { count: "exact", head: true })
       .not("category_id", "is", null),
-    supabase.from("suggestion_events").select("event_type, suggestion_source"),
+    // OPT-02: paginate the suggestion_events scan so it isn't silently truncated at 1000.
+    paginateAll<{ event_type: string | null; suggestion_source: string | null }>(
+      async (from, pageSize) => {
+        const { data, error } = await supabase
+          .from("suggestion_events")
+          .select("event_type, suggestion_source")
+          .order("id", { ascending: true })
+          .range(from, from + pageSize - 1);
+        return { data, error };
+      },
+    ),
   ]);
 
-  const rows = (events ?? []) as Array<{ event_type: string | null; suggestion_source: string | null }>;
+  const rows = events;
   const DETERMINISTIC = new Set(["qb_training", "confirmed_history", "blended", "amount_match"]);
   let aiAccepted = 0;
   let aiRejected = 0;
@@ -227,21 +198,12 @@ export async function getCategorizationProgress(): Promise<CategorizationProgres
   };
 }
 
-export async function getEntitySummaries(period: PeriodRange): Promise<EntitySummary[]> {
-  const supabase = await createClient();
-  const { start, end, compareStart, compareEnd } = period;
-
-  const [cpaReviewIds, entitiesResult, transactions, previousTransactions] = await Promise.all([
-    getCpaReviewCategoryIdSet(supabase),
-    supabase.from("entities").select("id, name, slug, display_order").eq("is_classifiable", true).order("display_order"),
-    fetchPeriodSummaryTransactions(supabase, start, end),
-    fetchPeriodSummaryTransactions(supabase, compareStart, compareEnd),
-  ]);
-
-  if (entitiesResult.error) throw entitiesResult.error;
-
-  const entities = entitiesResult.data ?? [];
-
+function buildEntitySummaries(
+  entities: Array<{ id: string; name: string; slug: string }>,
+  transactions: SummaryTransaction[],
+  previousTransactions: SummaryTransaction[],
+  cpaReviewIds: Set<string>,
+): EntitySummary[] {
   const summaries = entities.map((entity) => {
     const entityTransactions = transactions.filter(
       (tx) => tx.classification.entity_id === entity.id,
@@ -249,21 +211,19 @@ export async function getEntitySummaries(period: PeriodRange): Promise<EntitySum
     const previousEntityTransactions = previousTransactions.filter(
       (tx) => tx.classification.entity_id === entity.id,
     );
+    // BUG-04/QA-01: book by category kind (sign-independent) + SIGNED sum so a refund
+    // in an expense category nets its charge. Routes through the single shared predicate
+    // so /review and /reports agree. (Refunds > charges may make this legitimately negative.)
     const expenseTotal = entityTransactions
-      .filter(
-        (tx) =>
-          !needsReviewCategory(tx.classification.category_id, cpaReviewIds) &&
-          isOperatingExpense(tx.amount, tx.classification.category?.full_path),
-      )
+      .filter((tx) => isBookedOperatingExpense(tx.classification.category?.full_path))
       .reduce((sum, tx) => sum + Number(tx.amount), 0);
     const previousExpenseTotal = previousEntityTransactions
-      .filter(
-        (tx) =>
-          !needsReviewCategory(tx.classification.category_id, cpaReviewIds) &&
-          isOperatingExpense(tx.amount, tx.classification.category?.full_path),
-      )
+      .filter((tx) => isBookedOperatingExpense(tx.classification.category?.full_path))
       .reduce((sum, tx) => sum + Number(tx.amount), 0);
 
+    // NOTE: once refunds net (above), grossTotal (positive-only) no longer equals
+    // expenseTotal + excludedTotal + unclassifiedTotal. grossTotal reconciles the
+    // POSITIVE buckets; expenseTotal is the NET P&L number. This is correct.
     const positive = entityTransactions.filter((tx) => Number(tx.amount) > 0);
     const grossTotal = positive.reduce((sum, tx) => sum + Number(tx.amount), 0);
     const excludedTotal = positive
@@ -324,17 +284,48 @@ export async function getEntitySummaries(period: PeriodRange): Promise<EntitySum
   return summaries;
 }
 
+export async function getEntitySummaries(period: PeriodRange): Promise<EntitySummary[]> {
+  const supabase = await createClient();
+  const { start, end, compareStart, compareEnd } = period;
+
+  const [cpaReviewIds, entitiesResult, transactions, previousTransactions] = await Promise.all([
+    getCpaReviewCategoryIdSet(supabase),
+    supabase.from("entities").select("id, name, slug, display_order").eq("is_classifiable", true).order("display_order"),
+    fetchPeriodSummaryTransactions(supabase, start, end),
+    fetchPeriodSummaryTransactions(supabase, compareStart, compareEnd),
+  ]);
+
+  if (entitiesResult.error) throw entitiesResult.error;
+
+  return buildEntitySummaries(entitiesResult.data ?? [], transactions, previousTransactions, cpaReviewIds);
+}
+
 export async function getReviewDashboardStats(
   period: PeriodRange,
 ): Promise<ReviewDashboardStats & { summaries: EntitySummary[] }> {
   const supabase = await createClient();
-  const { start, end } = period;
-  const [cpaReviewIds, summaries, transactions, aiPreclassifiedCount] = await Promise.all([
-    getCpaReviewCategoryIdSet(supabase),
-    getEntitySummaries(period),
-    fetchPeriodSummaryTransactions(supabase, start, end),
-    getAiPreclassifiedCount(),
-  ]);
+  const { start, end, compareStart, compareEnd } = period;
+
+  // OPT-05: fetch the current period ONCE and reuse it for both the per-entity summaries
+  // and the dashboard counts (the old code fetched it twice, plus cpaReviewIds twice).
+  const [cpaReviewIds, entitiesResult, transactions, previousTransactions, aiPreclassifiedCount] =
+    await Promise.all([
+      getCpaReviewCategoryIdSet(supabase),
+      supabase.from("entities").select("id, name, slug, display_order").eq("is_classifiable", true).order("display_order"),
+      fetchPeriodSummaryTransactions(supabase, start, end),
+      fetchPeriodSummaryTransactions(supabase, compareStart, compareEnd),
+      getAiPreclassifiedCount(),
+    ]);
+
+  if (entitiesResult.error) throw entitiesResult.error;
+
+  const summaries = buildEntitySummaries(
+    entitiesResult.data ?? [],
+    transactions,
+    previousTransactions,
+    cpaReviewIds,
+  );
+
   return {
     ...buildReviewDashboardStats(summaries, transactions, cpaReviewIds, aiPreclassifiedCount),
     summaries,
@@ -345,21 +336,15 @@ export async function getTotalBacklogCount(): Promise<number> {
   const supabase = await createClient();
   const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
 
-  const rows = await paginateAll(async (from, pageSize) => {
-    const result = await supabase
-      .from("transactions")
-      .select("classification:classifications!inner(category_id)")
-      .order("id", { ascending: true })
-      .range(from, from + pageSize - 1);
-    return { data: result.data, error: result.error };
-  });
+  // BUG-14/OPT-06: push the predicate into SQL with a head/count aggregate instead of
+  // streaming the entire transactions table into Node just to count it.
+  const { count, error } = await supabase
+    .from("transactions")
+    .select("id, classification:classifications!inner(category_id)", { count: "exact", head: true })
+    .or(reviewBacklogOrClause(cpaReviewIds));
 
-  return rows.filter((tx) =>
-    needsReviewCategory(
-      (tx.classification as { category_id: string | null }).category_id,
-      cpaReviewIds,
-    ),
-  ).length;
+  if (error) throw error;
+  return count ?? 0;
 }
 
 export async function getDormantEntities() {
@@ -384,51 +369,30 @@ function monthFromDate(date: string) {
   return Number(date.slice(5, 7));
 }
 
+const MATRIX_SELECT = `
+  amount,
+  transaction_date,
+  classification:classifications!inner(
+    entity_id,
+    category_id,
+    category:categories(id, full_path)
+  )
+`;
+
 async function fetchYearMatrixTransactions(year: number, entityId?: string): Promise<MatrixTransaction[]> {
   const supabase = await createClient();
-  const yearStart = `${year}-01-01`;
-  const yearEnd = `${year + 1}-01-01`;
-  const pageSize = 1000;
-  const all: MatrixTransaction[] = [];
-  let from = 0;
-
-  while (true) {
-    let query = supabase
-      .from("transactions")
-      .select(
-        `
-        amount,
-        transaction_date,
-        classification:classifications!inner(
-          entity_id,
-          category_id,
-          category:categories(id, full_path)
-        )
-      `,
-      )
-      .gte("transaction_date", yearStart)
-      .lt("transaction_date", yearEnd)
-      .order("transaction_date", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + pageSize - 1);
-
-    if (entityId) {
-      query = query.eq("classification.entity_id", entityId);
-    }
-
-    const { data, error } = await query;
-
-    if (error) throw error;
-    const page = (data ?? []) as MatrixTransaction[];
-    all.push(...page);
-    if (page.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return all;
+  // OPT-08: same select/filters/ascending order over the [year, year+1) window.
+  return fetchPeriodTransactions<MatrixTransaction>({
+    supabase,
+    select: MATRIX_SELECT,
+    start: `${year}-01-01`,
+    end: `${year + 1}-01-01`,
+    entityId,
+    order: "asc",
+  });
 }
 
-function buildMonthlyRow(
+export function buildMonthlyRow(
   slug: string,
   name: string,
   transactions: MatrixTransaction[],
@@ -440,10 +404,14 @@ function buildMonthlyRow(
   let ytdCount = 0;
 
   for (const tx of transactions) {
-    if (options?.expenseOnly && !isOperatingExpense(tx.amount, tx.classification.category?.full_path)) {
+    if (options?.expenseOnly) {
+      // Expense row: book by category kind (sign-independent) + SIGNED sum so refunds net (BUG-04).
+      // AMA is a review category → excluded here, so it no longer double-counts with the backlog row (QA-04).
+      if (!isBookedOperatingExpense(tx.classification.category?.full_path)) continue;
+    } else if (Number(tx.amount) <= 0) {
+      // Review-backlog row: gross positive "$ to classify" (matches getEntitySummaries.unclassifiedTotal).
       continue;
     }
-    if (Number(tx.amount) <= 0) continue;
     const month = monthFromDate(tx.transaction_date);
     months[month] = (months[month] ?? 0) + Number(tx.amount);
     monthCounts[month] = (monthCounts[month] ?? 0) + 1;
@@ -494,7 +462,7 @@ function buildMonthlyCategoryRow(
   categoryId: string | null,
   categoryName: string,
   transactions: MatrixTransaction[],
-  options?: { isUnclassified?: boolean },
+  options?: { isUnclassified?: boolean; expenseOnly?: boolean },
 ): MonthlyCategoryRow {
   const months: Record<number, number> = {};
   const monthCounts: Record<number, number> = {};
@@ -502,7 +470,15 @@ function buildMonthlyCategoryRow(
   let ytdCount = 0;
 
   for (const tx of transactions) {
-    if (Number(tx.amount) <= 0) continue;
+    if (options?.expenseOnly) {
+      // Expense category row: book by kind (sign-independent) + SIGNED sum so refunds net, mirroring
+      // the entity expense rows in getMonthlyEntityMatrix so spending-by-category reconciles with
+      // spending-by-entity and non-expense kinds (transfers/income/funding/capital) are excluded (BUG-04/QA-01).
+      if (!isBookedOperatingExpense(tx.classification.category?.full_path)) continue;
+    } else if (Number(tx.amount) <= 0) {
+      // Uncategorized row: gross positive "$ to classify", matching the entity Review-backlog row.
+      continue;
+    }
     const month = monthFromDate(tx.transaction_date);
     months[month] = (months[month] ?? 0) + Number(tx.amount);
     monthCounts[month] = (monthCounts[month] ?? 0) + 1;
@@ -559,7 +535,9 @@ export async function getMonthlyCategoryMatrix(entitySlug: string, year: number)
   for (const [categoryId, categoryTransactions] of byCategory.entries()) {
     const name =
       categoryTransactions[0]?.classification.category?.full_path ?? "Unknown category";
-    categoryRows.push(buildMonthlyCategoryRow(categoryId, name, categoryTransactions));
+    const row = buildMonthlyCategoryRow(categoryId, name, categoryTransactions, { expenseOnly: true });
+    // A non-expense-kind category (transfer/income/funding/capital) nets to an empty expense row — drop it.
+    if (row.ytdCount > 0) categoryRows.push(row);
   }
 
   categoryRows.sort((a, b) => b.ytd - a.ytd);
@@ -699,6 +677,8 @@ export async function getTransactionById(id: string): Promise<TransactionWithDet
   const { data, error } = await supabase.from("transactions").select(TRANSACTION_SELECT).eq("id", id).maybeSingle();
 
   if (error) throw error;
+  // OPT-11: one intentional narrow cast. PostgREST types embedded to-one joins as arrays,
+  // but the runtime shape of the shared TRANSACTION_SELECT literal matches TransactionWithDetails.
   return (data as unknown as TransactionWithDetails | null) ?? null;
 }
 

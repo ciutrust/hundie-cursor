@@ -1,6 +1,6 @@
 import type { PeriodRange } from "@/lib/period";
 import { rowsToCsv } from "@/lib/csv";
-import { isOperatingExpense } from "@/lib/category-expense";
+import { isBookedOperatingExpense } from "@/lib/category-expense";
 import { createClient } from "@/lib/supabase/server";
 import { paginateAll } from "@/lib/supabase/paginate";
 
@@ -88,7 +88,9 @@ export async function getPersonalCardBusinessReport(period: PeriodRange): Promis
     notes: row.classification.notes,
   }));
 
-  const expenseRows = all.filter((row) => isOperatingExpense(row.amount, row.category_name));
+  // BUG-04/QA-01: shared predicate excludes AMA from grandTotal. Rows are pre-filtered to amount>0
+  // (line above), so signed == positive here — netting refunds would need removing .gt("amount", 0).
+  const expenseRows = all.filter((row) => isBookedOperatingExpense(row.category_name));
   const grandTotal = expenseRows.reduce((sum, row) => sum + row.amount, 0);
   return {
     rows: all.sort((a, b) => a.transaction_date.localeCompare(b.transaction_date)),
@@ -112,7 +114,7 @@ export function personalCardBusinessToCsv(rows: PersonalCardBusinessRow[]) {
   return rowsToCsv(
     header,
     rows.map((row) => {
-      const countsAsExpense = isOperatingExpense(row.amount, row.category_name);
+      const countsAsExpense = isBookedOperatingExpense(row.category_name);
       return [
         row.transaction_date,
         row.account_name,

@@ -46,3 +46,26 @@ describe("roundAmount", () => {
     expect(roundAmount(12.5)).toBe(12.5);
   });
 });
+
+describe("rankAmountAwareMatches sign separation (BUG-10)", () => {
+  const rows = [
+    row(50, "meals", "Meals"),
+    row(50, "meals", "Meals"),
+    row(-50, "refund", "Meals Refund"),
+    row(-50, "refund", "Meals Refund"),
+  ];
+
+  test("a +50 charge target matches only the charge bucket, not the refunds", () => {
+    const m = rankAmountAwareMatches(50, rows);
+    expect(m).toHaveLength(1);
+    expect(m[0]?.matchType).toBe("exact");
+    expect(m[0]?.bucketAmount).toBe(50);
+    expect(m[0]?.fullPath).toBe("Meals");
+  });
+
+  test("a -50 refund target matches the refund bucket", () => {
+    const m = rankAmountAwareMatches(-50, rows);
+    expect(m[0]?.bucketAmount).toBe(-50);
+    expect(m[0]?.fullPath).toBe("Meals Refund");
+  });
+});

@@ -12,18 +12,21 @@ function sqlString(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
+// SEC-07: route entityId through the same escaper as every other interpolated value.
+const entityIdLiteral = sqlString(entityId);
+
 const outDir = resolve(__dirname, ".qb-import-sql");
 mkdirSync(outDir, { recursive: true });
 
 const categorySql = [`-- categories for ${data.sourceFile}`];
 for (const category of data.categoryInserts) {
   const parentSql = category.parentPath
-    ? `(select id from categories where entity_id = '${entityId}' and full_path = ${sqlString(category.parentPath)})`
+    ? `(select id from categories where entity_id = ${entityIdLiteral} and full_path = ${sqlString(category.parentPath)})`
     : "null";
 
   categorySql.push(`
 insert into categories (entity_id, name, full_path, parent_id)
-values ('${entityId}', ${sqlString(category.name)}, ${sqlString(category.fullPath)}, ${parentSql})
+values (${entityIdLiteral}, ${sqlString(category.name)}, ${sqlString(category.fullPath)}, ${parentSql})
 on conflict (entity_id, full_path) do update
 set name = excluded.name,
     parent_id = excluded.parent_id,
@@ -34,7 +37,7 @@ writeFileSync(resolve(outDir, "01-categories.sql"), categorySql.join("\n"));
 
 const batchSql = `
 insert into import_batches (source_type, source_file, entity_id, row_count)
-values ('quickbooks_csv', ${sqlString(data.sourceFile)}, '${entityId}', ${data.expenseRows.length})
+values ('quickbooks_csv', ${sqlString(data.sourceFile)}, ${entityIdLiteral}, ${data.expenseRows.length})
 returning id;
 `;
 
@@ -49,9 +52,9 @@ for (let i = 0; i < data.expenseRows.length; i += chunkSize) {
 expenseChunks.forEach((chunk, index) => {
   const values = chunk
     .map((row) => {
-      const categoryIdSql = `(select id from categories where entity_id = '${entityId}' and full_path = ${sqlString(row.categoryName)})`;
+      const categoryIdSql = `(select id from categories where entity_id = ${entityIdLiteral} and full_path = ${sqlString(row.categoryName)})`;
       return `(
-        '${entityId}',
+        ${entityIdLiteral},
         ${categoryIdSql},
         (select id from import_batches where source_file = ${sqlString(data.sourceFile)} order by imported_at desc limit 1),
         ${sqlString(row.sourceAccount)},

@@ -1,4 +1,3 @@
-import { Suspense } from "react";
 import { Sparkles } from "lucide-react";
 import { AiReviewPanel } from "@/components/review/ai-review-panel";
 import { getCategoriesByEntity, getClassifiableEntities } from "@/lib/queries/review";
