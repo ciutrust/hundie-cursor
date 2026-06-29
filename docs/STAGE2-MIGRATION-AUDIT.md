@@ -78,19 +78,20 @@ Apply all 28 **in filename order** via the MCP. Per-file `apply_migration` (reco
 - `node scripts/export-ledger-backup.mjs` → `~/hundie-backups/stage2-2026-06-29_05-12-13/` (outside the repo; financial data).
 - Full logical export of all 13 tables; integrity-checked twice (writer + independent on-disk parse). **28,498 wipe-table rows** + KEEP tables. Counts match live exactly. This fully reverses the Phase-4 wipe.
 
-## ⛔ Critical Phase-4 fix (discovered during Phase-2 prep)
-The runbook's Phase-4 statement `TRUNCATE … import_batches … RESTART IDENTITY CASCADE` is **unsafe as written**.
-`qb_training_expenses` (a KEEP table, 3,832 rows — **all** with `import_batch_id` set) is the **only** external FK into the wipe set (`qb_training_expenses_import_batch_id_fkey → import_batches`). `TRUNCATE … CASCADE` truncates every table that references the set, so it would **wipe `qb_training_expenses` entirely** — destroying all training data + the Phase-2 snapshot.
+## ⛔ Critical Phase-4 trap (and the fix that actually works)
+The runbook's `TRUNCATE … import_batches … CASCADE` is **unsafe**. `qb_training_expenses` (a KEEP table) is the only external FK into the wipe set (`qb_training_expenses_import_batch_id_fkey → import_batches`).
 
-**Required Phase-4 sequence:**
+**Important correction (proven by the Phase-4 dry-run):** `TRUNCATE … CASCADE` cascades by **FK constraint existence**, *not* by whether rows actually reference the table. So nulling `import_batch_id` does **NOT** save `qb_training_expenses` — the first dry-run still emptied it (7012 → 0). The constraint is what triggers the cascade.
+
+**The fix that works (used by `scripts/stage2/wipe.mjs`):** `DELETE` in FK-dependency order instead of TRUNCATE CASCADE. `DELETE` respects the `NO ACTION` FK and never touches `qb_training_expenses`. PKs are UUIDs, so `RESTART IDENTITY` is moot (no sequences).
 ```sql
-UPDATE qb_training_expenses SET import_batch_id = NULL;   -- remove the only external FK into the wipe set (recoverable from backup; those batches get wiped anyway)
-TRUNCATE transactions, classifications, classification_history,
-         ai_suggestions, suggestion_events, raw_import_rows, import_batches
-  RESTART IDENTITY CASCADE;                                -- now CASCADE has nothing extra to pull in
+UPDATE qb_training_expenses SET import_batch_id = NULL;     -- so DELETE FROM import_batches isn't restricted
+-- children → parents:
+DELETE FROM classification_history; DELETE FROM suggestion_events; DELETE FROM ai_suggestions;
+DELETE FROM classifications; DELETE FROM raw_import_rows; DELETE FROM transactions; DELETE FROM import_batches;
 UPDATE bank_connections SET sync_cursor = NULL;
 ```
-Phase-2 snapshot rows are already inserted with `import_batch_id = NULL`, so they are immune regardless.
+The script runs this in one transaction and asserts every KEEP table (incl. `qb_training_expenses`=7012, snapshot=3180) is unchanged before COMMIT — else it ROLLBACKs.
 
 ## Open items for later phases (not blocking Phase 3)
 - **Merge/deploy ordering:** apply migrations (Phase 3) → merge `stage1-overnight-fixes` → `main` + deploy (so the live app & Plaid sync route run fixed code against the new schema) → *then* Phase 4 wipe & re-import. New code must not deploy before its schema exists.
