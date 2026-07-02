@@ -29,6 +29,11 @@ export function makeFakeSupabase(initial = {}) {
     import_batches: (initial.import_batches ?? []).map((r) => ({ ...r })),
     raw_import_rows: (initial.raw_import_rows ?? []).map((r) => ({ ...r })),
   };
+  // Seed any additional tables the caller provides (categories, entities,
+  // classification_proposals, suggestion_events, ai_suggestions, ...).
+  for (const [t, rows] of Object.entries(initial)) {
+    if (!(t in db)) db[t] = (rows ?? []).map((r) => ({ ...r }));
+  }
   const counters = {};
   const nextId = (table) => `${table}-${(counters[table] = (counters[table] ?? 0) + 1)}`;
 
@@ -143,6 +148,10 @@ export function makeFakeSupabase(initial = {}) {
         return this;
       },
       single() {
+        this._single = true;
+        return this;
+      },
+      maybeSingle() {
         this._single = true;
         return this;
       },
