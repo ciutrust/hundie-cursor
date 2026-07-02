@@ -21,7 +21,7 @@ import { chunk, loadEnvFile } from "./lib/ledger-import.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const envPath = resolve(__dirname, "..", ".env.local");
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = { apply: false, entity: null, account: null };
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { chooseDuplicateKeeper, groupDuplicates } from "../scripts/cleanup-ledger-duplicates.mjs";
+import {
+  chooseDuplicateKeeper,
+  groupDuplicates,
+  parseArgs,
+} from "../scripts/cleanup-ledger-duplicates.mjs";
 import { buildTransactionHash, withOccurrence } from "../scripts/lib/import-hash.mjs";
 
 describe("chooseDuplicateKeeper", () => {
@@ -29,7 +33,7 @@ describe("chooseDuplicateKeeper", () => {
 
 describe("groupDuplicates — C7 genuine-charge preservation", () => {
   const h = buildTransactionHash({ accountId: "acct-1", transactionDate: "2026-06-01", amount: 5, description: "COFFEE" });
-  const mk = (id, importHash, extra = {}) => ({
+  const mk = (id: string, importHash: string | null, extra: Record<string, unknown> = {}) => ({
     id, account_id: "acct-1", transaction_date: "2026-06-01", amount: 5, description: "COFFEE",
     import_hash: importHash, external_id: null, created_at: "2026-06-25T00:00:00Z", ...extra,
   });
@@ -52,5 +56,14 @@ describe("groupDuplicates — C7 genuine-charge preservation", () => {
   });
   it("still collapses legacy pre-hash duplicates (null import_hash) via the business-key fallback", () => {
     expect(groupDuplicates([mk("a", null), mk("b", null)])).toHaveLength(1);
+  });
+});
+
+describe("cleanup parseArgs", () => {
+  it("defaults apply=false (dry run)", () => {
+    expect(parseArgs(["node", "cleanup.mjs"]).apply).toBe(false);
+  });
+  it("enables delete only with --apply", () => {
+    expect(parseArgs(["node", "cleanup.mjs", "--apply"]).apply).toBe(true);
   });
 });

@@ -16,7 +16,7 @@ Copy `.env.local.example` to `.env.local` and set:
 
 - `NEXT_PUBLIC_SUPABASE_URL` — project URL
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — publishable key (`sb_publishable_...`) from **Project Settings → API**
-- `SUPABASE_SERVICE_ROLE_KEY` — service role key from **Project Settings → API** (required for `npm run import:cards` write mode and `npm run verify:db`; never commit)
+- `SUPABASE_SERVICE_ROLE_KEY` — service role key from **Project Settings → API** (required for `npm run import:cards:apply` write mode and `npm run verify:db`; never commit)
 
 Never commit `.env.local` or the service role key.
 
@@ -78,12 +78,12 @@ SQL migrations live in `supabase/migrations/`. Apply with Supabase CLI (`supabas
 Issuer parsers: Wells Fargo, Chase, Amex, Citi, Capital One (`scripts/lib/*-csv-parser.mjs`).
 
 ```bash
-# Parse all CSVs locally (no DB, no secrets)
-npm run import:cards:dry-run
+# Parse all CSVs locally (no DB, no secrets) — bare import:cards is dry-run
+npm run import:cards
 npm run verify:card-parsers
 
 # Write to Supabase (needs SUPABASE_SERVICE_ROLE_KEY in .env.local)
-npm run import:cards
+npm run import:cards:apply
 
 # Post-import counts
 npm run import:cards:verify
