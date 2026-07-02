@@ -1,6 +1,26 @@
 import { describe, expect, test } from "vitest";
-import { resolveSyncFromDate, stampRemovedTransactions } from "@/lib/plaid/run-sync";
+import {
+  resolveSyncFromDate,
+  stampRemovedTransactions,
+  unmappedPlaidAccountIds,
+} from "@/lib/plaid/run-sync";
 import { makeFakeSupabase } from "./helpers/fake-supabase.mjs";
+
+describe("C2 — unmappedPlaidAccountIds (cursor-advance gate)", () => {
+  const linkMap = new Map<string, string>([
+    ["plaid-A", "acct-1"],
+    ["plaid-B", "acct-2"],
+  ]);
+  test("flags an incoming Plaid account with no link", () => {
+    expect(unmappedPlaidAccountIds(["plaid-A", "plaid-Z"], linkMap)).toEqual(["plaid-Z"]);
+  });
+  test("returns empty when every incoming account is mapped (safe to advance cursor)", () => {
+    expect(unmappedPlaidAccountIds(["plaid-A", "plaid-B"], linkMap)).toEqual([]);
+  });
+  test("dedupes repeated unmapped ids", () => {
+    expect(unmappedPlaidAccountIds(["plaid-Z", "plaid-Z"], linkMap)).toEqual(["plaid-Z"]);
+  });
+});
 
 describe("BUG-06 — resolveSyncFromDate guard", () => {
   test("null falls back to today and warns (never full history)", () => {
