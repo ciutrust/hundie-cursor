@@ -3,10 +3,10 @@ import { makeFakeSupabase } from '../../../tests/helpers/fake-supabase.mjs';
 
 afterEach(() => { vi.resetModules(); vi.restoreAllMocks(); });
 
-function makeClient(initial) {
-  const sb = makeFakeSupabase(initial);
+function makeClient(initial: Record<string, unknown[]>) {
+  const sb = makeFakeSupabase(initial) as any;
   const origFrom = sb.from.bind(sb);
-  const from = (t) => { const q = origFrom(t); if (typeof q.maybeSingle !== 'function') q.maybeSingle = function () { this._single = true; return this; }; return q; };
+  const from = (t: string) => { const q = origFrom(t); if (typeof q.maybeSingle !== 'function') q.maybeSingle = function () { this._single = true; return this; }; return q; };
   return { client: { from, auth: { getUser: async () => ({ data: { user: { id: 'u1', email: 'u@x.com' } }, error: null }) } }, db: sb.db };
 }
 
