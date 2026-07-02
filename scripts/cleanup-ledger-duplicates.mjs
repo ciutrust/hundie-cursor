@@ -87,6 +87,7 @@ async function fetchTransactions(supabase, { accountId, entityId }) {
         amount,
         description,
         import_hash,
+        external_id,
         created_at,
         accounts ( slug, display_name ),
         classifications (
@@ -99,7 +100,7 @@ async function fetchTransactions(supabase, { accountId, entityId }) {
         )
       `,
       )
-      .order("transaction_date", { ascending: true })
+      .order("id")
       .range(offset, offset + pageSize - 1);
 
     if (accountId) query = query.eq("account_id", accountId);
@@ -123,22 +124,30 @@ async function fetchTransactions(supabase, { accountId, entityId }) {
   return rows;
 }
 
-function groupDuplicates(transactions) {
-  const groups = new Map();
+function distinctExternalIds(group) {
+  return new Set(group.map((tx) => tx.external_id).filter((v) => v != null)).size;
+}
 
+// C7/BUG-03: identity is the import_hash — the SAME key idempotent import uses. Occurrence-suffixed CSV
+// charges and distinct Plaid txns already have distinct hashes, so two genuine same-day/same-amount
+// charges land in DIFFERENT buckets and both survive. Only hash-less legacy rows fall back to the
+// coarse business key.
+export function groupDuplicates(transactions) {
+  const groups = new Map();
   for (const tx of transactions) {
-    const key = buildTransactionDedupeKey({
-      accountId: tx.account_id,
-      transactionDate: tx.transaction_date,
-      amount: tx.amount,
-      description: tx.description,
-    });
+    const key =
+      tx.import_hash ??
+      `nohash:${buildTransactionDedupeKey({
+        accountId: tx.account_id,
+        transactionDate: tx.transaction_date,
+        amount: tx.amount,
+        description: tx.description,
+      })}`;
     const bucket = groups.get(key) ?? [];
     bucket.push(tx);
     groups.set(key, bucket);
   }
-
-  return [...groups.values()].filter((group) => group.length > 1);
+  return [...groups.values()].filter((group) => group.length > 1 && distinctExternalIds(group) <= 1);
 }
 
 async function mergeCategoryToKeeper(supabase, keeper, dupe) {
