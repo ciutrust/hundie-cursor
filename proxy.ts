@@ -9,6 +9,7 @@ export const config = {
   matcher: [
     "/review/:path*",
     "/reports/:path*",
+    "/categories/:path*",
     "/month-close/:path*",
     "/tax-close/:path*",
     "/settings/:path*",

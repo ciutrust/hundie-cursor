@@ -4,6 +4,7 @@ import { decryptSecret } from "@/lib/crypto/secret-box";
 import { createClient } from "@/lib/supabase/server";
 import { requireMfaStepUp, requireSameOrigin } from "@/lib/plaid/require-mfa";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
+import { isUuid } from "@/lib/uuid";
 
 export const runtime = "nodejs";
 
@@ -25,8 +26,8 @@ export async function POST(request: Request) {
   if (mfaError) return mfaError;
 
   const body = (await request.json().catch(() => null)) as { connectionId?: string } | null;
-  if (!body?.connectionId) {
-    return NextResponse.json({ error: "Missing connectionId" }, { status: 400 });
+  if (!body || !isUuid(body.connectionId)) {
+    return NextResponse.json({ error: "Invalid connectionId" }, { status: 400 });
   }
 
   const admin = createServiceRoleClient();

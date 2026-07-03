@@ -219,6 +219,26 @@ export async function acceptAiSuggestions(
 
   const createdBy = user.email ?? user.id;
 
+  // S4: guard that each assigned category belongs to its entity — the same invariant every other
+  // writer enforces (reclassify.ts, proposals.ts). RLS's blanket USING(true) won't catch a
+  // cross-entity write, so validate up front and fail closed before touching any classification.
+  const categoryIds = [
+    ...new Set(items.map((i) => i.categoryId).filter((id): id is string => id != null)),
+  ];
+  if (categoryIds.length > 0) {
+    const { data: catRows, error: catErr } = await supabase
+      .from("categories")
+      .select("id, entity_id")
+      .in("id", categoryIds);
+    if (catErr) return { error: catErr.message };
+    const entityByCategory = new Map((catRows ?? []).map((c) => [c.id, c.entity_id]));
+    for (const item of items) {
+      if (item.categoryId && entityByCategory.get(item.categoryId) !== item.entityId) {
+        return { error: "Category does not belong to the selected entity" };
+      }
+    }
+  }
+
   const acceptedTxIds: string[] = [];
 
   for (const item of items) {

@@ -8,6 +8,7 @@ import {
 } from "@/lib/plaid/cutover";
 import { requireMfaStepUp, requireSameOrigin } from "@/lib/plaid/require-mfa";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
+import { isUuid } from "@/lib/uuid";
 
 export const runtime = "nodejs";
 
@@ -39,12 +40,12 @@ export async function POST(request: Request) {
     cutoverDate?: string | null;
     force?: boolean;
   } | null;
-  if (!body?.connectionId || !Array.isArray(body.links)) {
-    return NextResponse.json({ error: "Missing connectionId or links" }, { status: 400 });
+  if (!body || !isUuid(body.connectionId) || !Array.isArray(body.links)) {
+    return NextResponse.json({ error: "Invalid connectionId or links" }, { status: 400 });
   }
 
   const valid = body.links.filter(
-    (l) => l && typeof l.plaidAccountId === "string" && typeof l.accountId === "string" && l.accountId,
+    (l) => l && typeof l.plaidAccountId === "string" && l.plaidAccountId !== "" && isUuid(l.accountId),
   );
   if (valid.length === 0) return NextResponse.json({ linked: 0 });
 

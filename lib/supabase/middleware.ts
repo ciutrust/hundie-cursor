@@ -32,6 +32,7 @@ export async function updateSession(request: NextRequest) {
   const isProtectedRoute =
     path.startsWith("/review") ||
     path.startsWith("/reports") ||
+    path.startsWith("/categories") ||
     path.startsWith("/settings") ||
     path.startsWith("/month-close") ||
     path.startsWith("/tax-close");
