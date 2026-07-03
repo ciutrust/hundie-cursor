@@ -1,8 +1,15 @@
 import { callAnthropic } from "@/lib/ai/anthropic";
 import { calibrateConfidence } from "@/lib/ai/confidence";
 import { AI_BATCH_SIZE } from "@/lib/ai/config";
-import type { EntityChart } from "@/lib/ai/preclassify";
 import type { VendorGroupPackage } from "@/lib/ai/vendor-group-packages";
+
+/** An entity's slug + name + the closed list of category paths the model may choose from.
+ *  (Moved here from the removed lib/ai/preclassify.ts — T8.) */
+export type EntityChart = {
+  slug: string;
+  name: string;
+  categoryPaths: string[];
+};
 
 export type VendorGroupClassifyResult = {
   vendor_key: string;
