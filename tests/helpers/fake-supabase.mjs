@@ -1,7 +1,7 @@
 // In-memory fake of the supabase-js query builder, supporting exactly the chained calls that
 // importAccountPlan, filterRowsAgainstExisting, partition/update-by-external_id and
 // stampRemovedTransactions make: from, select/single, insert, upsert (ignoreDuplicates), update,
-// delete, eq/gte/lte/is/in/order/range. Exposes `.db` for assertions.
+// delete, eq/gte/lte/lt/is/in/order/range. Exposes `.db` for assertions.
 
 function project(row, cols) {
   if (!cols || cols === "*") return { ...row };
@@ -16,6 +16,7 @@ function matches(row, filters) {
     if (f.type === "eq") return row[f.col] === f.val;
     if (f.type === "gte") return row[f.col] >= f.val;
     if (f.type === "lte") return row[f.col] <= f.val;
+    if (f.type === "lt") return row[f.col] < f.val;
     if (f.type === "is") return f.val === null ? row[f.col] == null : row[f.col] === f.val;
     // .not(col, "is", null) => col IS NOT NULL (the only .not(...) shape used in the app).
     if (f.type === "not_is") return f.val === null ? row[f.col] != null : row[f.col] !== f.val;
@@ -138,6 +139,10 @@ export function makeFakeSupabase(initial = {}) {
       },
       lte(col, val) {
         this._filters.push({ type: "lte", col, val });
+        return this;
+      },
+      lt(col, val) {
+        this._filters.push({ type: "lt", col, val });
         return this;
       },
       is(col, val) {

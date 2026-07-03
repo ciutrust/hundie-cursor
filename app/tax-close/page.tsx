@@ -97,14 +97,29 @@ export default async function TaxClosePage({ searchParams }: Props) {
                     );
                   }
                   if (status === "open") {
+                    // C9: orphans (failed-to-book transactions) turn a cell red — they can't be
+                    // cleared by classifying (there's no classification row); re-run the import heal.
+                    const orphanTitle =
+                      cell.orphanCount > 0
+                        ? `${cell.orphanCount} failed to book (re-run import heal)`
+                        : "";
+                    const backlogTitle =
+                      cell.backlogCount > 0 ? `${cell.backlogCount} to classify` : "";
+                    const title = [backlogTitle, orphanTitle].filter(Boolean).join(" · ");
+                    const total = cell.backlogCount + cell.orphanCount;
+                    const hasOrphans = cell.orphanCount > 0;
                     return (
                       <td key={m} className="px-2 py-2 text-center">
                         <Link
                           href={`/review/${row.slug}?period=month&at=${year}-${pad2(m)}`}
-                          className="inline-block rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium tabular-nums text-amber-700 hover:bg-amber-500/25 dark:text-amber-400"
-                          title={`${cell.backlogCount} to classify`}
+                          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium tabular-nums ${
+                            hasOrphans
+                              ? "bg-red-500/15 text-red-700 hover:bg-red-500/25 dark:text-red-400"
+                              : "bg-amber-500/15 text-amber-700 hover:bg-amber-500/25 dark:text-amber-400"
+                          }`}
+                          title={title}
                         >
-                          {cell.backlogCount}
+                          {total}
                         </Link>
                       </td>
                     );
@@ -123,7 +138,9 @@ export default async function TaxClosePage({ searchParams }: Props) {
 
       <p className="text-xs text-muted-foreground">
         ✓ closed (0 backlog) · <span className="text-amber-600 dark:text-amber-400">amber</span> = rows
-        still need a category (click to clear) · · = no activity
+        still need a category (click to clear) ·{" "}
+        <span className="text-red-600 dark:text-red-400">red</span> = includes failed-to-book
+        transactions (re-run import heal) · · = no activity
       </p>
     </div>
   );

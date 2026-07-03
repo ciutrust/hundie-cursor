@@ -92,12 +92,26 @@ export default async function MonthClosePage({ searchParams }: Props) {
                   <CheckCircle2 className="h-4 w-4" /> Closed
                 </span>
               ) : cs === "open" ? (
-                <Link
-                  href={`/review/${row.slug}?period=month&at=${at}`}
-                  className="rounded-full bg-amber-500/15 px-2.5 py-1 text-sm font-medium text-amber-700 hover:bg-amber-500/25 dark:text-amber-400"
-                >
-                  {row.cell.backlogCount} left →
-                </Link>
+                <div className="flex items-center gap-2">
+                  {row.cell.orphanCount > 0 ? (
+                    // C9: an orphan is a transaction whose classification insert failed mid-import.
+                    // Surface it so the OPEN status is explained (re-run the import heal to fix).
+                    <span
+                      className="rounded-full bg-red-500/15 px-2.5 py-1 text-sm font-medium text-red-700 dark:text-red-400"
+                      title="Transactions with no classification (import failed to book them). Re-run the import heal to fix."
+                    >
+                      {row.cell.orphanCount} failed to book
+                    </span>
+                  ) : null}
+                  {row.cell.backlogCount > 0 ? (
+                    <Link
+                      href={`/review/${row.slug}?period=month&at=${at}`}
+                      className="rounded-full bg-amber-500/15 px-2.5 py-1 text-sm font-medium text-amber-700 hover:bg-amber-500/25 dark:text-amber-400"
+                    >
+                      {row.cell.backlogCount} left →
+                    </Link>
+                  ) : null}
+                </div>
               ) : (
                 <span className="text-sm text-muted-foreground">— no activity</span>
               )}
