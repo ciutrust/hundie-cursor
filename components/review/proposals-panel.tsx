@@ -187,7 +187,12 @@ export function ProposalsPanel({ entitySlug, proposals, entities, categoriesByEn
       setError(`Pick a category for "${group.label}" (entity changed → choose its category)`);
       return;
     }
-    const chosenEntityId = entityIdBySlug.get(curEntitySlug(group)) ?? null;
+    // Same reason for the ENTITY: a mixed group must keep each row's own entity, not collapse to
+    // proposals[0]'s (curEntitySlug reads proposals[0].chosen_entity_id, so a Tier-2 cross-entity
+    // reassignment on row[0] would otherwise stamp its entity on every row → rows whose category
+    // belongs to the original entity silently mismatch and get skipped at commit). Sending
+    // `undefined` leaves chosen_entity_id untouched so the commit path resolves per-row.
+    const chosenEntityId = applyPerRow ? undefined : (entityIdBySlug.get(curEntitySlug(group)) ?? null);
     const moved = curEntitySlug(group) !== entitySlug ? ` → ${curEntitySlug(group)}` : "";
     setError(null);
     startTransition(async () => {

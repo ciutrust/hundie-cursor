@@ -2,7 +2,6 @@ import { describe, expect, test } from "vitest";
 import {
   rankAmountAwareMatches,
   representativeBulkAmount,
-  roundAmount,
 } from "../lib/suggestions/amount-aware-ranking";
 
 const row = (amount: number, id: string, path: string) => ({
@@ -46,13 +45,6 @@ describe("representativeBulkAmount", () => {
     expect(representativeBulkAmount([50, 50, -50, -50])).toBeUndefined();
     // A charge majority stays a positive representative.
     expect(representativeBulkAmount([50, 50, 50, -50])).toBe(50);
-  });
-});
-
-describe("roundAmount", () => {
-  test("uses absolute value to 2dp so refunds bucket with their charges", () => {
-    expect(roundAmount(-850)).toBe(850);
-    expect(roundAmount(12.5)).toBe(12.5);
   });
 });
 

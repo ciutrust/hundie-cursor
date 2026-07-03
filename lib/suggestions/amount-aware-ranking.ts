@@ -15,10 +15,6 @@ export type AmountBucketMatch = {
   bucketAmount: number;
 };
 
-export function roundAmount(amount: number): number {
-  return Math.round(Math.abs(amount) * 100) / 100;
-}
-
 /** Signed rounding so refund buckets stay separate from charge buckets (BUG-10). */
 function signedRoundAmount(amount: number): number {
   return Math.round(amount * 100) / 100;

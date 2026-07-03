@@ -5,7 +5,7 @@ import { classifyProposalEvent } from "@/lib/actions/proposal-event-plan";
 const cand = (over: Record<string, unknown> = {}) => ({
   proposalId: "p1", transactionId: "t1", entityId: "e1", categoryId: "c-proposed",
   rationale: "training says meals", source: "training", description: "CHIPOTLE", vendor: null,
-  proposedCategoryId: "c-proposed", wasOverride: false, ...over,
+  proposedCategoryId: "c-proposed", ...over,
 });
 
 describe("partitionCommitPlan", () => {
@@ -39,20 +39,18 @@ describe("partitionCommitPlan", () => {
     expect(toWrite[0].keepNote).toBe("training says meals");
   });
 
-  it("threads proposedCategoryId + wasOverride through to toWrite (C16)", () => {
+  it("threads proposedCategoryId through to toWrite (C16)", () => {
     const overridden = cand({
       categoryId: "c-chosen",
       proposedCategoryId: "c-proposed",
-      wasOverride: true,
     });
     const { toWrite } = partitionCommitPlan([overridden] as never, new Map() as never);
     expect(toWrite[0].proposedCategoryId).toBe("c-proposed");
-    expect(toWrite[0].wasOverride).toBe(true);
     expect(toWrite[0].categoryId).toBe("c-chosen"); // the booked category
   });
 
   it("an overridden proposal yields a reject event with suggested_category_id === proposedCategoryId (C16)", () => {
-    const overridden = cand({ categoryId: "c-chosen", proposedCategoryId: "c-proposed", wasOverride: true });
+    const overridden = cand({ categoryId: "c-chosen", proposedCategoryId: "c-proposed" });
     const { toWrite } = partitionCommitPlan([overridden] as never, new Map() as never);
     const x = toWrite[0];
     const ev = classifyProposalEvent({

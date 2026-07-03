@@ -1,8 +1,8 @@
-// Stage 2 Phase 3: apply the 28 unapplied migrations to the live DB, byte-exact and atomic.
+// Stage 2 Phase 3: apply the 29 unapplied migrations to the live DB, byte-exact and atomic.
 //
 // Reads the exact .sql files (no transcription) and runs them in ONE transaction.
-//   --dry-run : BEGIN → apply all 28 → ROLLBACK   (proves they succeed; changes nothing)
-//   --apply   : BEGIN → apply all 28 → COMMIT
+//   --dry-run : BEGIN → apply all 29 → ROLLBACK   (proves they succeed; changes nothing)
+//   --apply   : BEGIN → apply all 29 → COMMIT
 // Any error rolls the whole batch back and reports the offending file. Re-runnable
 // (every migration is verified idempotent in docs/STAGE2-MIGRATION-AUDIT.md).
 //
@@ -20,7 +20,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..", "..");
 const migDir = join(root, "supabase", "migrations");
 
-// The verified 28-file apply set (files #16–#43), in filename order. Explicit list so we
+// The verified 29-file apply set (files #16–#44), in filename order. Explicit list so we
 // can never accidentally re-run the 15 already-tracked migrations or pick up future files.
 const FILES = [
   "20260701140000_keller_refund_category.sql",
@@ -109,10 +109,10 @@ try {
   }
   if (apply) {
     await client.query("COMMIT");
-    console.log("\n✅ COMMITTED — all 28 migrations applied.");
+    console.log(`\n✅ COMMITTED — all ${FILES.length} migrations applied.`);
   } else {
     await client.query("ROLLBACK");
-    console.log("\n✅ DRY RUN OK — all 28 applied cleanly inside a transaction, then ROLLED BACK (no changes). Re-run with --apply to commit.");
+    console.log(`\n✅ DRY RUN OK — all ${FILES.length} applied cleanly inside a transaction, then ROLLED BACK (no changes). Re-run with --apply to commit.`);
   }
 } catch (e) {
   failed = e;

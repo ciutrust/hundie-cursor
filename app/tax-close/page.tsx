@@ -110,30 +110,35 @@ export default async function TaxClosePage({ searchParams }: Props) {
                     );
                   }
                   if (status === "open") {
-                    // C9: orphans (failed-to-book transactions) turn a cell red — they can't be
-                    // cleared by classifying (there's no classification row); re-run the import heal.
-                    const orphanTitle =
-                      cell.orphanCount > 0
-                        ? `${cell.orphanCount} failed to book (re-run import heal)`
-                        : "";
-                    const backlogTitle =
-                      cell.backlogCount > 0 ? `${cell.backlogCount} to classify` : "";
-                    const title = [backlogTitle, orphanTitle].filter(Boolean).join(" · ");
-                    const total = cell.backlogCount + cell.orphanCount;
+                    // Mirror month-close: orphans and the __unassigned__ pseudo-row have NO
+                    // classification to clear, so they must NOT be wrapped in a /review Link
+                    // (non-actionable, and `/review/__unassigned__` 404s). Only the amber backlog
+                    // badge — real rows needing a category — is a working link (C9 / D-min1).
                     const hasOrphans = cell.orphanCount > 0;
+                    const hasBacklog = cell.backlogCount > 0;
                     return (
                       <td key={m} className="px-2 py-2 text-center">
-                        <Link
-                          href={`/review/${row.slug}?period=month&at=${year}-${pad2(m)}`}
-                          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium tabular-nums ${
-                            hasOrphans
-                              ? "bg-red-500/15 text-red-700 hover:bg-red-500/25 dark:text-red-400"
-                              : "bg-amber-500/15 text-amber-700 hover:bg-amber-500/25 dark:text-amber-400"
-                          }`}
-                          title={title}
-                        >
-                          {total}
-                        </Link>
+                        <span className="inline-flex flex-wrap items-center justify-center gap-1">
+                          {hasOrphans ? (
+                            // C9: failed-to-book transactions — can't be cleared by classifying
+                            // (no classification row); re-run the import heal. Non-link red badge.
+                            <span
+                              className="inline-block rounded bg-red-500/15 px-1.5 py-0.5 text-xs font-medium tabular-nums text-red-700 dark:text-red-400"
+                              title={`${cell.orphanCount} failed to book (re-run import heal)`}
+                            >
+                              {cell.orphanCount}
+                            </span>
+                          ) : null}
+                          {hasBacklog ? (
+                            <Link
+                              href={`/review/${row.slug}?period=month&at=${year}-${pad2(m)}`}
+                              className="inline-block rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium tabular-nums text-amber-700 hover:bg-amber-500/25 dark:text-amber-400"
+                              title={`${cell.backlogCount} to classify`}
+                            >
+                              {cell.backlogCount}
+                            </Link>
+                          ) : null}
+                        </span>
                       </td>
                     );
                   }

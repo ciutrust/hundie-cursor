@@ -106,9 +106,9 @@ export async function commitApprovedProposals(
     source: string;
     description: string;
     vendor: string | null;
-    // Provenance for the training signal (C16): what was proposed, and whether it was overridden.
+    // Provenance for the training signal (C16): the proposed category. accept/reject is derived
+    // from proposed-vs-booked at log time (classifyProposalEvent), so no override flag is stored.
     proposedCategoryId: string | null;
-    wasOverride: boolean;
   };
   const plan: Plan[] = [];
   let skipped = 0;
@@ -129,7 +129,6 @@ export async function commitApprovedProposals(
       description: p.transactions?.description ?? "",
       vendor: p.transactions?.vendor ?? null,
       proposedCategoryId: p.proposed_category_id,
-      wasOverride: p.chosen_category_id != null && p.chosen_category_id !== p.proposed_category_id,
     });
   }
   if (plan.length === 0) return { error: `Nothing valid to commit (${skipped} skipped)` };

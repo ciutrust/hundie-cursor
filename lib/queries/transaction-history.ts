@@ -1,10 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { createClient } from "@/lib/supabase/server";
+import { paginateAll } from "@/lib/supabase/paginate";
 
 type ServerClient = Awaited<ReturnType<typeof createClient>>;
 
 // Page size for scanning the audit table. Kept modest — this is a distinct-id scan, not a full export.
 const PAGE_SIZE = 1000;
+
+type HistoryRow = { id: string; transaction_id: string };
 
 /**
  * C8: the set of `transaction_id`s that appear in the `transaction_history` audit trail — i.e. every
@@ -29,35 +32,31 @@ export async function fetchChangedTransactionIds(
   const db = supabase as unknown as SupabaseClient;
   const ids = new Set<string>();
   try {
-    let from = 0;
-    // Paginate defensively so a large trail is not silently truncated at the default 1000.
-    while (true) {
-      const { data, error } = await db
-        .from("transaction_history")
-        .select("transaction_id")
-        .order("transaction_id", { ascending: true })
-        .range(from, from + PAGE_SIZE - 1);
-
-      if (error) {
-        // Table missing (pre-migration) or any other read failure → fail soft.
-        console.warn(
-          `[transaction-history] changed-transaction fetch failed; treating as no changes (pre-migration or read error): ${
-            (error as { message?: string }).message ?? String(error)
-          }`,
-        );
-        return new Set<string>();
-      }
-
-      const rows = (data ?? []) as Array<{ transaction_id: string }>;
-      for (const row of rows) {
-        if (row.transaction_id) ids.add(row.transaction_id);
-      }
-      if (rows.length < PAGE_SIZE) break;
-      from += PAGE_SIZE;
+    // Paginate defensively so a large trail is not silently truncated at the default 1000. Order by
+    // the UNIQUE `id` (a transaction edited N times has N history rows sharing one transaction_id — a
+    // non-unique sort column silently skips/duplicates rows across page boundaries; F-min1). `key`
+    // makes paginateAll throw loudly if that invariant is ever violated. Mirrors orphans.ts / income.ts.
+    const rows = await paginateAll<HistoryRow>(
+      async (from, pageSize) => {
+        const { data, error } = await db
+          .from("transaction_history")
+          .select("id, transaction_id")
+          .order("id", { ascending: true })
+          .range(from, from + pageSize - 1);
+        return { data: data as HistoryRow[] | null, error };
+      },
+      PAGE_SIZE,
+      (r) => r.id,
+    );
+    for (const row of rows) {
+      if (row.transaction_id) ids.add(row.transaction_id);
     }
   } catch (err) {
+    // Table missing (pre-migration, esp. Postgres 42P01) or ANY other read failure → fail soft: an
+    // error result surfaces here as a thrown Error via paginateAll. Return an empty Set + warn once;
+    // never throw, so the Month-Close / Tax-Close pages render normally pre-migration.
     console.warn(
-      `[transaction-history] changed-transaction fetch threw; treating as no changes: ${
+      `[transaction-history] changed-transaction fetch failed; treating as no changes (pre-migration or read error): ${
         err instanceof Error ? err.message : String(err)
       }`,
     );
