@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { partitionCommitPlan } from "@/lib/actions/commit-plan";
+import { classifyProposalEvent } from "@/lib/actions/proposal-event-plan";
 
 const cand = (over: Record<string, unknown> = {}) => ({
   proposalId: "p1", transactionId: "t1", entityId: "e1", categoryId: "c-proposed",
-  rationale: "training says meals", source: "training", description: "CHIPOTLE", vendor: null, ...over,
+  rationale: "training says meals", source: "training", description: "CHIPOTLE", vendor: null,
+  proposedCategoryId: "c-proposed", wasOverride: false, ...over,
 });
 
 describe("partitionCommitPlan", () => {
@@ -35,5 +37,41 @@ describe("partitionCommitPlan", () => {
     const { toWrite, staleProposalIds } = partitionCommitPlan([cand()] as never, new Map() as never);
     expect(staleProposalIds).toEqual([]);
     expect(toWrite[0].keepNote).toBe("training says meals");
+  });
+
+  it("threads proposedCategoryId + wasOverride through to toWrite (C16)", () => {
+    const overridden = cand({
+      categoryId: "c-chosen",
+      proposedCategoryId: "c-proposed",
+      wasOverride: true,
+    });
+    const { toWrite } = partitionCommitPlan([overridden] as never, new Map() as never);
+    expect(toWrite[0].proposedCategoryId).toBe("c-proposed");
+    expect(toWrite[0].wasOverride).toBe(true);
+    expect(toWrite[0].categoryId).toBe("c-chosen"); // the booked category
+  });
+
+  it("an overridden proposal yields a reject event with suggested_category_id === proposedCategoryId (C16)", () => {
+    const overridden = cand({ categoryId: "c-chosen", proposedCategoryId: "c-proposed", wasOverride: true });
+    const { toWrite } = partitionCommitPlan([overridden] as never, new Map() as never);
+    const x = toWrite[0];
+    const ev = classifyProposalEvent({
+      proposedCategoryId: x.proposedCategoryId,
+      chosenCategoryId: x.categoryId,
+    });
+    expect(ev.eventType).toBe("reject");
+    expect(ev.suggestedCategoryId).toBe("c-proposed"); // what was shown
+    expect(ev.chosenCategoryId).toBe("c-chosen"); // what was booked
+  });
+
+  it("a kept proposal yields an accept event (C16)", () => {
+    const { toWrite } = partitionCommitPlan([cand()] as never, new Map() as never);
+    const x = toWrite[0];
+    const ev = classifyProposalEvent({
+      proposedCategoryId: x.proposedCategoryId,
+      chosenCategoryId: x.categoryId,
+    });
+    expect(ev.eventType).toBe("accept");
+    expect(ev.suggestedCategoryId).toBe("c-proposed");
   });
 });

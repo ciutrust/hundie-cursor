@@ -19,6 +19,8 @@ function matches(row, filters) {
     if (f.type === "is") return f.val === null ? row[f.col] == null : row[f.col] === f.val;
     // .not(col, "is", null) => col IS NOT NULL (the only .not(...) shape used in the app).
     if (f.type === "not_is") return f.val === null ? row[f.col] != null : row[f.col] !== f.val;
+    // .not(col, "in", '("a","b")') => col NOT IN (a, b). Value is the PostgREST list string.
+    if (f.type === "not_in") return !f.vals.includes(row[f.col]);
     if (f.type === "in") return f.vals.includes(row[f.col]);
     return true;
   });
@@ -143,8 +145,17 @@ export function makeFakeSupabase(initial = {}) {
         return this;
       },
       not(col, op, val) {
-        // Only the `.not(col, "is", null)` (IS NOT NULL) shape is used in the app.
+        // `.not(col, "is", null)` (IS NOT NULL) and `.not(col, "in", '("a","b")')` (NOT IN) shapes.
         if (op === "is") this._filters.push({ type: "not_is", col, val });
+        else if (op === "in") {
+          // Parse the PostgREST list string: '("committed","skipped")' -> ["committed","skipped"].
+          const vals = String(val)
+            .replace(/^\(|\)$/g, "")
+            .split(",")
+            .map((s) => s.trim().replace(/^"|"$/g, ""))
+            .filter(Boolean);
+          this._filters.push({ type: "not_in", col, vals });
+        }
         return this;
       },
       in(col, vals) {

@@ -45,12 +45,33 @@ const supabase = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE
   auth: { persistSession: false },
 });
 
-async function fetchAllPaged<T>(builder: (from: number, to: number) => Promise<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
+// Offset pagination is only stable when the query orders by a UNIQUE column. Both call sites below
+// add `.order("id" | "transaction_id")` for that; `key` here enforces it at runtime — it throws the
+// moment a row is delivered on two pages (the signature of a missing/non-unique tiebreaker), rather
+// than silently skipping/duplicating rows past 1000 (BUG-05 / C10).
+async function fetchAllPaged<T>(
+  builder: (from: number, to: number) => Promise<{ data: T[] | null; error: { message: string } | null }>,
+  key?: (row: T) => string,
+): Promise<T[]> {
   const out: T[] = [];
+  const seen = key ? new Set<string>() : null;
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await builder(from, from + PAGE - 1);
     if (error) throw new Error(error.message);
-    out.push(...(data ?? []));
+    const page = data ?? [];
+    if (seen) {
+      for (const row of page) {
+        const k = key!(row);
+        if (seen.has(k)) {
+          throw new Error(
+            `fetchAllPaged: row key ${JSON.stringify(k)} returned on two pages — the query needs a ` +
+              `unique .order() tiebreaker (e.g. .order("id")) for stable offset pagination.`,
+          );
+        }
+        seen.add(k);
+      }
+    }
+    out.push(...page);
     if (!data || data.length < PAGE) break;
   }
   return out;
@@ -84,14 +105,16 @@ for (const slug of ENTITIES) {
   }
 
   // 1) training tally: vendorKey -> (categoryId -> count), active categories only
-  const training = await fetchAllPaged<{ category_id: string | null; vendor_name: string | null; description: string | null }>(
+  const training = await fetchAllPaged<{ id: string; category_id: string | null; vendor_name: string | null; description: string | null }>(
     (from, to) =>
       supabase
         .from("qb_training_expenses")
-        .select("category_id, vendor_name, description")
+        .select("id, category_id, vendor_name, description")
         .eq("entity_id", entityId)
         .not("category_id", "is", null)
+        .order("id", { ascending: true })
         .range(from, to),
+    (r) => r.id,
   );
   const tally = new Map<string, Map<string, number>>();
   for (const t of training) {
@@ -111,7 +134,9 @@ for (const slug of ENTITIES) {
         .select("transaction_id, transactions!inner(description, vendor)")
         .eq("entity_id", entityId)
         .is("category_id", null)
+        .order("transaction_id", { ascending: true })
         .range(from, to) as never,
+    (r) => r.transaction_id,
   );
 
   let matchedHigh = 0,

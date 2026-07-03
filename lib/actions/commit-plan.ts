@@ -10,6 +10,9 @@ export type ExistingClass = { category_id: string | null; classified_by: string 
 export type CommitCandidate = {
   proposalId: string; transactionId: string; entityId: string; categoryId: string;
   rationale: string | null; source: string; description: string; vendor: string | null;
+  // Provenance for the training signal: the category the engine PROPOSED, and whether the operator
+  // overrode it. Threaded through so the commit logs accept vs. reject correctly (C16).
+  proposedCategoryId: string | null; wasOverride: boolean;
 };
 
 /** Guard against clobbering interim manual work: skip any candidate whose transaction already has a
