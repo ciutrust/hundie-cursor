@@ -17,6 +17,8 @@ function matches(row, filters) {
     if (f.type === "gte") return row[f.col] >= f.val;
     if (f.type === "lte") return row[f.col] <= f.val;
     if (f.type === "is") return f.val === null ? row[f.col] == null : row[f.col] === f.val;
+    // .not(col, "is", null) => col IS NOT NULL (the only .not(...) shape used in the app).
+    if (f.type === "not_is") return f.val === null ? row[f.col] != null : row[f.col] !== f.val;
     if (f.type === "in") return f.vals.includes(row[f.col]);
     return true;
   });
@@ -138,6 +140,11 @@ export function makeFakeSupabase(initial = {}) {
       },
       is(col, val) {
         this._filters.push({ type: "is", col, val });
+        return this;
+      },
+      not(col, op, val) {
+        // Only the `.not(col, "is", null)` (IS NOT NULL) shape is used in the app.
+        if (op === "is") this._filters.push({ type: "not_is", col, val });
         return this;
       },
       in(col, vals) {

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { parseCardCsv, KNOWN_ACCOUNTS } from "./lib/card-parsers.mjs";
 import { buildTransactionHash, dedupeImportPlanRows } from "./lib/import-hash.mjs";
 import { filterRowsAgainstExisting, inDateRange } from "./lib/ledger-import.mjs";
+import { capCsvWindowForPlaid } from "./lib/csv-plaid-cap.mjs";
 import { writeFileSync } from "node:fs";
 import { resolveEntitySlug } from "./lib/entity-resolver.mjs";
 import { rowsToObjects, parseCsv } from "./lib/csv-utils.mjs";
@@ -55,6 +56,7 @@ export function parseArgs(argv) {
     dateFrom: null, // inclusive lower bound (YYYY-MM-DD)
     dateTo: null, // EXCLUSIVE upper bound (YYYY-MM-DD); --to 2026-06-01 keeps through May 31
     exportJson: null, // path to write the filtered rows as JSON (no DB write needed)
+    force: false, // C6: bypass the Plaid-cutover cap (deliberate CSV backfill over Plaid's window)
   };
 
   for (let i = 2; i < argv.length; i++) {
@@ -68,6 +70,7 @@ export function parseArgs(argv) {
     else if (arg === "--from") args.dateFrom = argv[++i];
     else if (arg === "--to") args.dateTo = argv[++i];
     else if (arg === "--export-json") args.exportJson = resolve(argv[++i]);
+    else if (arg === "--force") args.force = true;
     else if (!arg.startsWith("-")) args.filePath = resolve(arg);
   }
 
@@ -115,6 +118,31 @@ function normalizeAccount(account) {
     ...account,
     default_entity: account.default_entity ?? null,
   };
+}
+
+/**
+ * C6: load the target account's Plaid cutover, if any. Two flat queries (mirroring run-sync's
+ * separate plaid_account_links + bank_connections loads) rather than a nested join, so the shape
+ * stays simple and testable. Returns `hasPlaidLink=false` (and syncFromDate=null) for a CSV-only
+ * account, in which case the CSV window is left untouched.
+ * @returns {Promise<{ hasPlaidLink: boolean, syncFromDate: string | null }>}
+ */
+export async function loadPlaidCutoverForAccount(supabase, accountId) {
+  const { data: links, error: lErr } = await supabase
+    .from("plaid_account_links")
+    .select("connection_id")
+    .eq("account_id", accountId);
+  if (lErr) throw new Error(`Failed to load Plaid links: ${lErr.message}`);
+  const connectionId = links?.[0]?.connection_id;
+  if (!connectionId) return { hasPlaidLink: false, syncFromDate: null };
+
+  const { data: conn, error: cErr } = await supabase
+    .from("bank_connections")
+    .select("sync_from_date")
+    .eq("id", connectionId)
+    .single();
+  if (cErr) throw new Error(`Failed to load bank connection: ${cErr.message}`);
+  return { hasPlaidLink: true, syncFromDate: conn?.sync_from_date ?? null };
 }
 
 function resolveSupplementalCsvTexts(known, csvDir = null, manifestEntry = null) {
@@ -614,11 +642,31 @@ for (const target of targets) {
     args.csvDir,
     target.manifestEntry,
   );
+
+  // C6: if this account is Plaid-linked, cap the CSV window at the day before its Plaid cutover so
+  // CSV rows can't re-import a window Plaid already owns (CSV descriptors won't business-key-match
+  // Plaid's raw ones → duplicates). --force bypasses (deliberate CSV backfill over Plaid's window).
+  const { hasPlaidLink, syncFromDate } = await loadPlaidCutoverForAccount(
+    supabase,
+    target.account.id,
+  );
+  const { effectiveTo, capped } = capCsvWindowForPlaid({
+    requestedTo: args.dateTo,
+    syncFromDate,
+    hasPlaidLink,
+    force: args.force,
+  });
+  if (capped) {
+    console.log(
+      `  ${target.account.slug}: Plaid-linked (cutover ${syncFromDate}) — capping CSV window to < ${effectiveTo} (rows on/after ${syncFromDate} are Plaid's; pass --force to override)`,
+    );
+  }
+
   const plan = buildImportPlan(target.account, target.csvPath, csvText, entityMap, {
     dryRun: false,
     supplementalCsvTexts,
     dateFrom: args.dateFrom,
-    dateTo: args.dateTo,
+    dateTo: effectiveTo,
   });
   const result = await importAccount(supabase, plan, { dryRun: args.dryRun });
   results.push({

@@ -11,4 +11,10 @@ describe("import-cards parseArgs", () => {
   it("stays dry-run with explicit --dry-run", () => {
     expect(parseArgs(["node", "import-cards.mjs", "--dry-run"]).dryRun).toBe(true);
   });
+  it("defaults force to false", () => {
+    expect(parseArgs(["node", "import-cards.mjs", "--all"]).force).toBe(false);
+  });
+  it("sets force true with --force (bypasses the C6 Plaid-cutover cap)", () => {
+    expect(parseArgs(["node", "import-cards.mjs", "--all", "--force"]).force).toBe(true);
+  });
 });

@@ -31,6 +31,44 @@ export async function deriveCutoverDate(
 }
 
 /**
+ * C5: MAX(transaction_date) over the mapped accounts' PLAID-SOURCED rows (external_id IS NOT NULL).
+ * CSV/manual rows carry external_id NULL and are excluded, because they do NOT define Plaid's
+ * territory — only rows Plaid has already delivered do. Returns null when none of the accounts have
+ * a Plaid-sourced row yet (nothing for a backdated cutover to overlap). Mirrors deriveCutoverDate's
+ * query shape, adding the `.not("external_id","is",null)` Plaid-only filter.
+ */
+export async function newestPlaidSourcedDate(
+  admin: Admin,
+  accountIds: string[],
+): Promise<string | null> {
+  if (accountIds.length === 0) return null;
+  const { data } = await admin
+    .from("transactions")
+    .select("transaction_date")
+    .in("account_id", accountIds)
+    .not("external_id", "is", null)
+    .order("transaction_date", { ascending: false })
+    .range(0, 0);
+  return (data?.[0]?.transaction_date as string | undefined) ?? null;
+}
+
+/**
+ * C5: true iff a proposed cutover would re-pull a window Plaid has already delivered — i.e. both
+ * dates are known AND the cutover is on or before the newest Plaid-sourced transaction. ISO
+ * `YYYY-MM-DD` strings compare lexicographically = chronologically, so `<=` is a date comparison.
+ * A cutover ON the newest Plaid row still re-pulls that day, so equality counts as backdated.
+ * Either date null → no known overlap → false (the derived cutover, always MAX(all rows)+1, is
+ * strictly after every Plaid row, so it never trips this; only an operator override can).
+ */
+export function isBackdatedCutover(
+  cutoverDate: string | null,
+  newestPlaidDate: string | null,
+): boolean {
+  if (cutoverDate === null || newestPlaidDate === null) return false;
+  return cutoverDate <= newestPlaidDate;
+}
+
+/**
  * C3: whether to persist a computed cutover for this map-accounts call. `sync_from_date` is
  * NOT NULL with `default current_date` (BUG-06), so it always has a value from the moment the
  * connection row is inserted — a `.is('sync_from_date', null)` guard can never distinguish "not

@@ -81,6 +81,34 @@ export function unmappedPlaidAccountIds(
   return [...unmapped];
 }
 
+/**
+ * C20: from a batch of Plaid `modified` events, the external_ids that must be routed to
+ * removal-stamping — i.e. rows whose NEW state now FAILS shouldImportPlaidTxn for this account type
+ * (Plaid re-reported the charge as a payment/transfer, or it went pending) AND that ALREADY EXIST in
+ * the ledger. Without this, the eligible filter silently drops the modified copy while the STALE
+ * pre-modification row lingers, overstating expenses.
+ *
+ * Pure: depends only on shouldImportPlaidTxn + membership in `existingExternalIds`. Guard (critical):
+ * a modified id that was never imported is NEVER returned — stamping it would create a phantom
+ * removal. Order/dedup follows first appearance in `modifiedTxns`.
+ */
+export function ineligibleModifiedToRemove(
+  modifiedTxns: ReadonlyArray<AggregatorTransaction>,
+  accountType: string,
+  existingExternalIds: Set<string>,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const t of modifiedTxns) {
+    if (shouldImportPlaidTxn(t, accountType)) continue; // still eligible → keep as-is
+    if (!existingExternalIds.has(t.externalId)) continue; // never imported → no phantom removal
+    if (seen.has(t.externalId)) continue;
+    seen.add(t.externalId);
+    out.push(t.externalId);
+  }
+  return out;
+}
+
 const DROP_REASONS: PlaidDropReason[] = ["pending", "zero", "pfc", "payment", "card_income"];
 
 /**
@@ -144,6 +172,27 @@ export async function stampRemovedTransactions(
     .select("id");
   if (error) throw new Error(`Failed to stamp removed transactions: ${error.message}`);
   return (data ?? []).length;
+}
+
+/**
+ * C20 support: of the given external_ids, the subset that ALREADY EXISTS in the ledger for this
+ * account. Mirrors partitionRowsByExistingExternalId's query shape (eq account_id, in external_id).
+ * Used to guard removal-stamping so a modified id that was never imported is never phantom-removed.
+ */
+export async function existingExternalIdsForAccount(
+  admin: Admin,
+  accountId: string,
+  externalIds: string[],
+): Promise<Set<string>> {
+  const ids = [...new Set(externalIds.filter(Boolean))];
+  if (ids.length === 0) return new Set();
+  const { data, error } = await admin
+    .from("transactions")
+    .select("external_id")
+    .eq("account_id", accountId)
+    .in("external_id", ids);
+  if (error) throw new Error(`external_id existence lookup failed: ${error.message}`);
+  return new Set((data ?? []).map((r) => r.external_id as string));
 }
 
 /**
@@ -305,6 +354,41 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
         // now KEPT (income capture, Phase 3) and land uncategorized for the operator to classify.
         const eligible = txns.filter((t) => shouldImportPlaidTxn(t, account.account_type));
         dropSummary = addPlaidDropSummary(dropSummary, summarizePlaidDrops(txns, account.account_type));
+
+        // C20: a `modified` event whose NEW state now fails the filter (Plaid re-reported the charge
+        // as a payment/transfer, or it went pending) would otherwise be silently dropped while its
+        // STALE pre-modification row lingers in the ledger, overstating expenses. Route those to
+        // removal-stamping — but ONLY for ids that ACTUALLY EXIST (guard against phantom removals).
+        const modifiedInBatch = txns.filter((t) => modifiedIds.has(t.externalId));
+        const ineligibleModified = modifiedInBatch.filter(
+          (t) => !shouldImportPlaidTxn(t, account.account_type),
+        );
+        if (ineligibleModified.length > 0) {
+          const existingIneligibleIds = await existingExternalIdsForAccount(
+            admin,
+            account.id,
+            ineligibleModified.map((t) => t.externalId),
+          );
+          const toRemove = ineligibleModifiedToRemove(
+            modifiedInBatch,
+            account.account_type,
+            existingIneligibleIds,
+          );
+          if (toRemove.length > 0) {
+            const stamped = await stampRemovedTransactions(
+              admin,
+              [account.id],
+              toRemove,
+              new Date().toISOString(),
+            );
+            if (stamped > 0) {
+              console.log(
+                `  ${conn.id}/${account.slug}: ${stamped} modified txn(s) no longer ledger-eligible — stamped removed (stale expense cleared)`,
+              );
+            }
+          }
+        }
+
         if (eligible.length === 0) continue;
 
         const parsed = eligible.map((t) => ({

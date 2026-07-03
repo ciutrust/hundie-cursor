@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { deriveCutoverDate, shouldPersistCutover } from "@/lib/plaid/cutover";
+import {
+  deriveCutoverDate,
+  isBackdatedCutover,
+  newestPlaidSourcedDate,
+  shouldPersistCutover,
+} from "@/lib/plaid/cutover";
 import { requireMfaStepUp, requireSameOrigin } from "@/lib/plaid/require-mfa";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 
@@ -32,6 +37,7 @@ export async function POST(request: Request) {
     connectionId?: string;
     links?: LinkInput[];
     cutoverDate?: string | null;
+    force?: boolean;
   } | null;
   if (!body?.connectionId || !Array.isArray(body.links)) {
     return NextResponse.json({ error: "Missing connectionId or links" }, { status: 400 });
@@ -85,6 +91,24 @@ export async function POST(request: Request) {
     .from("plaid_account_links")
     .select("id", { count: "exact", head: true })
     .eq("connection_id", body.connectionId);
+
+  // C5: refuse a backdated cutover that would re-import a window Plaid already covers. This only
+  // matters when we're about to persist a cutover (first-ever mapping) — the DERIVED cutover is
+  // always MAX(all rows)+1, strictly after every Plaid row, so it can never trip this; only an
+  // operator OVERRIDE can be backdated. Re-syncing a Plaid-covered window duplicates charges (the
+  // re-linked item hands back new transaction_ids → different import_hash → dedup can't collapse).
+  // Guard runs BEFORE any mutation (no links upserted, no cutover written) unless force is set.
+  if (shouldPersistCutover(existingLinkCount ?? 0, cutoverDate)) {
+    const newestPlaidDate = await newestPlaidSourcedDate(admin, accountIds);
+    if (isBackdatedCutover(cutoverDate, newestPlaidDate) && !body.force) {
+      return NextResponse.json(
+        {
+          error: `Cutover ${cutoverDate} is on/before the newest Plaid-synced transaction (${newestPlaidDate}) for these accounts; re-syncing would duplicate charges. Pass force:true to override.`,
+        },
+        { status: 400 },
+      );
+    }
+  }
 
   const rows = valid.map((l) => ({
     connection_id: body.connectionId,
