@@ -50,7 +50,7 @@ Transaction data is kept while the owner needs it for bookkeeping. When a bank c
 
 ## 7. Vendors
 
-The application relies on a small set of established providers: Plaid for bank data, Supabase for the database and authentication, Vercel for hosting, and QuickBooks Online for accounting. Financial transaction data is not sold or shared with anyone outside these providers, and it is not used for advertising.
+The application relies on a small set of established providers: Plaid for bank data, Supabase for the database and authentication, Vercel for hosting, QuickBooks Online for accounting, and Anthropic (the Claude API) for optional AI categorization suggestions. When the owner runs the AI suggestion feature, transaction details for the selected transactions — description, amount, account name, and the entity and category names — are sent to the Anthropic API so it can propose a category. Those suggestions are advisory and are never applied automatically. Financial transaction data is not sold or shared with anyone outside these providers, and it is not used for advertising. The Anthropic API's data-retention setting for the account in use should be confirmed and recorded alongside the trust's Data Retention and Deletion Policy.
 
 ## 8. Incident response
 
