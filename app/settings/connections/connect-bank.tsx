@@ -23,6 +23,7 @@ export function ConnectBank({ accounts }: { accounts: MappableAccount[] }) {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [exchange, setExchange] = useState<ExchangeResult | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
+  const [cutoverDate, setCutoverDate] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -95,12 +96,17 @@ export function ConnectBank({ accounts }: { accounts: MappableAccount[] }) {
       const res = await fetch("/api/plaid/map-accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ connectionId: exchange.connectionId, links }),
+        body: JSON.stringify({
+          connectionId: exchange.connectionId,
+          links,
+          cutoverDate: cutoverDate || null,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not save mapping");
       setExchange(null);
       setMapping({});
+      setCutoverDate("");
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save mapping");
@@ -145,6 +151,18 @@ export function ConnectBank({ accounts }: { accounts: MappableAccount[] }) {
             </div>
           ))}
         </div>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium">Plaid start date (cutover)</span>
+          <input
+            type="date"
+            value={cutoverDate}
+            onChange={(e) => setCutoverDate(e.target.value)}
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+          />
+          <span className="text-muted-foreground">
+            Leave blank to start the day after the last imported transaction for the mapped accounts.
+          </span>
+        </label>
         {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
         <div className="flex gap-2">
           <button
@@ -158,6 +176,7 @@ export function ConnectBank({ accounts }: { accounts: MappableAccount[] }) {
             onClick={() => {
               setExchange(null);
               setMapping({});
+              setCutoverDate("");
             }}
             disabled={busy}
             className="rounded-md border border-border px-3 py-1.5 text-sm"

@@ -1,0 +1,13 @@
+-- C2: run-sync writes status 'needs_mapping' when a sync finds unmapped Plaid accounts and HOLDS
+-- the forward-only cursor so their rows re-deliver after mapping. The status column is the
+-- connection_status enum, so the value must exist before that write can succeed.
+--
+-- NOTE: this migration originally also dropped sync_from_date's default, on the assumption that a
+-- NULL column was how map-accounts would detect "first-ever mapping" for a connection. That default
+-- is set back to current_date (and the column made NOT NULL) by
+-- 20260703141000_bank_connections_sync_from_date_not_null.sql (BUG-06), which runs after this file
+-- and would silently re-establish it — making the drop a no-op that also breaks
+-- app/api/plaid/exchange's insert (which relies on the default). map-accounts now detects
+-- first-ever-mapping by counting existing plaid_account_links rows instead
+-- (see shouldPersistCutover in lib/plaid/cutover.ts), so no default-dropping is needed here.
+alter type connection_status add value if not exists 'needs_mapping';

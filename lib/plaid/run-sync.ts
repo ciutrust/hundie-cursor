@@ -61,6 +61,22 @@ export function resolveSyncFromDate(
 }
 
 /**
+ * C2: /transactions/sync is forward-only — a dropped `added` row never re-delivers. If any incoming
+ * Plaid account id is unmapped (no plaid_account_links row) we must NOT advance the cursor, or those
+ * rows are permanently lost. Returns the unmapped Plaid account ids (empty = safe to persist cursor).
+ */
+export function unmappedPlaidAccountIds(
+  incomingPlaidAccountIds: Iterable<string>,
+  accountIdByPlaid: Map<string, string>,
+): string[] {
+  const unmapped = new Set<string>();
+  for (const id of incomingPlaidAccountIds) {
+    if (!accountIdByPlaid.has(id)) unmapped.add(id);
+  }
+  return [...unmapped];
+}
+
+/**
  * BUG-09/DATA-02: stamp plaid_removed_at on transactions Plaid reported as removed, located by
  * external_id (BUG-01). Idempotent (`.is("plaid_removed_at", null)` skips already-stamped rows).
  * Never deletes — a removed row may carry a human classification, so it is surfaced for human review.
@@ -218,6 +234,17 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
         byPlaidAccount.set(t.accountExternalId, arr);
       }
 
+      const connectionHasLinks = (accountIdsByConnection.get(conn.id) ?? []).length > 0;
+      const unmapped = unmappedPlaidAccountIds(byPlaidAccount.keys(), accountIdByPlaid);
+      if (!connectionHasLinks && byPlaidAccount.size > 0) {
+        // Zero links yet: don't burn the initial full-sync cursor page — leave cursor untouched so a
+        // later map-accounts run can still ingest this history.
+        result.status = "needs_mapping";
+        result.error = `${byPlaidAccount.size} Plaid account(s) not yet mapped — sync deferred until accounts are linked.`;
+        summary.connections.push(result);
+        continue;
+      }
+
       for (const [plaidAccountId, txns] of byPlaidAccount) {
         const accountId = accountIdByPlaid.get(plaidAccountId);
         if (!accountId) continue; // unmapped Plaid account → don't sync
@@ -274,16 +301,28 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
         }
       }
 
-      await admin
-        .from("bank_connections")
-        .update({
-          sync_cursor: synced.data.cursor,
-          last_synced_at: new Date().toISOString(),
-          status: "healthy",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", conn.id);
-      result.status = "healthy";
+      if (unmapped.length === 0) {
+        await admin
+          .from("bank_connections")
+          .update({
+            sync_cursor: synced.data.cursor,
+            last_synced_at: new Date().toISOString(),
+            status: "healthy",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", conn.id);
+        result.status = "healthy";
+      } else {
+        // C2: do NOT advance the forward-only cursor — dropped rows would never re-deliver. Hold the
+        // cursor so the next sync (after the operator maps these accounts) re-delivers the same window.
+        await admin
+          .from("bank_connections")
+          .update({ status: "needs_mapping", updated_at: new Date().toISOString() })
+          .eq("id", conn.id);
+        result.status = "needs_mapping";
+        result.error = `Unmapped Plaid account(s): ${unmapped.join(", ")}. Cursor held — map these accounts, then re-sync.`;
+        console.warn(`  ${conn.id}: ${result.error}`);
+      }
     } catch (e) {
       result.error = e instanceof Error ? e.message : "sync failed";
       result.status = "error";

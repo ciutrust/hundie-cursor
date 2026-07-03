@@ -75,8 +75,13 @@ export function makeFakeSupabase(initial = {}) {
     // select
     let rows = table.filter((r) => matches(r, q._filters));
     if (q._order) {
+      const dir = q._order.opts?.ascending === false ? -1 : 1;
       rows = [...rows].sort((a, b) =>
-        a[q._order.col] > b[q._order.col] ? 1 : a[q._order.col] < b[q._order.col] ? -1 : 0,
+        a[q._order.col] > b[q._order.col]
+          ? dir
+          : a[q._order.col] < b[q._order.col]
+            ? -dir
+            : 0,
       );
     }
     if (q._range) rows = rows.slice(q._range[0], q._range[1] + 1);
