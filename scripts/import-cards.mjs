@@ -547,6 +547,15 @@ if (args.dryRun) {
   if (args.dateFrom || args.dateTo)
     console.log(`Date window: ${args.dateFrom ?? "(open)"} ≤ d < ${args.dateTo ?? "(open)"}`);
   console.log(`Targets: ${targets.length}`);
+  // C6 caveat: the Plaid-cutover cap is a DB read (plaid_account_links + bank_connections), and the
+  // dry-run path runs on seed data with no supabase client — so it can't apply the cap here. Warn that
+  // --apply will exclude CSV rows on/after a Plaid-linked account's cutover, so this preview's row
+  // count can overstate what --apply actually writes. (No ledger impact — dry-run writes nothing.)
+  if (!args.force) {
+    console.log(
+      `Note: Plaid-linked accounts are capped at their cutover on --apply — dry-run cannot read links, so counts here may overstate what --apply writes (pass --force to import over the cutover anyway).`,
+    );
+  }
 
   let total = 0;
   let totalRefunds = 0;

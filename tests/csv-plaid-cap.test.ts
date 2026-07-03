@@ -1,28 +1,22 @@
 import { describe, expect, test } from "vitest";
-import { capCsvWindowForPlaid, dayBefore } from "../scripts/lib/csv-plaid-cap.mjs";
+import { capCsvWindowForPlaid } from "../scripts/lib/csv-plaid-cap.mjs";
+import { inDateRange } from "../scripts/lib/ledger-import.mjs";
 import { loadPlaidCutoverForAccount } from "../scripts/import-cards.mjs";
 import { makeFakeSupabase } from "./helpers/fake-supabase.mjs";
 
-describe("C6 — dayBefore (UTC, no off-by-one)", () => {
-  test("returns the calendar day before an ISO date", () => {
-    expect(dayBefore("2026-06-01")).toBe("2026-05-31");
-  });
-  test("crosses a year boundary", () => {
-    expect(dayBefore("2026-01-01")).toBe("2025-12-31");
-  });
-});
-
 describe("C6 — capCsvWindowForPlaid", () => {
-  test("linked account: caps requestedTo down to the day before sync_from_date", () => {
+  test("linked account: caps requestedTo down to sync_from_date itself (EXCLUSIVE bound)", () => {
     const r = capCsvWindowForPlaid({
       requestedTo: "2026-06-30",
       syncFromDate: "2026-06-01",
       hasPlaidLink: true,
       force: false,
     });
-    // dateTo is EXCLUSIVE, so the effective upper bound is sync_from_date's day-before to keep no
-    // CSV row on/after the cutover. dayBefore(2026-06-01) = 2026-05-31.
-    expect(r.effectiveTo).toBe("2026-05-31");
+    // dateTo is EXCLUSIVE (inDateRange keeps d < to) and Plaid owns rows >= sync_from_date, so the
+    // exclusive cap is sync_from_date ITSELF: keeps everything strictly before the cutover (through
+    // sync_from_date - 1) and drops sync_from_date onward. Capping at dayBefore would double-apply the
+    // exclusivity and wrongly drop the sync_from_date - 1 seam row.
+    expect(r.effectiveTo).toBe("2026-06-01");
     expect(r.capped).toBe(true);
   });
 
@@ -66,7 +60,7 @@ describe("C6 — capCsvWindowForPlaid", () => {
       hasPlaidLink: true,
       force: false,
     });
-    expect(r.effectiveTo).toBe("2026-05-31");
+    expect(r.effectiveTo).toBe("2026-06-01");
     expect(r.capped).toBe(true);
   });
 
@@ -77,20 +71,42 @@ describe("C6 — capCsvWindowForPlaid", () => {
       hasPlaidLink: true,
       force: false,
     });
-    // min(requestedTo, dayBefore(syncFromDate)) = min(2026-05-15, 2026-05-31) = 2026-05-15.
+    // min(requestedTo, syncFromDate) = min(2026-05-15, 2026-06-01) = 2026-05-15.
     expect(r.effectiveTo).toBe("2026-05-15");
     expect(r.capped).toBe(false);
   });
 
   test("requestedTo exactly equals the cap: kept, reported as not capped (no change)", () => {
     const r = capCsvWindowForPlaid({
-      requestedTo: "2026-05-31",
+      requestedTo: "2026-06-01",
       syncFromDate: "2026-06-01",
       hasPlaidLink: true,
       force: false,
     });
-    expect(r.effectiveTo).toBe("2026-05-31");
+    expect(r.effectiveTo).toBe("2026-06-01");
     expect(r.capped).toBe(false);
+  });
+});
+
+// End-to-end boundary: feed the capped effectiveTo through the importer's EXCLUSIVE inDateRange and
+// prove the CSV window and Plaid window meet contiguously at the seam. With sync_from_date derived as
+// MAX(transaction_date)+1, the day 2026-05-31 (= sync_from_date - 1) is the most likely day to carry
+// real CSV rows and is NOT Plaid's — it must be KEPT. 2026-06-01 (the cutover) IS Plaid's — dropped.
+// This is the test that would have caught the off-by-one.
+describe("C6 — seam is contiguous through inDateRange (regression for the off-by-one)", () => {
+  test("sync_from_date - 1 is kept and sync_from_date is dropped by the capped bound", () => {
+    const { effectiveTo } = capCsvWindowForPlaid({
+      requestedTo: null,
+      syncFromDate: "2026-06-01",
+      hasPlaidLink: true,
+      force: false,
+    });
+    // The seam row (last CSV-owned day) is kept — it is strictly before the cutover.
+    expect(inDateRange("2026-05-31", null, effectiveTo)).toBe(true);
+    // The cutover day itself is Plaid's — excluded from the CSV window.
+    expect(inDateRange("2026-06-01", null, effectiveTo)).toBe(false);
+    // Everything after the cutover is likewise Plaid's — excluded.
+    expect(inDateRange("2026-06-02", null, effectiveTo)).toBe(false);
   });
 });
 
@@ -111,7 +127,7 @@ describe("C6 — loadPlaidCutoverForAccount + composed window cap (fake supabase
       hasPlaidLink: cut.hasPlaidLink,
       force: false,
     });
-    expect(capped).toEqual({ effectiveTo: "2026-05-31", capped: true });
+    expect(capped).toEqual({ effectiveTo: "2026-06-01", capped: true });
   });
 
   test("CSV-only account (no Plaid link) leaves the window untouched", async () => {

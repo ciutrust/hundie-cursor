@@ -5,25 +5,18 @@
 // can load links itself and hand the resolved facts in.
 
 /**
- * The calendar day before an ISO `YYYY-MM-DD` date, in UTC (T00:00:00.000Z + setUTCDate avoids an
- * off-by-one across time zones / DST — same pattern as deriveCutoverDate).
- * @param {string} isoDate
- * @returns {string}
- */
-export function dayBefore(isoDate) {
-  const d = new Date(`${isoDate}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
-
-/**
- * Compute the effective (EXCLUSIVE) upper bound for a CSV import so no CSV row dated on/after the
- * Plaid cutover is imported. The importer's dateTo is EXCLUSIVE (inDateRange keeps `d < to`), so to
- * exclude sync_from_date itself and everything after it, the cap is `dayBefore(syncFromDate)`.
+ * Compute the effective (EXCLUSIVE) upper bound for a CSV import so no CSV row on/after the Plaid
+ * cutover is imported. The importer's dateTo is EXCLUSIVE (inDateRange keeps `d < to`) and Plaid owns
+ * every row `>= sync_from_date`, so the correct cap is `sync_from_date` ITSELF: `d < sync_from_date`
+ * keeps everything strictly before the cutover (through `sync_from_date - 1`) and excludes the cutover
+ * day onward. The CSV and Plaid windows therefore meet contiguously at the seam — capping at the
+ * day-before would double-apply the exclusivity and silently drop the `sync_from_date - 1` row, which
+ * (since sync_from_date is derived as MAX(transaction_date)+1) is exactly the CSV→Plaid hand-off seam
+ * and the most likely day to carry real CSV rows.
  *
  * Returns `requestedTo` unchanged (capped=false) when the account has no Plaid link, has no
- * sync_from_date, or `force` is set. Otherwise `effectiveTo = min(requestedTo, dayBefore(sync))`,
- * with `capped` true only when that actually moved the bound earlier than what was requested (so an
+ * sync_from_date, or `force` is set. Otherwise `effectiveTo = min(requestedTo, syncFromDate)`, with
+ * `capped` true only when that actually moved the bound earlier than what was requested (so an
  * already-tighter requestedTo isn't reported as a Plaid cap).
  *
  * @param {{ requestedTo: string | null, syncFromDate: string | null, hasPlaidLink: boolean, force: boolean }} params
@@ -33,7 +26,7 @@ export function capCsvWindowForPlaid({ requestedTo, syncFromDate, hasPlaidLink, 
   if (force || !hasPlaidLink || !syncFromDate) {
     return { effectiveTo: requestedTo, capped: false };
   }
-  const cap = dayBefore(syncFromDate);
+  const cap = syncFromDate;
   // No requestedTo bound, or requestedTo is later than the cap → the cap tightens the window.
   if (requestedTo === null || requestedTo > cap) {
     return { effectiveTo: cap, capped: true };
