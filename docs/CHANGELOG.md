@@ -8,8 +8,13 @@ All notable changes to the Hundie project. Format based on [Keep a Changelog](ht
 
 - **`cleanup:ledger-dupes`** — one-time script to remove duplicate ledger rows (same account, date, amount, description). Keeps oldest or categorized row; `--entity` / `--account` filters. Dry-run by default; `--apply` deletes.
 
+### Changed
+
+- **Destructive npm scripts now default to dry-run (T3).** Bare `npm run import:*` and `cleanup:ledger-dupes` no longer inject `--apply` — they preview only. Writes require the explicit `:apply` suffix (e.g. `import:cards:apply`, `cleanup:ledger-dupes:apply`); `:dry-run` aliases are kept for back-compat. `import-cards.mjs` `parseArgs` now defaults `dryRun: true` and gained an `--apply` flag plus an `isMain` guard so importing it (for tests) no longer runs the script.
+
 ### Fixed
 
+- **Cleanup dedupe over-deletion (C7).** `cleanup:ledger-dupes` now keys duplicate groups on `import_hash` (falling back to the business key only for hash-less legacy rows) and excludes groups spanning distinct `external_id`s, so genuine same-day/same-amount charges and distinct Plaid transactions are preserved (BUG-03). Pagination now sorts on the stable unique `id` instead of the non-unique `transaction_date`.
 - **Import dedupe** — `import_hash` no longer includes CSV row index (caused Keller WF accounts to double-count ~130 charges when the same export was imported twice). Imports now also skip rows that match existing ledger rows on business key, even under legacy hashes. In-file dedupe before insert.
 
 ### Planned
