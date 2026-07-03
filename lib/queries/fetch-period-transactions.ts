@@ -6,9 +6,10 @@ type ServerClient = Awaited<ReturnType<typeof createClient>>;
 /**
  * OPT-08: one parameterized period-transaction fetcher behind the ~6 near-identical
  * hand-maintained fetchers (review / reports / report-analytics / entity-home). Each
- * caller supplies its own embed `select` + filters; this owns the pagination + the
- * `transaction_date`/`id` ordering. Strictly behavior-preserving: omit `order` to skip
- * `.order()` entirely, matching callers that don't order. The method-chaining order
+ * caller supplies its own embed `select` + filters; this owns the pagination + ordering.
+ * A UNIQUE `id` tiebreaker is ALWAYS applied so offset pagination is stable (never skips or
+ * duplicates a row across pages on >1000-row periods); `order` additionally sorts by
+ * `transaction_date` for display when the caller asks. The method-chaining order
  * (range before order/eq) is irrelevant to the emitted PostgREST query.
  */
 export type FetchPeriodTransactionsOptions = {
@@ -22,7 +23,7 @@ export type FetchPeriodTransactionsOptions = {
   entitySlug?: string;
   /** Filter on the embedded `classification.category_id`. */
   categoryId?: string;
-  /** `transaction_date` then `id`; omit to leave ordering to PostgREST defaults. */
+  /** Add a `transaction_date` primary display sort (with `id` tiebreaker); omit to page in stable `id` order only. */
   order?: "asc" | "desc";
 };
 
@@ -41,6 +42,10 @@ export async function fetchPeriodTransactions<T>(
     if (order) {
       const ascending = order === "asc";
       query = query.order("transaction_date", { ascending }).order("id", { ascending });
+    } else {
+      // Stability: always order by a UNIQUE column so offset pagination never skips/duplicates a row
+      // across pages (>1000-row periods). Callers that don't care about display order still need this.
+      query = query.order("id");
     }
     if (entityId) query = query.eq("classification.entity_id", entityId);
     if (entitySlug) query = query.eq("classification.entity.slug", entitySlug);
