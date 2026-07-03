@@ -150,7 +150,7 @@ capital contribution / owner funding flow — kept OUT of the P&L. Surface in a 
 ## Icebox
 
 - [ ] QuickBooks write-back
-- [ ] Transaction splits
+- [ ] Transaction splits — the splits-writer PR must add the sum-to-parent invariant + rollup exclusion + parity test (C18, deferred; see the note in `supabase/migrations/20260705122000_transaction_splits.sql`)
 - [ ] Full intercompany automation
 - [ ] Bills / due dates, income / P&L, CPA packet
 - [ ] pgvector semantic matching

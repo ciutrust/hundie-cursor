@@ -7,6 +7,9 @@ import {
   buildCategoryTree,
   buildImportHash,
 } from "./lib/qb-csv-parser.mjs";
+// Plain-node mirror of lib/category-kind.ts — this .mjs runs under bare `node`, so it CANNOT import
+// the .ts lib. Keep scripts/lib/category-kind.mjs in sync with lib/category-kind.ts.
+import { categoryKind } from "./lib/category-kind.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -109,6 +112,7 @@ for (const node of categoryTree) {
         name: node.name,
         parent_id: parentId,
         full_path: node.fullPath,
+        kind: categoryKind(node.fullPath),
         is_active: true,
       },
       { onConflict: "entity_id,full_path" },

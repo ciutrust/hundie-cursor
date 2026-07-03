@@ -82,6 +82,20 @@ const INCOME_PATHS = new Set<string>([
   "Intercompany — 136 Anita (income)", // Austin ACAA receives the GBSL lease — ACCT-07 (em-dash U+2014)
 ]);
 
+/**
+ * Display kind for a category row: use its stored `kind` when set, otherwise derive it from
+ * `full_path`. QB-imported categories can land with `kind = NULL` (the importer historically omitted
+ * it — C11); this makes them render under their TRUE P&L kind (matching what reports compute) instead
+ * of collapsing every QB category into "unclassified". Pure so the /categories page can stay a thin
+ * shell and this stays unit-testable.
+ */
+export function categoryDisplayKind(c: {
+  kind: CategoryKind | null | undefined;
+  full_path: string | null | undefined;
+}): CategoryKind {
+  return c.kind ?? categoryKind(c.full_path);
+}
+
 export function categoryKind(fullPath: string | null | undefined): CategoryKind {
   // No category assigned yet → "unclassified", never "expense". Defaulting null to expense inflated
   // every P&L (52% of the ledger was uncategorized — ACCT-02); unclassified rows are excluded from
