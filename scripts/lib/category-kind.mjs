@@ -69,6 +69,21 @@ const INCOME_PATHS = new Set([
 ]);
 
 /**
+ * Structural view of the kind→paths mapping. Mirror of the same export in lib/category-kind.ts.
+ * Exported so tests/category-kind-parity.test.ts can assert this .mjs twin and the .ts stay in sync.
+ * The private Sets above remain the source of truth for dispatch; this just re-exposes them as arrays.
+ * Keys must match the .ts export exactly (same kinds, same members).
+ */
+export const CATEGORY_KIND_PATH_SETS = {
+  transfer: [...TRANSFER_PATHS],
+  funding: [...FUNDING_PATHS],
+  capital: [...CAPITAL_PATHS],
+  liability: [...LIABILITY_PATHS],
+  non_deductible: [...NON_DEDUCTIBLE_PATHS],
+  income: [...INCOME_PATHS],
+};
+
+/**
  * Classify a category by its full_path. Mirror of lib/category-kind.ts `categoryKind`.
  * @param {string | null | undefined} fullPath
  * @returns {"expense"|"income"|"transfer"|"funding"|"capital"|"liability"|"non_deductible"|"unclassified"}

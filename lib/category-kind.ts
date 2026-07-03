@@ -83,6 +83,22 @@ const INCOME_PATHS = new Set<string>([
 ]);
 
 /**
+ * Structural view of the kind→paths mapping, exported so a cross-implementation parity test can
+ * assert this file and its plain-node twin (scripts/lib/category-kind.mjs) stay byte-for-byte in
+ * sync (tests/category-kind-parity.test.ts). Do NOT drive the dispatch off this — the private Sets
+ * above remain the source of truth; this is the same data re-exposed as arrays for comparison.
+ * Keys must match the .mjs export exactly (same kinds, same members).
+ */
+export const CATEGORY_KIND_PATH_SETS = {
+  transfer: [...TRANSFER_PATHS],
+  funding: [...FUNDING_PATHS],
+  capital: [...CAPITAL_PATHS],
+  liability: [...LIABILITY_PATHS],
+  non_deductible: [...NON_DEDUCTIBLE_PATHS],
+  income: [...INCOME_PATHS],
+} as const;
+
+/**
  * Display kind for a category row: use its stored `kind` when set, otherwise derive it from
  * `full_path`. QB-imported categories can land with `kind = NULL` (the importer historically omitted
  * it — C11); this makes them render under their TRUE P&L kind (matching what reports compute) instead
