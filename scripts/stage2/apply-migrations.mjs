@@ -51,6 +51,11 @@ const FILES = [
   "20260706121000_create_fixed_assets.sql",
   "20260706122000_create_account_reconciliations.sql",
   "20260706123000_create_sales_tax_periods.sql",
+  // C8 (Batch F): audit-only transaction_history table + trigger. Idempotent (create ... if not
+  // exists / create or replace / drop ... if exists), so re-running the batch is safe.
+  // NOTE: the three 20260707*_*.sql proposals migrations are intentionally NOT in this list — that is
+  // an operator decision to make separately, not part of this batch.
+  "20260708120000_transaction_history.sql",
 ];
 
 function loadDotEnv() {
