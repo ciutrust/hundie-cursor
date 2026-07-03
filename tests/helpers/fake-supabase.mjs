@@ -1,7 +1,7 @@
 // In-memory fake of the supabase-js query builder, supporting exactly the chained calls that
 // importAccountPlan, filterRowsAgainstExisting, partition/update-by-external_id and
 // stampRemovedTransactions make: from, select/single, insert, upsert (ignoreDuplicates), update,
-// delete, eq/gte/lte/is/in/order/range. Exposes `.db` for assertions.
+// delete, eq/gte/lte/lt/is/in/order/range. Exposes `.db` for assertions.
 
 function project(row, cols) {
   if (!cols || cols === "*") return { ...row };
@@ -16,7 +16,12 @@ function matches(row, filters) {
     if (f.type === "eq") return row[f.col] === f.val;
     if (f.type === "gte") return row[f.col] >= f.val;
     if (f.type === "lte") return row[f.col] <= f.val;
+    if (f.type === "lt") return row[f.col] < f.val;
     if (f.type === "is") return f.val === null ? row[f.col] == null : row[f.col] === f.val;
+    // .not(col, "is", null) => col IS NOT NULL (the only .not(...) shape used in the app).
+    if (f.type === "not_is") return f.val === null ? row[f.col] != null : row[f.col] !== f.val;
+    // .not(col, "in", '("a","b")') => col NOT IN (a, b). Value is the PostgREST list string.
+    if (f.type === "not_in") return !f.vals.includes(row[f.col]);
     if (f.type === "in") return f.vals.includes(row[f.col]);
     return true;
   });
@@ -136,8 +141,26 @@ export function makeFakeSupabase(initial = {}) {
         this._filters.push({ type: "lte", col, val });
         return this;
       },
+      lt(col, val) {
+        this._filters.push({ type: "lt", col, val });
+        return this;
+      },
       is(col, val) {
         this._filters.push({ type: "is", col, val });
+        return this;
+      },
+      not(col, op, val) {
+        // `.not(col, "is", null)` (IS NOT NULL) and `.not(col, "in", '("a","b")')` (NOT IN) shapes.
+        if (op === "is") this._filters.push({ type: "not_is", col, val });
+        else if (op === "in") {
+          // Parse the PostgREST list string: '("committed","skipped")' -> ["committed","skipped"].
+          const vals = String(val)
+            .replace(/^\(|\)$/g, "")
+            .split(",")
+            .map((s) => s.trim().replace(/^"|"$/g, ""))
+            .filter(Boolean);
+          this._filters.push({ type: "not_in", col, vals });
+        }
         return this;
       },
       in(col, vals) {

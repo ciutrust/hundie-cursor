@@ -10,6 +10,8 @@ import { createClient } from "@/lib/supabase/server";
 import type { MonthCloseCell } from "@/lib/month-close";
 import { getAiPreclassifiedCount } from "@/lib/queries/ai-suggestions";
 import { fetchPeriodTransactions } from "@/lib/queries/fetch-period-transactions";
+import { fetchOrphanCountsByEntityMonth, UNASSIGNED_ENTITY_KEY } from "@/lib/queries/orphans";
+import { fetchChangedTransactionIds } from "@/lib/queries/transaction-history";
 import { paginateAll } from "@/lib/supabase/paginate";
 import type { CategoryGroup, EntitySummary, MonthlyCategoryRow, MonthlyEntityRow, ReviewDashboardStats, TransactionWithDetails } from "@/lib/types/database";
 const TRANSACTION_SELECT = `
@@ -341,6 +343,8 @@ export async function getTotalBacklogCount(): Promise<number> {
   const { count, error } = await supabase
     .from("transactions")
     .select("id, classification:classifications!inner(category_id)", { count: "exact", head: true })
+    // C4: a Plaid-reversed charge is not backlog to clear — exclude it from the count.
+    .is("plaid_removed_at", null)
     .or(reviewBacklogOrClause(cpaReviewIds));
 
   if (error) throw error;
@@ -360,6 +364,7 @@ export async function getDormantEntities() {
 }
 
 type MatrixTransaction = {
+  id: string;
   amount: number;
   transaction_date: string;
   classification: { entity_id: string; category_id: string | null; category?: { id: string; full_path: string } | null };
@@ -370,6 +375,7 @@ function monthFromDate(date: string) {
 }
 
 const MATRIX_SELECT = `
+  id,
   amount,
   transaction_date,
   classification:classifications!inner(
@@ -688,10 +694,24 @@ export type MonthCloseEntityRow = {
   months: Record<number, MonthCloseCell>;
 };
 
+/**
+ * C9: orphans whose account has NO default entity (or is unknown) bucket here. Surfaced as a
+ * dedicated pseudo-row so they aren't silently lost — an orphan-only "unassigned" month still reads
+ * OPEN. Its slug intentionally can't collide with a real entity slug.
+ */
+export const UNASSIGNED_MONTH_CLOSE_SLUG = "__unassigned__";
+
+function emptyMonthCells(): Record<number, MonthCloseCell> {
+  const months: Record<number, MonthCloseCell> = {};
+  for (let m = 1; m <= 12; m += 1)
+    months[m] = { hasActivity: false, backlogCount: 0, orphanCount: 0, changedCount: 0 };
+  return months;
+}
+
 /** Per classifiable entity x month: activity + backlog (unclassified + AMA) for Month/Tax Close. */
 export async function getMonthCloseMatrix(year: number): Promise<MonthCloseEntityRow[]> {
   const supabase = await createClient();
-  const [entitiesResult, transactions, cpaReviewIds] = await Promise.all([
+  const [entitiesResult, transactions, cpaReviewIds, orphanCounts, changedIds] = await Promise.all([
     supabase
       .from("entities")
       .select("id, name, slug, display_order")
@@ -699,13 +719,18 @@ export async function getMonthCloseMatrix(year: number): Promise<MonthCloseEntit
       .order("display_order"),
     fetchYearMatrixTransactions(year),
     getCpaReviewCategoryIdSet(supabase),
+    // C9: SEPARATE orphan count (transactions with no classifications row). The report path keeps
+    // its `!inner` embed; orphan visibility lives only in the close/backlog path.
+    fetchOrphanCountsByEntityMonth(supabase, year),
+    // C8: ids of transactions whose amount/date/description was edited after the fact (audit trail).
+    // FAIL-SOFT: returns an empty Set if the transaction_history table is not yet applied.
+    fetchChangedTransactionIds(supabase, year),
   ]);
   if (entitiesResult.error) throw entitiesResult.error;
   const entities = entitiesResult.data ?? [];
 
-  return entities.map((entity) => {
-    const months: Record<number, MonthCloseCell> = {};
-    for (let m = 1; m <= 12; m += 1) months[m] = { hasActivity: false, backlogCount: 0 };
+  const rows: MonthCloseEntityRow[] = entities.map((entity) => {
+    const months = emptyMonthCells();
     for (const tx of transactions) {
       if (tx.classification.entity_id !== entity.id) continue;
       const cell = months[monthFromDate(tx.transaction_date)];
@@ -713,7 +738,37 @@ export async function getMonthCloseMatrix(year: number): Promise<MonthCloseEntit
       if (needsReviewCategory(tx.classification.category_id, cpaReviewIds)) {
         cell.backlogCount += 1;
       }
+      // C8: a changed-since-close warning is bucketed via the classified loop (v1 scope). A changed
+      // ORPHAN is an edge case out of scope (an orphan has no classifications row to have changed
+      // meaningfully, and it already keeps the month OPEN via orphanCount).
+      if (changedIds.has(tx.id)) {
+        cell.changedCount += 1;
+      }
+    }
+    // C9: fold in this entity's orphans — an orphan is unbooked activity that keeps the month OPEN.
+    const entityOrphans = orphanCounts.get(entity.id);
+    if (entityOrphans) {
+      for (const [month, count] of Object.entries(entityOrphans)) {
+        const cell = months[Number(month)];
+        cell.orphanCount += count;
+        cell.hasActivity = true;
+      }
     }
     return { slug: entity.slug, name: entity.name, months };
   });
+
+  // C9: orphans on accounts with no default entity (or unknown accounts) — surface as an
+  // "Unassigned" pseudo-row so they aren't silently lost. Only add it when there are any.
+  const unassignedOrphans = orphanCounts.get(UNASSIGNED_ENTITY_KEY);
+  if (unassignedOrphans && Object.keys(unassignedOrphans).length > 0) {
+    const months = emptyMonthCells();
+    for (const [month, count] of Object.entries(unassignedOrphans)) {
+      const cell = months[Number(month)];
+      cell.orphanCount += count;
+      cell.hasActivity = true;
+    }
+    rows.push({ slug: UNASSIGNED_MONTH_CLOSE_SLUG, name: "Unassigned (no entity)", months });
+  }
+
+  return rows;
 }

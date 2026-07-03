@@ -3,6 +3,7 @@ import { BookOpen } from "lucide-react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { getClassifiableEntities } from "@/lib/queries/review";
+import { categoryDisplayKind } from "@/lib/category-kind";
 import {
   DESCRIPTIONS,
   KIND_INFO,
@@ -29,7 +30,7 @@ export default async function CategoriesPage({ searchParams }: PageProps) {
   const activeEntity = entities.find((e) => e.slug === activeSlug);
 
   const sb = (await createClient()) as unknown as SupabaseClient;
-  const { data } = await sb
+  const { data, error } = await sb
     .from("categories")
     .select("id, full_path, kind")
     .eq("entity_id", activeEntity?.id ?? "")
@@ -39,7 +40,9 @@ export default async function CategoriesPage({ searchParams }: PageProps) {
 
   const byKind = new Map<CategoryKind, { full_path: string; description?: string }[]>();
   for (const c of cats) {
-    const kind = (c.kind ?? "unclassified") as CategoryKind;
+    // Derive the true P&L kind when the stored kind is NULL (QB-imported categories) instead of
+    // dumping them all into "unclassified" (C11).
+    const kind = categoryDisplayKind(c) as CategoryKind;
     const arr = byKind.get(kind) ?? [];
     arr.push({ full_path: c.full_path, description: DESCRIPTIONS[c.full_path] });
     byKind.set(kind, arr);
@@ -72,6 +75,15 @@ export default async function CategoriesPage({ searchParams }: PageProps) {
           );
         })}
       </nav>
+
+      {error && (
+        <div
+          role="alert"
+          className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300"
+        >
+          Couldn&apos;t load categories for this entity. {error.message}
+        </div>
+      )}
 
       {/* Legend */}
       <div className="rounded-lg border border-border bg-card p-3">

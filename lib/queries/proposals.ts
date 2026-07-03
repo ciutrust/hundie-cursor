@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { paginateAll } from "@/lib/supabase/paginate";
 
 // classification_proposals is a Stage-2 staging table not yet in the generated DB types
 // (no supabase CLI to regen). Access it through an untyped client view; shapes are asserted here.
@@ -75,24 +76,30 @@ export async function getProposalEntityCounts(): Promise<
 /** All actionable (pending+approved) proposals for one entity, with transaction details. */
 export async function getProposalsForEntity(entitySlug: string): Promise<Proposal[]> {
   const db = await proposalsTable();
-  const rows: RawRow[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await db
-      .from("classification_proposals")
-      .select(
-        `id, transaction_id, entity_id, entity_slug, vendor_key,
-         proposed_category_id, proposed_category_path, chosen_category_id, chosen_entity_id,
-         confidence, source, rationale, status,
-         transactions!inner ( description, vendor, amount, transaction_date, accounts!inner ( display_name ) )`,
-      )
-      .eq("entity_slug", entitySlug)
-      .in("status", ["pending", "approved"])
-      .order("vendor_key", { ascending: true })
-      .range(from, from + PAGE - 1);
-    if (error) throw new Error(error.message);
-    rows.push(...((data ?? []) as unknown as RawRow[]));
-    if (!data || data.length < PAGE) break;
-  }
+  // Order by vendor_key (groups vendors together for the UI) THEN by the unique `id` tiebreaker so
+  // offset pagination stays stable past 1000 rows — a non-unique sort alone silently skips/dups rows
+  // across page boundaries (BUG-05 / C10). paginateAll's `key` guard throws if that ever recurs.
+  const rows = await paginateAll<RawRow>(
+    (from, pageSize) =>
+      db
+        .from("classification_proposals")
+        .select(
+          `id, transaction_id, entity_id, entity_slug, vendor_key,
+           proposed_category_id, proposed_category_path, chosen_category_id, chosen_entity_id,
+           confidence, source, rationale, status,
+           transactions!inner ( description, vendor, amount, transaction_date, accounts!inner ( display_name ) )`,
+        )
+        .eq("entity_slug", entitySlug)
+        .in("status", ["pending", "approved"])
+        .order("vendor_key", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, from + pageSize - 1) as unknown as PromiseLike<{
+        data: RawRow[] | null;
+        error: { message: string } | null;
+      }>,
+    PAGE,
+    (r) => r.id,
+  );
 
   return rows.map((r) => ({
     id: r.id,

@@ -7,6 +7,12 @@
 -- transaction_splits lets a single charge be allocated across entities/categories later. amount sign
 -- mirrors transactions.amount. RLS authenticated-only, mirroring the ai_suggestions / fixed_assets
 -- policy set (select / insert / update; deletes via the service-role client).
+--
+-- C18 (DEFERRED, intentional): the sum-to-parent invariant (splits must sum to transactions.amount),
+-- the rollup exclusion (a split parent must not also be counted whole), and the parity test are
+-- INTENTIONALLY DEFERRED to the future splits-writer PR. Guarding an empty table now is dead code
+-- that risks getting the netting logic wrong before there is any writer to validate against; the
+-- constraint/trigger belongs with the code that first writes splits. Do NOT add the trigger here.
 
 alter table accounts add column if not exists mixed_use boolean not null default false;
 

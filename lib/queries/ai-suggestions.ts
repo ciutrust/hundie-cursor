@@ -23,6 +23,9 @@ async function countPersonalUncategorizedBacklog(
     .select("id, classification:classifications!inner(category_id)", { count: "exact", head: true })
     .eq("classification.entity_id", personalId)
     .is("classification.category_id", null)
+    // C4: this count feeds the AI-coverage report — exclude Plaid-reversed charges so it agrees
+    // with the backlog it measures coverage of.
+    .is("plaid_removed_at", null)
     .gte("transaction_date", AI_BACKLOG_START)
     .lt("transaction_date", AI_BACKLOG_END);
 
@@ -75,6 +78,9 @@ async function countBacklogMatches(
       .in("id", chunk)
       .eq("classification.entity_id", personalId)
       .is("classification.category_id", null)
+      // C4: keep this "with-AI-suggestion" count consistent with countPersonalUncategorizedBacklog
+      // (both exclude Plaid-reversed charges) so coverage = withAi/total never goes out of range.
+      .is("plaid_removed_at", null)
       .gte("transaction_date", AI_BACKLOG_START)
       .lt("transaction_date", AI_BACKLOG_END);
 
@@ -131,6 +137,9 @@ export async function getPersonalAiBacklog(): Promise<BacklogTransaction[]> {
       .select(BACKLOG_SELECT)
       .eq("classification.entity_id", personal.id)
       .is("classification.category_id", null)
+      // C4: don't offer a Plaid-reversed charge for classification, and keep this backlog aligned
+      // with the coverage counts (countPersonalUncategorizedBacklog/countBacklogMatches) above.
+      .is("plaid_removed_at", null)
       .gte("transaction_date", AI_BACKLOG_START)
       .lt("transaction_date", AI_BACKLOG_END)
       .order("transaction_date")

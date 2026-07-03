@@ -52,6 +52,11 @@ export async function getIncomeSummary(period: PeriodRange): Promise<EntityIncom
         .select("id, amount, classifications(entity_id, category_id, categories(full_path))")
         .gte("transaction_date", start)
         .lt("transaction_date", end)
+        // C4: exclude Plaid-reversed charges (row retained + still classified) so /reports/income
+        // does not double-count them into income/expense/net/byCategory. Top-level `transactions`
+        // column — composes with the embed + the gte/lt/order/range. Mirrors
+        // fetch-period-transactions.ts and review.ts::getTotalBacklogCount.
+        .is("plaid_removed_at", null)
         .order("id")
         .range(from, from + pageSize - 1);
       return { data: data as unknown as IncomeRow[] | null, error };

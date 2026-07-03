@@ -93,6 +93,8 @@ export async function getGbslCheckingReconciliation(
         .eq("account_id", checking.id)
         .gte("transaction_date", start)
         .lt("transaction_date", end)
+        // C4: a Plaid-reversed charge is not a real ledger line — exclude it from reconciliation.
+        .is("plaid_removed_at", null)
         .order("transaction_date")
         .order("id")
         .range(from, from + pageSize - 1);

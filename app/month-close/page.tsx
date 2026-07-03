@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react";
 import { getMonthCloseMatrix } from "@/lib/queries/review";
-import { cellStatus, rollupStatus } from "@/lib/month-close";
+import { cellStatus, isChangedSinceClose, rollupStatus } from "@/lib/month-close";
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -88,16 +88,43 @@ export default async function MonthClosePage({ searchParams }: Props) {
             <div key={row.slug} className="flex items-center justify-between gap-4 px-4 py-3">
               <span className="font-medium">{row.name}</span>
               {cs === "closed" ? (
-                <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400">
-                  <CheckCircle2 className="h-4 w-4" /> Closed
-                </span>
+                <div className="flex items-center gap-2">
+                  {isChangedSinceClose(row.cell) ? (
+                    // C8: this month reads closed, but ≥1 transaction's amount/date/description was
+                    // edited after the fact (Plaid `modified` / a bulk commit). Warn — re-verify. This
+                    // is a non-link amber badge, deliberately distinct from the red orphan pill.
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-1 text-sm font-medium text-amber-700 dark:text-amber-400"
+                      title={`${row.cell.changedCount} transaction field(s) changed after this month looked closed — re-verify.`}
+                    >
+                      <AlertTriangle className="h-3.5 w-3.5" /> changed since close
+                    </span>
+                  ) : null}
+                  <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle2 className="h-4 w-4" /> Closed
+                  </span>
+                </div>
               ) : cs === "open" ? (
-                <Link
-                  href={`/review/${row.slug}?period=month&at=${at}`}
-                  className="rounded-full bg-amber-500/15 px-2.5 py-1 text-sm font-medium text-amber-700 hover:bg-amber-500/25 dark:text-amber-400"
-                >
-                  {row.cell.backlogCount} left →
-                </Link>
+                <div className="flex items-center gap-2">
+                  {row.cell.orphanCount > 0 ? (
+                    // C9: an orphan is a transaction whose classification insert failed mid-import.
+                    // Surface it so the OPEN status is explained (re-run the import heal to fix).
+                    <span
+                      className="rounded-full bg-red-500/15 px-2.5 py-1 text-sm font-medium text-red-700 dark:text-red-400"
+                      title="Transactions with no classification (import failed to book them). Re-run the import heal to fix."
+                    >
+                      {row.cell.orphanCount} failed to book
+                    </span>
+                  ) : null}
+                  {row.cell.backlogCount > 0 ? (
+                    <Link
+                      href={`/review/${row.slug}?period=month&at=${at}`}
+                      className="rounded-full bg-amber-500/15 px-2.5 py-1 text-sm font-medium text-amber-700 hover:bg-amber-500/25 dark:text-amber-400"
+                    >
+                      {row.cell.backlogCount} left →
+                    </Link>
+                  ) : null}
+                </div>
               ) : (
                 <span className="text-sm text-muted-foreground">— no activity</span>
               )}

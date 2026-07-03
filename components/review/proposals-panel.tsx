@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { setProposalDecision, commitApprovedProposals } from "@/lib/actions/proposals";
 import type { Proposal } from "@/lib/queries/proposals";
+import { groupIsHomogeneous } from "@/lib/review/group-homogeneity";
 import { formatCurrency } from "@/lib/utils";
 
 type Category = { id: string; full_path: string };
@@ -32,6 +33,7 @@ type Group = {
   rationale: string | null;
   allApproved: boolean;
   anyApproved: boolean;
+  homogeneous: boolean; // false = rows have DIFFERENT proposed categories (C13)
 };
 
 const CONF_RANK: Record<Proposal["confidence"], number> = { high: 3, medium: 2, low: 1 };
@@ -88,6 +90,7 @@ export function ProposalsPanel({ entitySlug, proposals, entities, categoriesByEn
         rationale: rep.rationale,
         allApproved: ps.every((p) => p.status === "approved"),
         anyApproved: ps.some((p) => p.status === "approved"),
+        homogeneous: groupIsHomogeneous(ps),
       });
     }
     return out;
@@ -174,12 +177,22 @@ export function ProposalsPanel({ entitySlug, proposals, entities, categoriesByEn
       setError(`No transactions selected in "${group.label}"`);
       return;
     }
-    const catId = curCategoryId(group);
-    if (decision === "approved" && !catId) {
+    // Heterogeneous groups (rows with different proposed categories) must NOT be collapsed to one
+    // category (C13): approve each row keeping its OWN proposed_category_id by sending `undefined`,
+    // so the commit path resolves per-row (chosen_category_id stays null → proposed_category_id wins).
+    // Reject never needs a category. Rejecting a mixed group is always fine.
+    const applyPerRow = !group.homogeneous && decision === "approved";
+    const catId = applyPerRow ? undefined : curCategoryId(group);
+    if (decision === "approved" && !applyPerRow && !catId) {
       setError(`Pick a category for "${group.label}" (entity changed → choose its category)`);
       return;
     }
-    const chosenEntityId = entityIdBySlug.get(curEntitySlug(group)) ?? null;
+    // Same reason for the ENTITY: a mixed group must keep each row's own entity, not collapse to
+    // proposals[0]'s (curEntitySlug reads proposals[0].chosen_entity_id, so a Tier-2 cross-entity
+    // reassignment on row[0] would otherwise stamp its entity on every row → rows whose category
+    // belongs to the original entity silently mismatch and get skipped at commit). Sending
+    // `undefined` leaves chosen_entity_id untouched so the commit path resolves per-row.
+    const chosenEntityId = applyPerRow ? undefined : (entityIdBySlug.get(curEntitySlug(group)) ?? null);
     const moved = curEntitySlug(group) !== entitySlug ? ` → ${curEntitySlug(group)}` : "";
     setError(null);
     startTransition(async () => {
@@ -287,9 +300,10 @@ export function ProposalsPanel({ entitySlug, proposals, entities, categoriesByEn
                       <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${confidenceBadge(g.confidence)}`}>{g.confidence}</span>
                       <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{g.source === "claude" ? "Claude" : "training"}</span>
                       {g.allApproved ? <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">approved</span> : null}
+                      {!g.homogeneous ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300" title="Rows in this group have different proposed categories">mixed proposals — expand to approve per row</span> : null}
                     </div>
                     <p className="mt-0.5 text-sm">
-                      → <span className="font-medium">{g.proposedPath ?? "—"}</span>
+                      → <span className="font-medium">{g.homogeneous ? (g.proposedPath ?? "—") : "multiple categories"}</span>
                     </p>
                     {g.rationale ? <p className="mt-0.5 text-xs italic text-muted-foreground">{g.rationale}</p> : null}
                   </div>
@@ -309,18 +323,24 @@ export function ProposalsPanel({ entitySlug, proposals, entities, categoriesByEn
                       </option>
                     ))}
                   </select>
-                  <select
-                    className="h-9 max-w-[220px] rounded-md border border-border bg-background px-2 text-sm"
-                    value={catId ?? ""}
-                    onChange={(e) => setOverride((o) => ({ ...o, [g.vendorKey]: e.target.value || null }))}
-                    aria-label="Category"
-                  >
-                    <option value="">— pick category —</option>
-                    {cats.map((c) => (
-                      <option key={c.id} value={c.id}>{c.full_path}</option>
-                    ))}
-                  </select>
-                  <Button type="button" size="sm" disabled={isPending || selCount === 0} onClick={() => decide(g, "approved")}>
+                  {g.homogeneous ? (
+                    <select
+                      className="h-9 max-w-[220px] rounded-md border border-border bg-background px-2 text-sm"
+                      value={catId ?? ""}
+                      onChange={(e) => setOverride((o) => ({ ...o, [g.vendorKey]: e.target.value || null }))}
+                      aria-label="Category"
+                    >
+                      <option value="">— pick category —</option>
+                      {cats.map((c) => (
+                        <option key={c.id} value={c.id}>{c.full_path}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="text-xs text-amber-700 dark:text-amber-300" title="Each row keeps its own proposed category — expand to review">per-row categories</span>
+                  )}
+                  {/* Mixed groups: disable the one-click group-approve until expanded, so the operator
+                      sees the per-row categories before committing them (C13). Reject stays available. */}
+                  <Button type="button" size="sm" disabled={isPending || selCount === 0 || (!g.homogeneous && !isOpen)} onClick={() => decide(g, "approved")} title={!g.homogeneous && !isOpen ? "Mixed group — expand to approve per row" : undefined}>
                     <Check className="mr-1 h-4 w-4" /> Approve{partial ? ` (${selCount})` : ""}
                   </Button>
                   <Button type="button" size="sm" variant="ghost" disabled={isPending || selCount === 0} onClick={() => decide(g, "rejected")}>
@@ -357,6 +377,11 @@ export function ProposalsPanel({ entitySlug, proposals, entities, categoriesByEn
                         <div className="min-w-0 flex-1">
                           <p className="truncate">{p.description}</p>
                           <p className="text-xs text-muted-foreground">{p.transaction_date} · {p.account_display_name}</p>
+                          {!g.homogeneous ? (
+                            <p className="mt-0.5 text-xs">
+                              → <span className="font-medium">{p.proposed_category_path ?? "—"}</span>
+                            </p>
+                          ) : null}
                         </div>
                         <span className="shrink-0 tabular-nums">{formatCurrency(p.amount)}</span>
                       </li>

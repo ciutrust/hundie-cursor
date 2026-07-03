@@ -58,4 +58,20 @@ describe("paginateAll (stable-order guard via `key`)", () => {
     const result = await paginateAll(build); // single short page → ends; guard is opt-in
     expect(result).toHaveLength(2);
   });
+
+  it("returns all rows across pages that TIE on a non-unique sort column but have unique id (C10)", async () => {
+    // Mirrors getProposalsForEntity: order by vendor_key (non-unique) THEN id (unique tiebreaker).
+    // Every row shares the same vendor_key; only the unique id keeps pagination stable.
+    const all = Array.from({ length: 2500 }, (_, i) => ({ id: i, vendor_key: "amazon" }));
+    const sorted = [...all].sort((a, b) =>
+      a.vendor_key < b.vendor_key ? -1 : a.vendor_key > b.vendor_key ? 1 : a.id - b.id,
+    );
+    const build = async (from: number, pageSize: number) => ({
+      data: sorted.slice(from, from + pageSize),
+      error: null,
+    });
+    const result = await paginateAll(build, 1000, (r) => r.id);
+    expect(result).toHaveLength(2500);
+    expect(new Set(result.map((r) => r.id)).size).toBe(2500); // no dup, no skip
+  });
 });

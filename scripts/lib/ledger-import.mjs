@@ -188,6 +188,12 @@ export async function partitionRowsByExistingExternalId(supabase, accountId, row
  * are returned in `unmatched` for the caller to INSERT. The UPDATE deliberately omits import_batch_id,
  * created_at and id, so the original batch lineage and insert timestamp are preserved.
  *
+ * C20 mirror: the payload also clears `plaid_removed_at`. A row that was stamped removed (e.g. a
+ * modified event flipped it to pending) but is now being re-delivered as an eligible Plaid txn is, by
+ * definition, NOT removed — leaving the flag set would keep a live charge hidden (understated
+ * expenses). This path only runs for rows Plaid re-delivered as eligible in the current batch, so
+ * clearing the flag is always correct; external_id is Plaid-only so CSV/manual rows are unaffected.
+ *
  * @returns {Promise<{ updated: number, unmatched: any[] }>}
  */
 export async function updateTransactionsByExternalId(supabase, accountId, rows) {
@@ -209,6 +215,7 @@ export async function updateTransactionsByExternalId(supabase, accountId, rows) 
         vendor: row.transaction.vendor,
         raw_category: row.transaction.raw_category,
         import_hash: row.transaction.import_hash,
+        plaid_removed_at: null, // C20: re-delivered as eligible → un-stamp any prior removal
       })
       .eq("account_id", accountId)
       .eq("external_id", externalId)

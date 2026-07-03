@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { CalendarCheck, ChevronLeft, ChevronRight } from "lucide-react";
 import { getMonthCloseMatrix } from "@/lib/queries/review";
-import { cellStatus, rollupStatus, summarizeMonths } from "@/lib/month-close";
+import { cellStatus, isChangedSinceClose, rollupStatus, summarizeMonths } from "@/lib/month-close";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 function pad2(n: number) {
@@ -90,6 +90,19 @@ export default async function TaxClosePage({ searchParams }: Props) {
                   const cell = row.months[m];
                   const status = cellStatus(cell);
                   if (status === "closed") {
+                    // C8: closed, but a transaction field changed after the fact → amber "⚠" warning
+                    // (re-verify) instead of the plain green ✓. Status is unchanged — still closed.
+                    if (isChangedSinceClose(cell)) {
+                      return (
+                        <td
+                          key={m}
+                          className="px-2 py-2 text-center text-amber-600 dark:text-amber-400"
+                          title={`${cell.changedCount} transaction field(s) changed after this month looked closed — re-verify.`}
+                        >
+                          ⚠
+                        </td>
+                      );
+                    }
                     return (
                       <td key={m} className="px-2 py-2 text-center text-emerald-600 dark:text-emerald-400">
                         ✓
@@ -97,15 +110,35 @@ export default async function TaxClosePage({ searchParams }: Props) {
                     );
                   }
                   if (status === "open") {
+                    // Mirror month-close: orphans and the __unassigned__ pseudo-row have NO
+                    // classification to clear, so they must NOT be wrapped in a /review Link
+                    // (non-actionable, and `/review/__unassigned__` 404s). Only the amber backlog
+                    // badge — real rows needing a category — is a working link (C9 / D-min1).
+                    const hasOrphans = cell.orphanCount > 0;
+                    const hasBacklog = cell.backlogCount > 0;
                     return (
                       <td key={m} className="px-2 py-2 text-center">
-                        <Link
-                          href={`/review/${row.slug}?period=month&at=${year}-${pad2(m)}`}
-                          className="inline-block rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium tabular-nums text-amber-700 hover:bg-amber-500/25 dark:text-amber-400"
-                          title={`${cell.backlogCount} to classify`}
-                        >
-                          {cell.backlogCount}
-                        </Link>
+                        <span className="inline-flex flex-wrap items-center justify-center gap-1">
+                          {hasOrphans ? (
+                            // C9: failed-to-book transactions — can't be cleared by classifying
+                            // (no classification row); re-run the import heal. Non-link red badge.
+                            <span
+                              className="inline-block rounded bg-red-500/15 px-1.5 py-0.5 text-xs font-medium tabular-nums text-red-700 dark:text-red-400"
+                              title={`${cell.orphanCount} failed to book (re-run import heal)`}
+                            >
+                              {cell.orphanCount}
+                            </span>
+                          ) : null}
+                          {hasBacklog ? (
+                            <Link
+                              href={`/review/${row.slug}?period=month&at=${year}-${pad2(m)}`}
+                              className="inline-block rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium tabular-nums text-amber-700 hover:bg-amber-500/25 dark:text-amber-400"
+                              title={`${cell.backlogCount} to classify`}
+                            >
+                              {cell.backlogCount}
+                            </Link>
+                          ) : null}
+                        </span>
                       </td>
                     );
                   }
@@ -122,8 +155,13 @@ export default async function TaxClosePage({ searchParams }: Props) {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        ✓ closed (0 backlog) · <span className="text-amber-600 dark:text-amber-400">amber</span> = rows
-        still need a category (click to clear) · · = no activity
+        ✓ closed (0 backlog) ·{" "}
+        <span className="text-amber-600 dark:text-amber-400">⚠</span> = closed but a field changed
+        after close (re-verify) ·{" "}
+        <span className="text-amber-600 dark:text-amber-400">amber #</span> = rows still need a
+        category (click to clear) ·{" "}
+        <span className="text-red-600 dark:text-red-400">red</span> = includes failed-to-book
+        transactions (re-run import heal) · · = no activity
       </p>
     </div>
   );

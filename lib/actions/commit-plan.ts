@@ -10,6 +10,10 @@ export type ExistingClass = { category_id: string | null; classified_by: string 
 export type CommitCandidate = {
   proposalId: string; transactionId: string; entityId: string; categoryId: string;
   rationale: string | null; source: string; description: string; vendor: string | null;
+  // Provenance for the training signal: the category the engine PROPOSED. Threaded through so the
+  // commit logs accept vs. reject correctly (C16) — accept/reject is derived from proposed-vs-booked
+  // in classifyProposalEvent, so no separate override flag is needed.
+  proposedCategoryId: string | null;
 };
 
 /** Guard against clobbering interim manual work: skip any candidate whose transaction already has a

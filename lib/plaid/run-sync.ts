@@ -1,6 +1,11 @@
 import { aggregator, type AggregatorTransaction } from "@/lib/aggregator";
 import { decryptSecret } from "@/lib/crypto/secret-box";
-import { shouldImportPlaidTxn } from "@/lib/plaid/ledger-filter";
+import {
+  shouldImportPlaidTxn,
+  summarizePlaidDrops,
+  type PlaidDropReason,
+  type PlaidDropSummary,
+} from "@/lib/plaid/ledger-filter";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 // The proven CSV write path (dedupe via import_hash, entity routing, classification upsert).
 // Plain JS — reused verbatim so Plaid is "just another import source".
@@ -29,6 +34,8 @@ export type ConnectionSyncResult = {
   inserted: number;
   updated: number;
   skipped: number;
+  /** C4: rows stamped plaid_removed_at for this connection this run. */
+  removed: number;
   status: string;
   error?: string;
 };
@@ -37,6 +44,8 @@ export type SyncSummary = {
   inserted: number;
   updated: number;
   skipped: number;
+  /** C4: rows newly stamped plaid_removed_at this run (Plaid-reversed charges pulled from reports). */
+  removed: number;
   connections: ConnectionSyncResult[];
 };
 
@@ -77,6 +86,74 @@ export function unmappedPlaidAccountIds(
 }
 
 /**
+ * C20: from a batch of Plaid `modified` events, the external_ids that must be routed to
+ * removal-stamping — i.e. rows whose NEW state now FAILS shouldImportPlaidTxn for this account type
+ * (Plaid re-reported the charge as a payment/transfer, or it went pending) AND that ALREADY EXIST in
+ * the ledger. Without this, the eligible filter silently drops the modified copy while the STALE
+ * pre-modification row lingers, overstating expenses.
+ *
+ * Pure: depends only on shouldImportPlaidTxn + membership in `existingExternalIds`. Guard (critical):
+ * a modified id that was never imported is NEVER returned — stamping it would create a phantom
+ * removal. Order/dedup follows first appearance in `modifiedTxns`.
+ */
+export function ineligibleModifiedToRemove(
+  modifiedTxns: ReadonlyArray<AggregatorTransaction>,
+  accountType: string,
+  existingExternalIds: Set<string>,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const t of modifiedTxns) {
+    if (shouldImportPlaidTxn(t, accountType)) continue; // still eligible → keep as-is
+    if (!existingExternalIds.has(t.externalId)) continue; // never imported → no phantom removal
+    if (seen.has(t.externalId)) continue;
+    seen.add(t.externalId);
+    out.push(t.externalId);
+  }
+  return out;
+}
+
+const DROP_REASONS: PlaidDropReason[] = ["pending", "zero", "pfc", "payment", "card_income"];
+
+/**
+ * C12: merge a per-account PlaidDropSummary into a running per-sync-run total (kept/dropped
+ * counts add; sample descriptions cap at a few per reason so the log line stays short).
+ */
+function addPlaidDropSummary(total: PlaidDropSummary, next: PlaidDropSummary): PlaidDropSummary {
+  const reasons = { ...total.reasons };
+  const samples = { ...total.samples };
+  for (const reason of DROP_REASONS) {
+    reasons[reason] += next.reasons[reason];
+    if (next.samples[reason]?.length) {
+      const merged = [...(samples[reason] ?? []), ...next.samples[reason]!];
+      samples[reason] = merged.slice(0, 3);
+    }
+  }
+  return { kept: total.kept + next.kept, dropped: total.dropped + next.dropped, reasons, samples };
+}
+
+function emptyPlaidDropSummary(): PlaidDropSummary {
+  return {
+    kept: 0,
+    dropped: 0,
+    reasons: { pending: 0, zero: 0, pfc: 0, payment: 0, card_income: 0 },
+    samples: {},
+  };
+}
+
+/**
+ * C12: format the per-import drop tally into a single log line (or null if nothing was dropped,
+ * so callers can skip logging a no-op line). Visibility for rows previously dropped silently.
+ */
+export function formatPlaidDropSummaryLine(summary: PlaidDropSummary): string | null {
+  if (summary.dropped === 0) return null;
+  const reasonParts = DROP_REASONS.filter((r) => summary.reasons[r] > 0).map(
+    (r) => `${r}=${summary.reasons[r]}`,
+  );
+  return `Plaid import: kept ${summary.kept}, dropped ${summary.dropped} (${reasonParts.join(", ")})`;
+}
+
+/**
  * BUG-09/DATA-02: stamp plaid_removed_at on transactions Plaid reported as removed, located by
  * external_id (BUG-01). Idempotent (`.is("plaid_removed_at", null)` skips already-stamped rows).
  * Never deletes — a removed row may carry a human classification, so it is surfaced for human review.
@@ -102,6 +179,27 @@ export async function stampRemovedTransactions(
 }
 
 /**
+ * C20 support: of the given external_ids, the subset that ALREADY EXISTS in the ledger for this
+ * account. Mirrors partitionRowsByExistingExternalId's query shape (eq account_id, in external_id).
+ * Used to guard removal-stamping so a modified id that was never imported is never phantom-removed.
+ */
+export async function existingExternalIdsForAccount(
+  admin: Admin,
+  accountId: string,
+  externalIds: string[],
+): Promise<Set<string>> {
+  const ids = [...new Set(externalIds.filter(Boolean))];
+  if (ids.length === 0) return new Set();
+  const { data, error } = await admin
+    .from("transactions")
+    .select("external_id")
+    .eq("account_id", accountId)
+    .in("external_id", ids);
+  if (error) throw new Error(`external_id existence lookup failed: ${error.message}`);
+  return new Set((data ?? []).map((r) => r.external_id as string));
+}
+
+/**
  * Pull every connection's transactions and import them through the existing ledger pipeline.
  * Service-role only (creation has always been service-role). Posted-only ingestion; dedupe and
  * entity routing are inherited from buildImportPlanFromTransactions + importAccountPlan.
@@ -121,6 +219,11 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
   if (cErr) throw cErr;
   if (lErr) throw lErr;
   if (eErr) throw eErr;
+
+  // C12: tally why rows are dropped across the whole run (kept pure via summarizePlaidDrops);
+  // logged once at the end so previously-silent drops (esp. payment-name drops now scoped to
+  // card accounts only) are visible per import.
+  let dropSummary = emptyPlaidDropSummary();
 
   const entityMap = new Map<string, string>();
   for (const e of entities ?? []) entityMap.set(e.slug, e.id);
@@ -152,7 +255,7 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
     for (const a of accounts ?? []) accountById.set(a.id, a as unknown as AccountRow);
   }
 
-  const summary: SyncSummary = { inserted: 0, updated: 0, skipped: 0, connections: [] };
+  const summary: SyncSummary = { inserted: 0, updated: 0, skipped: 0, removed: 0, connections: [] };
 
   for (const conn of connections ?? []) {
     const result: ConnectionSyncResult = {
@@ -161,6 +264,7 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
       inserted: 0,
       updated: 0,
       skipped: 0,
+      removed: 0,
       status: conn.status,
     };
 
@@ -216,6 +320,7 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
           synced.data.removedExternalIds,
           new Date().toISOString(),
         );
+        result.removed += stamped;
         console.log(
           `  Plaid reported ${synced.data.removedExternalIds.length} removed txn(s) for ${conn.id}; stamped ${stamped} for review (left in place)`,
         );
@@ -254,6 +359,43 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
         // Drop card payments + $0 noise (parity with the CSV parsers). Checking/savings deposits are
         // now KEPT (income capture, Phase 3) and land uncategorized for the operator to classify.
         const eligible = txns.filter((t) => shouldImportPlaidTxn(t, account.account_type));
+        dropSummary = addPlaidDropSummary(dropSummary, summarizePlaidDrops(txns, account.account_type));
+
+        // C20: a `modified` event whose NEW state now fails the filter (Plaid re-reported the charge
+        // as a payment/transfer, or it went pending) would otherwise be silently dropped while its
+        // STALE pre-modification row lingers in the ledger, overstating expenses. Route those to
+        // removal-stamping — but ONLY for ids that ACTUALLY EXIST (guard against phantom removals).
+        const modifiedInBatch = txns.filter((t) => modifiedIds.has(t.externalId));
+        const ineligibleModified = modifiedInBatch.filter(
+          (t) => !shouldImportPlaidTxn(t, account.account_type),
+        );
+        if (ineligibleModified.length > 0) {
+          const existingIneligibleIds = await existingExternalIdsForAccount(
+            admin,
+            account.id,
+            ineligibleModified.map((t) => t.externalId),
+          );
+          const toRemove = ineligibleModifiedToRemove(
+            modifiedInBatch,
+            account.account_type,
+            existingIneligibleIds,
+          );
+          if (toRemove.length > 0) {
+            const stamped = await stampRemovedTransactions(
+              admin,
+              [account.id],
+              toRemove,
+              new Date().toISOString(),
+            );
+            if (stamped > 0) {
+              result.removed += stamped;
+              console.log(
+                `  ${conn.id}/${account.slug}: ${stamped} modified txn(s) no longer ledger-eligible — stamped removed (stale expense cleared)`,
+              );
+            }
+          }
+        }
+
         if (eligible.length === 0) continue;
 
         const parsed = eligible.map((t) => ({
@@ -339,7 +481,17 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
     summary.inserted += result.inserted;
     summary.updated += result.updated;
     summary.skipped += result.skipped;
+    summary.removed += result.removed;
     summary.connections.push(result);
+  }
+
+  // C12: one-line, per-import visibility into rows dropped and why (previously silent).
+  const dropLine = formatPlaidDropSummaryLine(dropSummary);
+  if (dropLine) console.log(`  ${dropLine}`);
+
+  // C4: run-total of rows stamped plaid_removed_at (now excluded from reports/backlog/close).
+  if (summary.removed > 0) {
+    console.log(`  Plaid sync: stamped ${summary.removed} removed txn(s) this run (excluded from reports).`);
   }
 
   return summary;

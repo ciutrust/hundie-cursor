@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/auth/require-user";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 import { extractVendorSearchKey } from "@/lib/suggestions/category-suggestions";
 import { partitionCommitPlan, type ExistingClass } from "@/lib/actions/commit-plan";
+import { classifyProposalEvent } from "@/lib/actions/proposal-event-plan";
 
 // classification_proposals isn't in the generated DB types (no CLI to regen); access via an
 // untyped client view. classifications/entities stay on the typed client.
@@ -29,11 +30,19 @@ export async function setProposalDecision(
   if (chosenCategoryId !== undefined) patch.chosen_category_id = chosenCategoryId;
   if (chosenEntityId !== undefined) patch.chosen_entity_id = chosenEntityId;
 
-  const { error } = await db.from("classification_proposals").update(patch).in("id", proposalIds);
+  // Status guard: never flip a committed/skipped proposal back to approved (it would let a
+  // terminal proposal be re-committed — compounds C1). Return the REAL matched count, not the
+  // requested count, so the UI reports what actually changed (C14).
+  const { data, error } = await db
+    .from("classification_proposals")
+    .update(patch)
+    .in("id", proposalIds)
+    .not("status", "in", '("committed","skipped")')
+    .select("id");
   if (error) return { error: error.message };
 
   revalidatePath("/review/proposals");
-  return { success: true, count: proposalIds.length };
+  return { success: true, count: data?.length ?? 0 };
 }
 
 type ApprovedRow = {
@@ -97,6 +106,9 @@ export async function commitApprovedProposals(
     source: string;
     description: string;
     vendor: string | null;
+    // Provenance for the training signal (C16): the proposed category. accept/reject is derived
+    // from proposed-vs-booked at log time (classifyProposalEvent), so no override flag is stored.
+    proposedCategoryId: string | null;
   };
   const plan: Plan[] = [];
   let skipped = 0;
@@ -116,6 +128,7 @@ export async function commitApprovedProposals(
       source: p.source,
       description: p.transactions?.description ?? "",
       vendor: p.transactions?.vendor ?? null,
+      proposedCategoryId: p.proposed_category_id,
     });
   }
   if (plan.length === 0) return { error: `Nothing valid to commit (${skipped} skipped)` };
@@ -187,17 +200,25 @@ export async function commitApprovedProposals(
   try {
     const events = toWrite
       .filter((x) => txToClass.has(x.transactionId))
-      .map((x) => ({
-        transaction_id: x.transactionId,
-        classification_id: txToClass.get(x.transactionId)!,
-        entity_id: x.entityId,
-        vendor_key: extractVendorSearchKey(x.description, x.vendor),
-        suggested_category_id: x.categoryId,
-        chosen_category_id: x.categoryId,
-        event_type: "accept" as const,
-        suggestion_source: x.source,
-        created_by: createdBy,
-      }));
+      .map((x) => {
+        // Accept only when the booked category equals the one proposed; an override logs as reject so
+        // the engine's accept-rate isn't inflated (C16). suggested_category_id = the PROPOSED category.
+        const ev = classifyProposalEvent({
+          proposedCategoryId: x.proposedCategoryId,
+          chosenCategoryId: x.categoryId,
+        });
+        return {
+          transaction_id: x.transactionId,
+          classification_id: txToClass.get(x.transactionId)!,
+          entity_id: x.entityId,
+          vendor_key: extractVendorSearchKey(x.description, x.vendor),
+          suggested_category_id: ev.suggestedCategoryId,
+          chosen_category_id: ev.chosenCategoryId,
+          event_type: ev.eventType,
+          suggestion_source: x.source,
+          created_by: createdBy,
+        };
+      });
     for (let i = 0; i < events.length; i += CHUNK) {
       await admin.from("suggestion_events").insert(events.slice(i, i + CHUNK));
     }

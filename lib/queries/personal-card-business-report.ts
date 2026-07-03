@@ -70,6 +70,8 @@ export async function getPersonalCardBusinessReport(period: PeriodRange): Promis
       .gte("transaction_date", start)
       .lt("transaction_date", end)
       .gt("amount", 0)
+      // C4: exclude Plaid-reversed charges so the personal-card business report doesn't overstate.
+      .is("plaid_removed_at", null)
       .order("transaction_date")
       .order("id")
       .range(from, from + pageSize - 1);

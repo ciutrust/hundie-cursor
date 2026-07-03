@@ -15,10 +15,6 @@ export type AmountBucketMatch = {
   bucketAmount: number;
 };
 
-export function roundAmount(amount: number): number {
-  return Math.round(Math.abs(amount) * 100) / 100;
-}
-
 /** Signed rounding so refund buckets stay separate from charge buckets (BUG-10). */
 function signedRoundAmount(amount: number): number {
   return Math.round(amount * 100) / 100;
@@ -101,7 +97,7 @@ export function rankAmountAwareMatches(
 export function representativeBulkAmount(amounts: number[]): number | undefined {
   if (amounts.length === 0) return undefined;
 
-  const rounded = amounts.map(roundAmount);
+  const rounded = amounts.map(signedRoundAmount);
   const counts = new Map<number, number>();
   for (const amount of rounded) {
     counts.set(amount, (counts.get(amount) ?? 0) + 1);

@@ -66,6 +66,42 @@ describe("BUG-01 updateTransactionsByExternalId", () => {
     expect(updated).toBe(0);
     expect(unmatched).toEqual([row]);
   });
+
+  // C20 mirror: a row previously stamped plaid_removed_at (e.g. a modified event flipped it to
+  // pending) later settles and Plaid re-delivers it as an eligible modified/added. Re-delivery as an
+  // eligible Plaid txn means it is, by definition, NOT removed — the UPDATE must clear the flag or the
+  // live charge stays hidden → understated expenses.
+  it("clears plaid_removed_at when a previously-removed external_id is re-delivered as eligible", async () => {
+    const sb = makeFakeSupabase({
+      transactions: [
+        {
+          id: "t1",
+          account_id: "acct-1",
+          external_id: "plaid_txn_1",
+          amount: 9.99,
+          description: "OLD",
+          plaid_removed_at: "2026-06-05T00:00:00.000Z",
+        },
+      ],
+    });
+    const row = {
+      transaction: {
+        external_id: "plaid_txn_1",
+        transaction_date: "2026-06-01",
+        posted_date: "2026-06-01",
+        amount: 12.5,
+        description: "NEW",
+        vendor: null,
+        raw_category: null,
+        import_hash: "h2",
+      },
+    };
+    const { updated } = await updateTransactionsByExternalId(sb, "acct-1", [row]);
+    expect(updated).toBe(1);
+    expect(sb.db.transactions).toHaveLength(1);
+    expect(sb.db.transactions[0].plaid_removed_at).toBeNull(); // un-stamped
+    expect(sb.db.transactions[0].amount).toBe(12.5); // still updated in place
+  });
 });
 
 describe("BUG-01 partitionRowsByExistingExternalId", () => {
