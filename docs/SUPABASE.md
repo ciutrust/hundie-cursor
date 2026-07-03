@@ -34,6 +34,15 @@ Hundie is deployed on Vercel. The **publishable (anon) key** is in the browser b
 
 **App-layer auth:** `middleware.ts` protects `/review`, `/reports`, and `/settings` (defense in depth alongside RLS).
 
+### Self-signup is disabled (allowlist model)
+
+RLS trusts *any* authenticated JWT (`USING (true)`), so who can obtain a JWT is the real trust boundary. Sign-in is allowlist-only:
+
+- **Client:** `login-form.tsx` sends magic links via `magicLinkOtpOptions()` (`lib/auth/sign-in-options.ts`) with `shouldCreateUser: false` — an OTP request for an unknown email fails instead of creating a user.
+- **Dashboard:** Authentication → Providers → Email → **"Allow new users to sign up" = OFF** (project `ihciuqpiavxhbulfkwod`). Verified 2026-07-02.
+
+Until per-user RLS exists (no `user_id` columns yet), do NOT enable signups. Adding a user = invite from the dashboard only.
+
 ### Verify anon is locked out
 
 ```bash
