@@ -60,6 +60,8 @@ export type AiRunResult = {
   outputTokens: number;
   costUsd: number;
   model: string;
+  /** T4: batches that failed after retries. >0 means the run is partial (some paid batches succeeded). */
+  failedBatches: number;
 };
 
 async function loadBacklogMap() {
@@ -124,14 +126,21 @@ export async function requestAiSuggestions(
     const { data: entities } = await supabase.from("entities").select("id, slug");
     const entityIdBySlug = new Map((entities ?? []).map((entity) => [entity.slug, entity.id]));
 
-    const { items, inputTokens, outputTokens, model } = await classifyAllVendorGroups(
+    const { items, inputTokens, outputTokens, model, failedBatches } = await classifyAllVendorGroups(
       packages,
       entityCharts,
     );
 
-    const staleIds = transactions.map((tx) => tx.id);
-    if (staleIds.length > 0) {
-      await supabase.from("ai_suggestions").update({ is_current: false }).in("transaction_id", staleIds);
+    // T4: if every batch failed, leave the existing suggestions untouched and surface the failure —
+    // never wipe current suggestions when there are no replacements. (items is empty only when all
+    // batches failed; a successful run maps every package to an item.)
+    if (items.length === 0) {
+      return {
+        error:
+          failedBatches > 0
+            ? `AI classification failed for all ${failedBatches} batch(es); existing suggestions left untouched.`
+            : "No suggestions were produced.",
+      };
     }
 
     const packageByKey = new Map(packages.map((pkg) => [pkg.vendor_key, pkg]));
@@ -172,9 +181,24 @@ export async function requestAiSuggestions(
       row.output_tokens = perRowOut;
     }
 
+    // T4: insert the NEW suggestions first, then retire ONLY the prior ones (by id, captured before
+    // the insert). A failed insert therefore leaves the previous suggestions current instead of
+    // leaving the operator with zero; and staling by prior-id can't accidentally hit the new rows.
     if (rows.length > 0) {
+      const staleTxIds = transactions.map((tx) => tx.id);
+      const { data: priorRows } = await supabase
+        .from("ai_suggestions")
+        .select("id")
+        .in("transaction_id", staleTxIds)
+        .eq("is_current", true);
+      const priorIds = (priorRows ?? []).map((r) => r.id as string);
+
       const { error } = await supabase.from("ai_suggestions").insert(rows);
       if (error) return { error: error.message };
+
+      if (priorIds.length > 0) {
+        await supabase.from("ai_suggestions").update({ is_current: false }).in("id", priorIds);
+      }
     }
 
     revalidatePath("/review/ai");
@@ -187,6 +211,7 @@ export async function requestAiSuggestions(
       outputTokens,
       costUsd: estimateCostUsd(inputTokens, outputTokens),
       model,
+      failedBatches,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : "AI run failed";

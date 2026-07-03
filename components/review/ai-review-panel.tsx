@@ -272,6 +272,7 @@ export function AiReviewPanel({ transactions, entities, categoriesByEntity }: Ai
       let totalInputTokens = 0;
       let totalOutputTokens = 0;
       let totalCostUsd = 0;
+      let totalFailedBatches = 0;
       let model = "";
 
       try {
@@ -296,11 +297,16 @@ export function AiReviewPanel({ transactions, entities, categoriesByEntity }: Ai
           totalInputTokens += result.inputTokens;
           totalOutputTokens += result.outputTokens;
           totalCostUsd += result.costUsd;
+          totalFailedBatches += result.failedBatches;
           model = result.model;
         }
 
+        const failedNote =
+          totalFailedBatches > 0
+            ? ` · ⚠️ ${totalFailedBatches} batch(es) failed — rerun to fill the gaps`
+            : "";
         setStatus(
-          `Done — ${totalProcessed} suggestions · ${packages.length} vendor groups · ${totalInputTokens + totalOutputTokens} tokens · $${totalCostUsd.toFixed(2)} (${model})`,
+          `Done — ${totalProcessed} suggestions · ${packages.length} vendor groups · ${totalInputTokens + totalOutputTokens} tokens · $${totalCostUsd.toFixed(2)} (${model})${failedNote}`,
         );
         router.refresh();
       } catch (err) {
