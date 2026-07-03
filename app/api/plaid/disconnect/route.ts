@@ -3,6 +3,7 @@ import { aggregator } from "@/lib/aggregator";
 import { decryptSecret } from "@/lib/crypto/secret-box";
 import { createClient } from "@/lib/supabase/server";
 import { requireMfaStepUp, requireSameOrigin } from "@/lib/plaid/require-mfa";
+import { shouldDeleteConnection } from "@/lib/plaid/disconnect-plan";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 import { isUuid } from "@/lib/uuid";
 
@@ -37,12 +38,32 @@ export async function POST(request: Request) {
     .eq("id", body.connectionId)
     .single();
 
+  let revoke: Awaited<ReturnType<typeof aggregator.removeItem>> | null = null;
   if (conn) {
+    let token: string | null = null;
     try {
-      await aggregator.removeItem(decryptSecret(conn.access_token_cipher));
+      token = decryptSecret(conn.access_token_cipher);
     } catch {
-      // best-effort revoke — proceed with local delete regardless
+      // Token can't be decrypted (key rotated) — it's already unusable and un-revocable at Plaid;
+      // log and fall through to delete the dead row (revoke stays null → deletable).
+      console.error(
+        `Plaid disconnect: could not decrypt token for connection ${body.connectionId}; deleting the unusable row`,
+      );
     }
+    if (token) {
+      revoke = await aggregator.removeItem(token);
+    }
+  }
+
+  // S7: don't delete the only token copy while the item is still authorized at Plaid — a failed
+  // revoke keeps the row so the operator can retry, instead of silently orphaning the authorization.
+  if (!shouldDeleteConnection(revoke)) {
+    const reason = revoke && !revoke.ok ? revoke.error : "unknown";
+    console.error(`Plaid item revoke failed for connection ${body.connectionId}: ${reason}`);
+    return NextResponse.json(
+      { error: "Could not revoke the bank connection at Plaid. Please try again." },
+      { status: 502 },
+    );
   }
 
   const { error } = await admin.from("bank_connections").delete().eq("id", body.connectionId);

@@ -39,6 +39,11 @@ export function keyFingerprint(): string {
 
 export function decryptSecret(payload: string): string {
   const buf = Buffer.from(payload, "base64");
+  // S10: reject a too-short payload with a clear error before createDecipheriv, instead of feeding
+  // garbage IV/tag into OpenSSL (which surfaces as an opaque low-level error).
+  if (buf.length < IV_BYTES + TAG_BYTES) {
+    throw new Error("invalid ciphertext payload: too short");
+  }
   const iv = buf.subarray(0, IV_BYTES);
   const tag = buf.subarray(IV_BYTES, IV_BYTES + TAG_BYTES);
   const ciphertext = buf.subarray(IV_BYTES + TAG_BYTES);

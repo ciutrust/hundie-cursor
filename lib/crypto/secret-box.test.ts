@@ -28,6 +28,11 @@ describe("secret-box AES-256-GCM", () => {
     expect(() => decryptSecret(buf.toString("base64"))).toThrow();
   });
 
+  test("S10: rejects a too-short payload with a clear error before OpenSSL", () => {
+    expect(() => decryptSecret("")).toThrow(/too short/);
+    expect(() => decryptSecret(Buffer.from([1, 2, 3]).toString("base64"))).toThrow(/too short/);
+  });
+
   test("keyFingerprint is stable for a key and changes when the key changes", () => {
     const saved = process.env.PLAID_TOKEN_ENC_KEY;
     process.env.PLAID_TOKEN_ENC_KEY = randomBytes(32).toString("base64");
