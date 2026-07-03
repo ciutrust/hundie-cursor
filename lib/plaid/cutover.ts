@@ -29,3 +29,19 @@ export async function deriveCutoverDate(
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
 }
+
+/**
+ * C3: whether to persist a computed cutover for this map-accounts call. `sync_from_date` is
+ * NOT NULL with `default current_date` (BUG-06), so it always has a value from the moment the
+ * connection row is inserted — a `.is('sync_from_date', null)` guard can never distinguish "not
+ * set yet" from "already set", so it can never fire. First-ever-mapping (no existing
+ * plaid_account_links rows for this connection) is the real signal: persist the derived/override
+ * cutover then, and never on a re-map, so an established cutover is only changed by an operator
+ * explicitly clearing it or passing an override.
+ */
+export function shouldPersistCutover(
+  existingLinkCountForConnection: number,
+  cutoverDate: string | null,
+): boolean {
+  return existingLinkCountForConnection === 0 && cutoverDate !== null;
+}

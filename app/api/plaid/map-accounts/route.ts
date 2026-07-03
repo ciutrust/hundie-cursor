@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { deriveCutoverDate } from "@/lib/plaid/cutover";
+import { deriveCutoverDate, shouldPersistCutover } from "@/lib/plaid/cutover";
 import { requireMfaStepUp, requireSameOrigin } from "@/lib/plaid/require-mfa";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 
@@ -79,6 +79,13 @@ export async function POST(request: Request) {
     cutoverDate = await deriveCutoverDate(admin, accountIds);
   }
 
+  // C3: captured BEFORE the upsert below — this is the "first-ever mapping for this connection"
+  // signal. sync_from_date is NOT NULL with a default, so it can't be used to detect that.
+  const { count: existingLinkCount } = await admin
+    .from("plaid_account_links")
+    .select("id", { count: "exact", head: true })
+    .eq("connection_id", body.connectionId);
+
   const rows = valid.map((l) => ({
     connection_id: body.connectionId,
     account_id: l.accountId,
@@ -99,14 +106,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
-  // C3: persist the cutover only when currently null, so re-mapping never silently moves an
-  // established cutover (an operator must clear it or pass an explicit override to change it).
-  if (cutoverDate) {
+  // C3: persist the cutover only on the first-ever mapping for this connection, so re-mapping
+  // never silently moves an established cutover (an operator must clear it or pass an explicit
+  // override to change it).
+  if (shouldPersistCutover(existingLinkCount ?? 0, cutoverDate)) {
     await admin
       .from("bank_connections")
       .update({ sync_from_date: cutoverDate, updated_at: new Date().toISOString() })
-      .eq("id", body.connectionId)
-      .is("sync_from_date", null);
+      .eq("id", body.connectionId);
   }
   // C2: a link added after an earlier sync can't recover already-passed transactions unless the
   // forward-only cursor is reset. Null it so the next sync re-pulls from sync_from_date.
