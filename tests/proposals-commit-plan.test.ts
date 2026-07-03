@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { partitionCommitPlan } from "@/lib/actions/proposals";
+import { partitionCommitPlan } from "@/lib/actions/commit-plan";
 
 const cand = (over: Record<string, unknown> = {}) => ({
   proposalId: "p1", transactionId: "t1", entityId: "e1", categoryId: "c-proposed",

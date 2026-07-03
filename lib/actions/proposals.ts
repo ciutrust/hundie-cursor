@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 import { extractVendorSearchKey } from "@/lib/suggestions/category-suggestions";
+import { partitionCommitPlan, type ExistingClass } from "@/lib/actions/commit-plan";
 
 // classification_proposals isn't in the generated DB types (no CLI to regen); access via an
 // untyped client view. classifications/entities stay on the typed client.
@@ -47,37 +48,8 @@ type ApprovedRow = {
   transactions: { description: string; vendor: string | null } | null;
 };
 
-// Provenance values meaning "machine placeholder, safe to overwrite". Anything else (a user email,
-// qb_backfill, refund_backfill, etc.) is a real classification we must not clobber.
-const OVERWRITABLE_CLASSIFIERS = new Set(["import", "import-heal"]);
-
-type ExistingClass = { category_id: string | null; classified_by: string | null; notes: string | null };
-
-type CommitCandidate = {
-  proposalId: string; transactionId: string; entityId: string; categoryId: string;
-  rationale: string | null; source: string; description: string; vendor: string | null;
-};
-
-/** Guard against clobbering interim manual work: skip any candidate whose transaction already has a
- *  non-null category or a non-machine classifier, and never overwrite an existing note with null. */
-export function partitionCommitPlan(
-  candidates: CommitCandidate[],
-  existingByTx: Map<string, ExistingClass>,
-): { toWrite: (CommitCandidate & { keepNote: string | null })[]; staleProposalIds: string[] } {
-  const toWrite: (CommitCandidate & { keepNote: string | null })[] = [];
-  const staleProposalIds: string[] = [];
-  for (const c of candidates) {
-    const existing = existingByTx.get(c.transactionId);
-    const protectedRow =
-      !!existing &&
-      (existing.category_id != null ||
-        !OVERWRITABLE_CLASSIFIERS.has(existing.classified_by ?? "import"));
-    if (protectedRow) { staleProposalIds.push(c.proposalId); continue; }
-    const keepNote = existing?.notes ?? c.rationale ?? null;
-    toWrite.push({ ...c, keepNote });
-  }
-  return { toWrite, staleProposalIds };
-}
+// partitionCommitPlan + its types live in ./commit-plan (a plain module): a "use server" file may
+// only export async functions, and this needs to stay a synchronous, directly-unit-tested helper.
 
 /** The ONLY thing that writes real classifications. For every approved proposal (optionally one
  *  entity), set the transaction's category (override or proposed), mark the proposal committed,
