@@ -78,14 +78,14 @@ UPDATE bank_connections SET sync_cursor = NULL;   -- else the June re-sync retur
 
 ## Phase 5 — Re-import (dry-run each first)
 1. **2025 history:** the `2025-WF-*` CSVs live in the `CSV 2025-2026` subdir but `import:2025` resolves at
-   `~/Downloads` root — **move/copy them there first**. Then `npm run import:2025:dry-run` → inspect → `npm run import:2025`.
-   Plus `npm run import:sheet:dry-run` / `import:sheet` (the 2025 xlsx for the 6 non-WF cards).
+   `~/Downloads` root — **move/copy them there first**. Then `npm run import:2025` (bare = dry-run) → inspect → `npm run import:2025:apply`.
+   Plus `npm run import:sheet` (dry-run) / `import:sheet:apply` (the 2025 xlsx for the 6 non-WF cards).
 2. **QB training re-import:** `npm run import:qb-gbsl` and `npm run import:qb-keller` (idempotent via `unique(entity_id, import_hash)`).
 3. **2026 Jan–May CSV — cap at May 31.** ⚠️ **Known gap:** `import:cards:csv-2025-2026` has **no date ceiling**
    (the importer consolidation was deferred from WS-A), so it would write June rows too. Before running, EITHER
    (a) trim the 2026 CSVs to ≤ 2026-05-31, OR (b) have the agent add a `--to 2026-06-01` flag to
    `scripts/import-cards.mjs` (port `inDateRange`/`dateTo` from `scripts/lib/ledger-import.mjs`). Then
-   `import:cards:csv-2025-2026:dry-run` → inspect → apply.
+   `import:cards:csv-2025-2026` (bare = dry-run) → inspect → `import:cards:csv-2025-2026:apply`.
 4. **Cutover config:** `UPDATE bank_connections SET sync_from_date = '2026-06-01';` (the exchange route never
    sets it; default is today). With CSV capped at May 31, this is a clean seam (gate is inclusive-lower / exclusive-upper).
 5. **Plaid June sync (no re-link):** run the sync for each connection — the default 90-day window covers June, so

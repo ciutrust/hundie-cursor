@@ -114,7 +114,7 @@ No account is double-sourced within a period; 2025 sources all end `2025-12-31`,
 | Period | Source | Command | Rows |
 |---|---|---|---|
 | 2025 (10 WF/CapOne accts) | `2025-WF-*` CSVs in `CSV 2025-2026/` | `import-2025-batch.mjs --apply --csv-dir "/Users/ac/Downloads/CSV 2025-2026"` | 2,591 |
-| 2025 (6 non-WF cards) | `~/Downloads/2025_Business_Expenses_Fixed.xlsx` | `npm run import:sheet` | (2025) |
+| 2025 (6 non-WF cards) | `~/Downloads/2025_Business_Expenses_Fixed.xlsx` | `npm run import:sheet:apply` | (2025) |
 | 2026 Jan 1 – May 31 (17 accts) | card CSVs | `import-cards.mjs --all --csv-dir "…/CSV 2025-2026" --from 2026-01-01 --to 2026-06-01` | 2,114 |
 | June (ground truth, not imported) | card CSVs June slice | `import-cards.mjs --dry-run --all --csv-dir "…" --from 2026-06-01 --export-json …/june-ground-truth.json` | 323 |
 | June (imported) | Plaid sync after `sync_from_date=2026-06-01` | reconcile vs june-ground-truth.json | — |

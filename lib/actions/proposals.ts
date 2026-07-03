@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 import { extractVendorSearchKey } from "@/lib/suggestions/category-suggestions";
+import { partitionCommitPlan, type ExistingClass } from "@/lib/actions/commit-plan";
 
 // classification_proposals isn't in the generated DB types (no CLI to regen); access via an
 // untyped client view. classifications/entities stay on the typed client.
@@ -46,6 +47,9 @@ type ApprovedRow = {
   rationale: string | null;
   transactions: { description: string; vendor: string | null } | null;
 };
+
+// partitionCommitPlan + its types live in ./commit-plan (a plain module): a "use server" file may
+// only export async functions, and this needs to stay a synchronous, directly-unit-tested helper.
 
 /** The ONLY thing that writes real classifications. For every approved proposal (optionally one
  *  entity), set the transaction's category (override or proposed), mark the proposal committed,
@@ -119,17 +123,47 @@ export async function commitApprovedProposals(
   const now = new Date().toISOString();
   const CHUNK = 500;
 
+  // Freshness guard: re-read the current classification for each candidate txn so we never clobber
+  // manual work done AFTER the proposal was generated (the history trigger wouldn't even log a
+  // notes-only wipe). Batched IN() reads to stay within URL limits.
+  const txIds = plan.map((x) => x.transactionId);
+  const existingByTx = new Map<string, ExistingClass>();
+  for (let i = 0; i < txIds.length; i += CHUNK) {
+    const { data: exRows, error: exErr } = await admin
+      .from("classifications")
+      .select("transaction_id, category_id, classified_by, notes")
+      .in("transaction_id", txIds.slice(i, i + CHUNK));
+    if (exErr) return { error: `classification read failed: ${exErr.message}` };
+    for (const r of exRows ?? [])
+      existingByTx.set(r.transaction_id, { category_id: r.category_id, classified_by: r.classified_by, notes: r.notes });
+  }
+
+  const { toWrite, staleProposalIds } = partitionCommitPlan(plan, existingByTx);
+  skipped += staleProposalIds.length;
+
+  // Retire stale proposals so they don't linger as 'approved' and get retried next commit.
+  for (let i = 0; i < staleProposalIds.length; i += CHUNK) {
+    const ids = staleProposalIds.slice(i, i + CHUNK);
+    const { error: skErr } = await admin
+      .from("classification_proposals")
+      .update({ status: "skipped", updated_at: now })
+      .in("id", ids);
+    if (skErr) return { error: `proposal skip update failed: ${skErr.message}` };
+  }
+
+  if (toWrite.length === 0) return { error: `Nothing valid to commit (${skipped} skipped)` };
+
   // 1) Bulk-upsert classifications (category + entity + provenance note) — a handful of batched
   //    calls instead of one round-trip per transaction, so thousands commit without timing out.
   const txToClass = new Map<string, string>();
-  for (let i = 0; i < plan.length; i += CHUNK) {
-    const payload = plan.slice(i, i + CHUNK).map((x) => ({
+  for (let i = 0; i < toWrite.length; i += CHUNK) {
+    const payload = toWrite.slice(i, i + CHUNK).map((x) => ({
       transaction_id: x.transactionId,
       entity_id: x.entityId,
       category_id: x.categoryId,
       classified_by: createdBy,
       classified_at: now,
-      notes: x.rationale ?? null,
+      notes: x.keepNote, // was: x.rationale ?? null — never overwrite an interim manual note with null
     }));
     const { data: up, error: upErr } = await admin
       .from("classifications")
@@ -140,8 +174,8 @@ export async function commitApprovedProposals(
   }
 
   // 2) Mark the proposals committed (bulk).
-  for (let i = 0; i < plan.length; i += CHUNK) {
-    const ids = plan.slice(i, i + CHUNK).map((x) => x.proposalId);
+  for (let i = 0; i < toWrite.length; i += CHUNK) {
+    const ids = toWrite.slice(i, i + CHUNK).map((x) => x.proposalId);
     const { error: stErr } = await admin
       .from("classification_proposals")
       .update({ status: "committed", committed_at: now })
@@ -151,7 +185,7 @@ export async function commitApprovedProposals(
 
   // 3) Best-effort training signal (batched insert; never blocks the commit).
   try {
-    const events = plan
+    const events = toWrite
       .filter((x) => txToClass.has(x.transactionId))
       .map((x) => ({
         transaction_id: x.transactionId,
@@ -173,5 +207,5 @@ export async function commitApprovedProposals(
 
   revalidatePath("/review/proposals");
   revalidatePath("/review");
-  return { success: true, count: plan.length, skipped };
+  return { success: true, count: toWrite.length, skipped };
 }

@@ -16,7 +16,7 @@ Copy `.env.local.example` to `.env.local` and set:
 
 - `NEXT_PUBLIC_SUPABASE_URL` — project URL
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — publishable key (`sb_publishable_...`) from **Project Settings → API**
-- `SUPABASE_SERVICE_ROLE_KEY` — service role key from **Project Settings → API** (required for `npm run import:cards` write mode and `npm run verify:db`; never commit)
+- `SUPABASE_SERVICE_ROLE_KEY` — service role key from **Project Settings → API** (required for `npm run import:cards:apply` write mode and `npm run verify:db`; never commit)
 
 Never commit `.env.local` or the service role key.
 
@@ -33,6 +33,15 @@ Hundie is deployed on Vercel. The **publishable (anon) key** is in the browser b
 **Migration:** `20260629140000_lock_anon_select_to_authenticated.sql` — replaced all `"Anyone can read …"` policies with `"Authenticated users can read …"`. **Committed on `main` and applied** to project `ihciuqpiavxhbulfkwod`.
 
 **App-layer auth:** `middleware.ts` protects `/review`, `/reports`, and `/settings` (defense in depth alongside RLS).
+
+### Self-signup is disabled (allowlist model)
+
+RLS trusts *any* authenticated JWT (`USING (true)`), so who can obtain a JWT is the real trust boundary. Sign-in is allowlist-only:
+
+- **Client:** `login-form.tsx` sends magic links via `magicLinkOtpOptions()` (`lib/auth/sign-in-options.ts`) with `shouldCreateUser: false` — an OTP request for an unknown email fails instead of creating a user.
+- **Dashboard:** Authentication → Providers → Email → **"Allow new users to sign up" = OFF** (project `ihciuqpiavxhbulfkwod`). Verified 2026-07-02.
+
+Until per-user RLS exists (no `user_id` columns yet), do NOT enable signups. Adding a user = invite from the dashboard only.
 
 ### Verify anon is locked out
 
@@ -78,12 +87,12 @@ SQL migrations live in `supabase/migrations/`. Apply with Supabase CLI (`supabas
 Issuer parsers: Wells Fargo, Chase, Amex, Citi, Capital One (`scripts/lib/*-csv-parser.mjs`).
 
 ```bash
-# Parse all CSVs locally (no DB, no secrets)
-npm run import:cards:dry-run
+# Parse all CSVs locally (no DB, no secrets) — bare import:cards is dry-run
+npm run import:cards
 npm run verify:card-parsers
 
 # Write to Supabase (needs SUPABASE_SERVICE_ROLE_KEY in .env.local)
-npm run import:cards
+npm run import:cards:apply
 
 # Post-import counts
 npm run import:cards:verify

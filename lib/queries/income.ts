@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { paginateAll } from "@/lib/supabase/paginate";
 import { categoryKind } from "@/lib/category-kind";
 import { isBookedOperatingExpense } from "@/lib/category-expense";
 import type { PeriodRange } from "@/lib/period";
@@ -19,6 +20,7 @@ export type EntityIncome = {
 };
 
 type IncomeRow = {
+  id: string;
   amount: number | string;
   classifications: {
     entity_id: string | null;
@@ -40,22 +42,23 @@ export async function getIncomeSummary(period: PeriodRange): Promise<EntityIncom
     .order("display_order");
   if (entError) throw entError;
 
-  const rows: IncomeRow[] = [];
-  const PAGE = 1000;
-  let from = 0;
-  while (true) {
-    const { data, error } = await supabase
-      .from("transactions")
-      .select("amount, classifications(entity_id, category_id, categories(full_path))")
-      .gte("transaction_date", start)
-      .lt("transaction_date", end)
-      .range(from, from + PAGE - 1);
-    if (error) throw error;
-    const page = (data ?? []) as unknown as IncomeRow[];
-    rows.push(...page);
-    if (page.length < PAGE) break;
-    from += PAGE;
-  }
+  // Stable pagination: order by a UNIQUE column (id) so a >1000-row period never skips/duplicates a
+  // row across pages (which would corrupt the summed income/expense totals). `key` makes paginateAll
+  // throw loudly if that invariant is ever violated. See lib/supabase/paginate.ts.
+  const rows = await paginateAll<IncomeRow>(
+    async (from, pageSize) => {
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("id, amount, classifications(entity_id, category_id, categories(full_path))")
+        .gte("transaction_date", start)
+        .lt("transaction_date", end)
+        .order("id")
+        .range(from, from + pageSize - 1);
+      return { data: data as unknown as IncomeRow[] | null, error };
+    },
+    1000,
+    (r) => r.id,
+  );
 
   return (entities ?? []).map((entity) => {
     const entityRows = rows.filter((r) => r.classifications?.entity_id === entity.id);

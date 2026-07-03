@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { safeRedirectPath } from "@/lib/auth/safe-redirect";
+import { magicLinkOtpOptions } from "@/lib/auth/sign-in-options";
 import { createClient } from "@/lib/supabase/client";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -33,9 +34,7 @@ export function LoginForm() {
     if (mode === "magic") {
       const { error: signInError } = await supabase.auth.signInWithOtp({
         email,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback?redirect=${encodeURIComponent(redirectTo)}`,
-        },
+        options: magicLinkOtpOptions(window.location.origin, redirectTo),
       });
 
       setLoading(false);

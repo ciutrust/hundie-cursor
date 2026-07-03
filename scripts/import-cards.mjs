@@ -44,9 +44,9 @@ function resolveDefaultPath(relativePath) {
   return resolve(process.env.HOME ?? "", relativePath);
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = {
-    dryRun: false,
+    dryRun: true,
     all: false,
     slug: null,
     filePath: null,
@@ -60,6 +60,7 @@ function parseArgs(argv) {
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--dry-run") args.dryRun = true;
+    else if (arg === "--apply") args.dryRun = false;
     else if (arg === "--all") args.all = true;
     else if (arg === "--verify") args.verifyOnly = true;
     else if (arg === "--account") args.slug = argv[++i];
@@ -494,6 +495,14 @@ async function printVerificationReport(supabase) {
   }
 }
 
+// isMain guard: importing this module (e.g. to test parseArgs) must NOT run the script.
+const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isMain) {
+  await run();
+}
+
+async function run() {
 const args = parseArgs(process.argv);
 
 if (args.dryRun) {
@@ -630,4 +639,5 @@ for (const result of results) {
   console.log(
     `  ${result.slug}: ${result.count} parsed${result.dryRun ? " (dry-run)" : `, ${result.inserted} inserted, ${result.skipped} dupes`}`,
   );
+}
 }

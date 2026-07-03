@@ -29,6 +29,11 @@ export function makeFakeSupabase(initial = {}) {
     import_batches: (initial.import_batches ?? []).map((r) => ({ ...r })),
     raw_import_rows: (initial.raw_import_rows ?? []).map((r) => ({ ...r })),
   };
+  // Seed any additional tables the caller provides (categories, entities,
+  // classification_proposals, suggestion_events, ai_suggestions, ...).
+  for (const [t, rows] of Object.entries(initial)) {
+    if (!(t in db)) db[t] = (rows ?? []).map((r) => ({ ...r }));
+  }
   const counters = {};
   const nextId = (table) => `${table}-${(counters[table] = (counters[table] ?? 0) + 1)}`;
 
@@ -70,8 +75,13 @@ export function makeFakeSupabase(initial = {}) {
     // select
     let rows = table.filter((r) => matches(r, q._filters));
     if (q._order) {
+      const dir = q._order.opts?.ascending === false ? -1 : 1;
       rows = [...rows].sort((a, b) =>
-        a[q._order.col] > b[q._order.col] ? 1 : a[q._order.col] < b[q._order.col] ? -1 : 0,
+        a[q._order.col] > b[q._order.col]
+          ? dir
+          : a[q._order.col] < b[q._order.col]
+            ? -dir
+            : 0,
       );
     }
     if (q._range) rows = rows.slice(q._range[0], q._range[1] + 1);
@@ -143,6 +153,10 @@ export function makeFakeSupabase(initial = {}) {
         return this;
       },
       single() {
+        this._single = true;
+        return this;
+      },
+      maybeSingle() {
         this._single = true;
         return this;
       },
