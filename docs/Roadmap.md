@@ -72,6 +72,16 @@ See [RUN.md](../RUN.md) for start instructions.
 
 Bank import, QBO API, write-back, splits, CPA packet — after Phase 2 is reliable.
 
+### Staged migrations (schema ahead of consumers)
+
+Several Phase-4 tables already exist in the DB (migrations applied) but have **no application code yet** — intentional pre-staging, not dead schema. Advisors/reviews will flag them (`unused_index`, `unindexed_foreign_keys` on the dark tables, `rls_policy_always_true`) until the feature lands; that's expected. Land each table's covering indexes + any policy tightening **with its consumer**, not before:
+
+- `transaction_splits` (`20260705122000`) — needs the sum-to-parent invariant + rollup exclusion before any writer (C18; Icebox in Backlog). Its two FK indexes were deliberately left off in the Track-2 FK pass.
+- `payees` / `payee_aliases` (`20260706120000_create_payees`) — payee normalization.
+- `fixed_assets` (`20260706121000`) — depreciation schedule.
+- `account_reconciliations` (`20260706122000`) — statement reconciliation.
+- `sales_tax_periods` (`20260706123000`) — sales-tax filing periods.
+
 ---
 
 ## Timeline

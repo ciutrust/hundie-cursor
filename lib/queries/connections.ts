@@ -1,3 +1,4 @@
+import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 
@@ -24,6 +25,13 @@ export type ConnectionView = {
  * this server module.
  */
 export async function getConnections(): Promise<ConnectionView[]> {
+  // S3: defense-in-depth on the most sensitive read. This uses the service-role client (the Plaid
+  // tables have no authenticated policies), so it must not rely on the middleware matcher alone — a
+  // matcher regression (the `/categories` class of mistake) would otherwise expose connection
+  // metadata. An unauthenticated caller gets an empty list, never connection data.
+  const { error: authError } = await requireUser();
+  if (authError) return [];
+
   const admin = createServiceRoleClient();
   const [{ data: connections, error: cErr }, { data: links, error: lErr }] = await Promise.all([
     admin

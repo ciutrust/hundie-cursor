@@ -32,7 +32,7 @@ Hundie is deployed on Vercel. The **publishable (anon) key** is in the browser b
 
 **Migration:** `20260629140000_lock_anon_select_to_authenticated.sql` — replaced all `"Anyone can read …"` policies with `"Authenticated users can read …"`. **Committed on `main` and applied** to project `ihciuqpiavxhbulfkwod`.
 
-**App-layer auth:** `middleware.ts` protects `/review`, `/reports`, and `/settings` (defense in depth alongside RLS).
+**App-layer auth:** `proxy.ts` + `lib/supabase/middleware.ts` protect `/review`, `/reports`, `/categories`, `/month-close`, `/tax-close`, and `/settings` (defense in depth alongside RLS).
 
 ### Self-signup is disabled (allowlist model)
 
@@ -60,6 +60,23 @@ Signed-in app smoke test: log in → `/review` → entity drill-down → `/repor
 
 RLS closes the read hole regardless, but consider rotating the publishable key since it was public in the bundle.
 
+### Hardening status & operator follow-ups (Review 2026-07-01, Track 2)
+
+**Shipped (code / migrations):**
+
+- **Audit-trail integrity (S2 / S8):** `log_classification_change` and `log_transaction_change` now set `changed_by` from the authenticated JWT email — `coalesce(auth.jwt()->>'email', <app provenance>)` — so a client-forged `classified_by` can no longer spoof the trail; service-role/import writes (no JWT email) keep their existing provenance. Both `SECURITY DEFINER` trigger functions had their RPC `EXECUTE` grant revoked from `public, anon, authenticated`. Migration `20260709120000_harden_audit_triggers`.
+- **Defense-in-depth reads (S3 / S5):** `getConnections()` requires an authenticated user before the service-role read; `/categories` is now inside the auth matcher.
+
+**Accepted single-tenant risk (documented, intentionally NOT changed):**
+
+- The ledger write policies are `USING (true)` / `WITH CHECK (true)` for `authenticated` (the advisor's `rls_policy_always_true` list). This is intentional for the "authenticated = owner" model. **Tightening them to require `aal2` is deferred** — it would lock the operator out of writes unless BOTH accounts have enrolled an MFA factor. Do it only after confirming MFA enrollment for Alex and Claudia.
+
+**Operator dashboard actions still open:**
+
+- **S9 — Leaked-password protection (HIBP):** Dashboard → Authentication → Policies → enable "Leaked password protection" (checks HaveIBeenPwned). Project `ihciuqpiavxhbulfkwod`. **Not yet enabled** (advisor still warns).
+- **S11 — Rate limiting:** login and the MFA challenge rely on Supabase's default auth rate limits (no app-level lockout). Optionally add a per-IP throttle via a Vercel WAF rule for the auth routes and `/api/plaid/*`.
+- **S10 — key fingerprint:** the displayed encryption-key fingerprint is still a raw SHA-256 (display-only, not stored/compared). Switching it to an HMAC is safe but changes the displayed value; do it in a follow-up if desired.
+
 ## Migrations
 
 SQL migrations live in `supabase/migrations/`. Apply with Supabase CLI (`supabase db push`) or Supabase MCP `apply_migration`.
@@ -81,6 +98,13 @@ SQL migrations live in `supabase/migrations/`. Apply with Supabase CLI (`supabas
 | `20260630140000_quicksilver_re_resolve_to_gbsl` | Quicksilver date_rules 2026 + re-resolve mis-booked entity |
 | `20260701120000_mortgage_heloc_payment_categories` | Counted `Mortgage payment` + `HELOC payment` on Pflugerville, Austin ACAA, Personal |
 | `20260701130000_perf_indexes` | Indexes on `transactions(transaction_date)` + `classifications(entity_id, category_id)` |
+
+Later migrations (Stage-2 through the 2026-07-01 review remediation, `20260702*`–`20260709*`) live in `supabase/migrations/` and were applied to the remote via Supabase MCP `apply_migration`. The two shipped by the Track-2/3 pass:
+
+| Migration | Description |
+|-----------|-------------|
+| `20260709120000_harden_audit_triggers` | **Security (S2/S8):** `changed_by` from JWT identity + `revoke execute` on both audit trigger fns |
+| `20260709121000_fk_covering_indexes` | **Perf (T6):** covering indexes for FKs on the active tables |
 
 ## Card CSV import
 

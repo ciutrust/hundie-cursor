@@ -1,8 +1,15 @@
 import { callAnthropic } from "@/lib/ai/anthropic";
 import { calibrateConfidence } from "@/lib/ai/confidence";
 import { AI_BATCH_SIZE } from "@/lib/ai/config";
-import type { EntityChart } from "@/lib/ai/preclassify";
 import type { VendorGroupPackage } from "@/lib/ai/vendor-group-packages";
+
+/** An entity's slug + name + the closed list of category paths the model may choose from.
+ *  (Moved here from the removed lib/ai/preclassify.ts — T8.) */
+export type EntityChart = {
+  slug: string;
+  name: string;
+  categoryPaths: string[];
+};
 
 export type VendorGroupClassifyResult = {
   vendor_key: string;
@@ -60,7 +67,7 @@ Vendor groups (one JSON object per line):
 ${groups}`;
 }
 
-function parseModelJson(text: string): { results?: VendorGroupClassifyResult[] } {
+export function parseModelJson(text: string): { results?: VendorGroupClassifyResult[] } {
   const trimmed = text.trim();
   const jsonText = trimmed.startsWith("```")
     ? trimmed.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "")
@@ -68,7 +75,7 @@ function parseModelJson(text: string): { results?: VendorGroupClassifyResult[] }
   return JSON.parse(jsonText) as { results?: VendorGroupClassifyResult[] };
 }
 
-function validateGroupResult(
+export function validateGroupResult(
   raw: VendorGroupClassifyResult,
   pkg: VendorGroupPackage,
   entityCharts: EntityChart[],
@@ -140,24 +147,35 @@ export async function classifyVendorGroupBatch(
 export async function classifyAllVendorGroups(
   packages: VendorGroupPackage[],
   entityCharts: EntityChart[],
-): Promise<VendorGroupClassifyBatchResult & { batches: number }> {
+): Promise<VendorGroupClassifyBatchResult & { batches: number; failedBatches: number }> {
   const allItems: VendorGroupClassifyResult[] = [];
   let inputTokens = 0;
   let outputTokens = 0;
   let model = "";
   let batches = 0;
+  let failedBatches = 0;
 
   for (let i = 0; i < packages.length; i += AI_BATCH_SIZE) {
     const batch = packages.slice(i, i + AI_BATCH_SIZE);
-    const result = await classifyVendorGroupBatch(batch, entityCharts);
-    allItems.push(...result.items);
-    inputTokens += result.inputTokens;
-    outputTokens += result.outputTokens;
-    model = result.model;
     batches += 1;
+    // T4: a single bad batch (invalid JSON / exhausted retries) must NOT discard the batches that
+    // already succeeded (paid tokens). Record the failure and keep going; the caller decides what to
+    // do with a partial result.
+    try {
+      const result = await classifyVendorGroupBatch(batch, entityCharts);
+      allItems.push(...result.items);
+      inputTokens += result.inputTokens;
+      outputTokens += result.outputTokens;
+      if (result.model) model = result.model;
+    } catch (err) {
+      failedBatches += 1;
+      console.error(
+        `AI batch ${batches} failed (${batch.length} vendor groups): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
-  return { items: allItems, inputTokens, outputTokens, model, batches };
+  return { items: allItems, inputTokens, outputTokens, model, batches, failedBatches };
 }
 
 /** Rough pre-run estimate for vendor-group classification. */

@@ -65,7 +65,7 @@ From [REVIEW-2026-06-26.md](./REVIEW-2026-06-26.md):
 - [x] **Quicksilver switch year** — GBSL through Jun 2026, Personal from Jul 2026 ([QUICKSILVER-DATE-RULE.md](./QUICKSILVER-DATE-RULE.md))
 - [x] AI pre-classifier — Personal backlog, Ask AI panel, accept/reject, `/reports/ai-suggestions` ([AI-PRECLASSIFY.md](./AI-PRECLASSIFY.md))
 - [ ] Remove `.qb-import-batches.json` from git history (S4)
-- [ ] Archive dead MCP scripts to `scripts/archive/`
+- [x] Dead MCP scripts removed — the 4 tracked `scripts/.*.mjs` prod-SQL runners were deleted and the `@modelcontextprotocol/sdk` devDependency dropped (T7, Review 2026-07-01)
 
 ---
 
@@ -149,6 +149,7 @@ capital contribution / owner funding flow — kept OUT of the P&L. Surface in a 
 
 ## Icebox
 
+- [ ] **Effects cleanup (T9, Review 2026-07-01)** — resolve the 10 `react-hooks/set-state-in-effect` warnings (surfaced as warnings, not gate-blocking; a dedicated effects pass without risking working UI). Current count by file: `components/review/transaction-list.tsx` (4 — L122, L184, L602, L811), `components/layout/app-shell.tsx` (2 — L159, L179), and `app/settings/security/mfa-setup.tsx`, `components/review/ai-review-panel.tsx`, `components/review/filter-multi-select.tsx`, `components/theme/theme-provider.tsx` (1 each).
 - [ ] QuickBooks write-back
 - [ ] Transaction splits — the splits-writer PR must add the sum-to-parent invariant + rollup exclusion + parity test (C18, deferred; see the note in `supabase/migrations/20260705122000_transaction_splits.sql`)
 - [ ] Full intercompany automation
