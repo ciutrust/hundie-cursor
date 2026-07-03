@@ -1,6 +1,11 @@
 import { aggregator, type AggregatorTransaction } from "@/lib/aggregator";
 import { decryptSecret } from "@/lib/crypto/secret-box";
-import { shouldImportPlaidTxn } from "@/lib/plaid/ledger-filter";
+import {
+  shouldImportPlaidTxn,
+  summarizePlaidDrops,
+  type PlaidDropReason,
+  type PlaidDropSummary,
+} from "@/lib/plaid/ledger-filter";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 // The proven CSV write path (dedupe via import_hash, entity routing, classification upsert).
 // Plain JS — reused verbatim so Plaid is "just another import source".
@@ -76,6 +81,46 @@ export function unmappedPlaidAccountIds(
   return [...unmapped];
 }
 
+const DROP_REASONS: PlaidDropReason[] = ["pending", "zero", "pfc", "payment", "card_income"];
+
+/**
+ * C12: merge a per-account PlaidDropSummary into a running per-sync-run total (kept/dropped
+ * counts add; sample descriptions cap at a few per reason so the log line stays short).
+ */
+function addPlaidDropSummary(total: PlaidDropSummary, next: PlaidDropSummary): PlaidDropSummary {
+  const reasons = { ...total.reasons };
+  const samples = { ...total.samples };
+  for (const reason of DROP_REASONS) {
+    reasons[reason] += next.reasons[reason];
+    if (next.samples[reason]?.length) {
+      const merged = [...(samples[reason] ?? []), ...next.samples[reason]!];
+      samples[reason] = merged.slice(0, 3);
+    }
+  }
+  return { kept: total.kept + next.kept, dropped: total.dropped + next.dropped, reasons, samples };
+}
+
+function emptyPlaidDropSummary(): PlaidDropSummary {
+  return {
+    kept: 0,
+    dropped: 0,
+    reasons: { pending: 0, zero: 0, pfc: 0, payment: 0, card_income: 0 },
+    samples: {},
+  };
+}
+
+/**
+ * C12: format the per-import drop tally into a single log line (or null if nothing was dropped,
+ * so callers can skip logging a no-op line). Visibility for rows previously dropped silently.
+ */
+export function formatPlaidDropSummaryLine(summary: PlaidDropSummary): string | null {
+  if (summary.dropped === 0) return null;
+  const reasonParts = DROP_REASONS.filter((r) => summary.reasons[r] > 0).map(
+    (r) => `${r}=${summary.reasons[r]}`,
+  );
+  return `Plaid import: kept ${summary.kept}, dropped ${summary.dropped} (${reasonParts.join(", ")})`;
+}
+
 /**
  * BUG-09/DATA-02: stamp plaid_removed_at on transactions Plaid reported as removed, located by
  * external_id (BUG-01). Idempotent (`.is("plaid_removed_at", null)` skips already-stamped rows).
@@ -121,6 +166,11 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
   if (cErr) throw cErr;
   if (lErr) throw lErr;
   if (eErr) throw eErr;
+
+  // C12: tally why rows are dropped across the whole run (kept pure via summarizePlaidDrops);
+  // logged once at the end so previously-silent drops (esp. payment-name drops now scoped to
+  // card accounts only) are visible per import.
+  let dropSummary = emptyPlaidDropSummary();
 
   const entityMap = new Map<string, string>();
   for (const e of entities ?? []) entityMap.set(e.slug, e.id);
@@ -254,6 +304,7 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
         // Drop card payments + $0 noise (parity with the CSV parsers). Checking/savings deposits are
         // now KEPT (income capture, Phase 3) and land uncategorized for the operator to classify.
         const eligible = txns.filter((t) => shouldImportPlaidTxn(t, account.account_type));
+        dropSummary = addPlaidDropSummary(dropSummary, summarizePlaidDrops(txns, account.account_type));
         if (eligible.length === 0) continue;
 
         const parsed = eligible.map((t) => ({
@@ -341,6 +392,10 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
     summary.skipped += result.skipped;
     summary.connections.push(result);
   }
+
+  // C12: one-line, per-import visibility into rows dropped and why (previously silent).
+  const dropLine = formatPlaidDropSummaryLine(dropSummary);
+  if (dropLine) console.log(`  ${dropLine}`);
 
   return summary;
 }

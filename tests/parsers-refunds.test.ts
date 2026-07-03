@@ -31,25 +31,37 @@ describe("Wells Fargo refunds", () => {
     expect(byDesc(txs, "ZERO AUTH")).toBeUndefined();
   });
 
-  test("checking: deposit (income) captured as inflow (negative); outflow positive", () => {
+  // C12: payment-name rows are legitimate on a depository account (rent income via Zelle, a
+  // mortgage AUTO PAY debit) and must now be KEPT there — the drop is scoped to card accounts only.
+  test("checking: deposit (income) captured as inflow (negative); outflow positive; payment-named rows KEPT (income capture, C12)", () => {
     const checkingCsv = [
       "DATE,DESCRIPTION,AMOUNT,CHECK #,STATUS",
       "01/18/2026,RENTAL INCOME DEPOSIT,1200.00,,posted",
       "01/15/2026,OFFICE DEPOT,-40.00,,posted",
-      "01/17/2026,ONLINE PAYMENT THANK YOU,500.00,,posted", // CC payment from checking still dropped
+      "01/17/2026,ONLINE PAYMENT THANK YOU,500.00,,posted", // C12: no longer a card, so KEPT
     ].join("\n");
     const txs = parseWellsFargoCsv(checkingCsv, { accountType: "checking" });
     expect(byDesc(txs, "RENTAL INCOME")?.amount).toBe(-1200);
     expect(byDesc(txs, "OFFICE DEPOT")?.amount).toBe(40);
-    expect(byDesc(txs, "THANK YOU")).toBeUndefined();
+    expect(byDesc(txs, "THANK YOU")).toBeDefined();
+    expect(byDesc(txs, "THANK YOU")?.amount).toBe(-500); // deposit into checking -> ledger inflow
   });
 
   test("BUG-12: credit_card and checking produce identical signs for the same rows (no dead branch divergence)", () => {
+    // C12 (finding, not BUG-12): the payment-name drop is now scoped to card accounts, so this
+    // fixture's payment row diverges by design between the two account types (dropped on
+    // credit_card, kept on checking) — exclude it and compare sign parity on the remaining rows.
     const cc = parseWellsFargoCsv(csv, { accountType: "credit_card" });
     const chk = parseWellsFargoCsv(csv, { accountType: "checking" });
     const sig = (txs: Array<{ description: string; amount: number }>) =>
-      txs.map((t) => [t.description, t.amount]).sort();
+      txs
+        .filter((t) => !t.description.toUpperCase().includes("PAYMENT"))
+        .map((t) => [t.description, t.amount])
+        .sort();
     expect(sig(chk)).toEqual(sig(cc));
+    // The payment row itself: dropped on credit_card, kept (as an inflow) on checking.
+    expect(byDesc(cc, "PAYMENT")).toBeUndefined();
+    expect(byDesc(chk, "PAYMENT")?.amount).toBe(-500);
   });
 });
 

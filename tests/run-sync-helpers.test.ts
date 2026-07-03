@@ -3,6 +3,7 @@ import {
   resolveSyncFromDate,
   stampRemovedTransactions,
   unmappedPlaidAccountIds,
+  formatPlaidDropSummaryLine,
 } from "@/lib/plaid/run-sync";
 import { makeFakeSupabase } from "./helpers/fake-supabase.mjs";
 
@@ -76,5 +77,35 @@ describe("BUG-09 — stampRemovedTransactions", () => {
     const sb: any = seed();
     expect(await stampRemovedTransactions(sb, [], ["ext-1"], "x")).toBe(0);
     expect(await stampRemovedTransactions(sb, ["acct-1"], [], "x")).toBe(0);
+  });
+});
+
+// C12: dropped Plaid rows previously left no trace. formatPlaidDropSummaryLine turns the pure
+// summarizePlaidDrops() tally into the one-line, per-import log message runPlaidSync emits.
+describe("C12 — formatPlaidDropSummaryLine (Plaid drop visibility)", () => {
+  test("formats a summary with mixed reasons and omits zero-count reasons", () => {
+    const line = formatPlaidDropSummaryLine({
+      kept: 10,
+      dropped: 3,
+      reasons: { pending: 1, zero: 0, pfc: 0, payment: 2, card_income: 0 },
+      samples: { payment: ["AUTOPAY PAYMENT THANK YOU"], pending: ["PENDING CHARGE"] },
+    });
+    expect(line).toContain("kept 10");
+    expect(line).toContain("dropped 3");
+    expect(line).toContain("payment=2");
+    expect(line).toContain("pending=1");
+    expect(line).not.toContain("zero=");
+    expect(line).not.toContain("pfc=");
+    expect(line).not.toContain("card_income=");
+  });
+
+  test("returns null when nothing was dropped (no line to log)", () => {
+    const line = formatPlaidDropSummaryLine({
+      kept: 5,
+      dropped: 0,
+      reasons: { pending: 0, zero: 0, pfc: 0, payment: 0, card_income: 0 },
+      samples: {},
+    });
+    expect(line).toBeNull();
   });
 });
