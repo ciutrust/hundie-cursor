@@ -341,6 +341,8 @@ export async function getTotalBacklogCount(): Promise<number> {
   const { count, error } = await supabase
     .from("transactions")
     .select("id, classification:classifications!inner(category_id)", { count: "exact", head: true })
+    // C4: a Plaid-reversed charge is not backlog to clear — exclude it from the count.
+    .is("plaid_removed_at", null)
     .or(reviewBacklogOrClause(cpaReviewIds));
 
   if (error) throw error;

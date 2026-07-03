@@ -11,6 +11,7 @@ import {
  */
 function recordingClient() {
   const orderCalls: string[] = [];
+  const isCalls: Array<{ col: string; val: unknown }> = [];
   const q: Record<string, unknown> = {};
   const chain = () => q;
   Object.assign(q, {
@@ -19,6 +20,10 @@ function recordingClient() {
     lt: chain,
     range: chain,
     eq: chain,
+    is: (col: string, val: unknown) => {
+      isCalls.push({ col, val });
+      return q;
+    },
     order: (col: string) => {
       orderCalls.push(col);
       return q;
@@ -27,16 +32,21 @@ function recordingClient() {
       resolve({ data: [], error: null }),
   });
   const supabase = { from: () => q };
-  return { supabase, orderCalls };
+  return { supabase, orderCalls, isCalls };
 }
 
-function optsFor(supabase: unknown, order?: "asc" | "desc"): FetchPeriodTransactionsOptions {
+function optsFor(
+  supabase: unknown,
+  order?: "asc" | "desc",
+  extra?: Partial<FetchPeriodTransactionsOptions>,
+): FetchPeriodTransactionsOptions {
   return {
     supabase,
     select: "id, amount",
     start: "2026-01-01",
     end: "2027-01-01",
     order,
+    ...extra,
   } as unknown as FetchPeriodTransactionsOptions;
 }
 
@@ -52,5 +62,29 @@ describe("fetchPeriodTransactions ordering (stable offset pagination)", () => {
     const { supabase, orderCalls } = recordingClient();
     await fetchPeriodTransactions(optsFor(supabase, "asc"));
     expect(orderCalls).toEqual(["transaction_date", "id"]);
+  });
+});
+
+// C4: reversed/removed Plaid charges (plaid_removed_at stamped) are not real spend. The shared
+// fetcher opts OUT by default — every report/backlog/close caller excludes them automatically,
+// eliminating the "forgot a caller" risk — and a caller must explicitly pass excludeRemoved:false
+// to include them.
+describe("fetchPeriodTransactions excludeRemoved (opt-out default)", () => {
+  it("excludes plaid_removed_at rows by default (adds .is(plaid_removed_at, null))", async () => {
+    const { supabase, isCalls } = recordingClient();
+    await fetchPeriodTransactions(optsFor(supabase, "asc"));
+    expect(isCalls).toContainEqual({ col: "plaid_removed_at", val: null });
+  });
+
+  it("still excludes them when excludeRemoved is undefined (default true)", async () => {
+    const { supabase, isCalls } = recordingClient();
+    await fetchPeriodTransactions(optsFor(supabase, "asc", { excludeRemoved: undefined }));
+    expect(isCalls).toContainEqual({ col: "plaid_removed_at", val: null });
+  });
+
+  it("includes removed rows only when excludeRemoved is explicitly false", async () => {
+    const { supabase, isCalls } = recordingClient();
+    await fetchPeriodTransactions(optsFor(supabase, "asc", { excludeRemoved: false }));
+    expect(isCalls).not.toContainEqual({ col: "plaid_removed_at", val: null });
   });
 });

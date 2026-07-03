@@ -50,6 +50,8 @@ export async function getIntercompanyReview(period: PeriodRange): Promise<Flagge
       )
       .gte("transaction_date", start)
       .lt("transaction_date", end)
+      // C4: a Plaid-reversed leg is not a real intercompany transfer — exclude it from the review.
+      .is("plaid_removed_at", null)
       .order("transaction_date", { ascending: true })
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);

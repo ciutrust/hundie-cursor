@@ -11,6 +11,11 @@ type ServerClient = Awaited<ReturnType<typeof createClient>>;
  * duplicates a row across pages on >1000-row periods); `order` additionally sorts by
  * `transaction_date` for display when the caller asks. The method-chaining order
  * (range before order/eq) is irrelevant to the emitted PostgREST query.
+ *
+ * C4: `excludeRemoved` DEFAULTS TO TRUE (opt-out). Because every report / report-analytics /
+ * entity-home / review summary+matrix fetcher routes through here, defaulting on means all of them
+ * exclude Plaid-removed (reversed) charges automatically — no caller can be accidentally missed. A
+ * caller must explicitly pass `excludeRemoved: false` to include those rows.
  */
 export type FetchPeriodTransactionsOptions = {
   supabase: ServerClient;
@@ -25,12 +30,18 @@ export type FetchPeriodTransactionsOptions = {
   categoryId?: string;
   /** Add a `transaction_date` primary display sort (with `id` tiebreaker); omit to page in stable `id` order only. */
   order?: "asc" | "desc";
+  /**
+   * C4: exclude rows with a `plaid_removed_at` timestamp (Plaid-reversed charges). DEFAULTS TO TRUE
+   * — pass `false` only for a surface that must still see removed rows (none today).
+   */
+  excludeRemoved?: boolean;
 };
 
 export async function fetchPeriodTransactions<T>(
   opts: FetchPeriodTransactionsOptions,
 ): Promise<T[]> {
   const { supabase, select, start, end, entityId, entitySlug, categoryId, order } = opts;
+  const excludeRemoved = opts.excludeRemoved !== false;
   return paginateAll<T>(async (from, pageSize) => {
     let query = supabase
       .from("transactions")
@@ -38,6 +49,9 @@ export async function fetchPeriodTransactions<T>(
       .gte("transaction_date", start)
       .lt("transaction_date", end)
       .range(from, from + pageSize - 1);
+
+    // C4: top-level `transactions` column — composes with the embed select + the other filters.
+    if (excludeRemoved) query = query.is("plaid_removed_at", null);
 
     if (order) {
       const ascending = order === "asc";

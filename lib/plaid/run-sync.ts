@@ -34,6 +34,8 @@ export type ConnectionSyncResult = {
   inserted: number;
   updated: number;
   skipped: number;
+  /** C4: rows stamped plaid_removed_at for this connection this run. */
+  removed: number;
   status: string;
   error?: string;
 };
@@ -42,6 +44,8 @@ export type SyncSummary = {
   inserted: number;
   updated: number;
   skipped: number;
+  /** C4: rows newly stamped plaid_removed_at this run (Plaid-reversed charges pulled from reports). */
+  removed: number;
   connections: ConnectionSyncResult[];
 };
 
@@ -251,7 +255,7 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
     for (const a of accounts ?? []) accountById.set(a.id, a as unknown as AccountRow);
   }
 
-  const summary: SyncSummary = { inserted: 0, updated: 0, skipped: 0, connections: [] };
+  const summary: SyncSummary = { inserted: 0, updated: 0, skipped: 0, removed: 0, connections: [] };
 
   for (const conn of connections ?? []) {
     const result: ConnectionSyncResult = {
@@ -260,6 +264,7 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
       inserted: 0,
       updated: 0,
       skipped: 0,
+      removed: 0,
       status: conn.status,
     };
 
@@ -315,6 +320,7 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
           synced.data.removedExternalIds,
           new Date().toISOString(),
         );
+        result.removed += stamped;
         console.log(
           `  Plaid reported ${synced.data.removedExternalIds.length} removed txn(s) for ${conn.id}; stamped ${stamped} for review (left in place)`,
         );
@@ -382,6 +388,7 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
               new Date().toISOString(),
             );
             if (stamped > 0) {
+              result.removed += stamped;
               console.log(
                 `  ${conn.id}/${account.slug}: ${stamped} modified txn(s) no longer ledger-eligible — stamped removed (stale expense cleared)`,
               );
@@ -474,12 +481,18 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
     summary.inserted += result.inserted;
     summary.updated += result.updated;
     summary.skipped += result.skipped;
+    summary.removed += result.removed;
     summary.connections.push(result);
   }
 
   // C12: one-line, per-import visibility into rows dropped and why (previously silent).
   const dropLine = formatPlaidDropSummaryLine(dropSummary);
   if (dropLine) console.log(`  ${dropLine}`);
+
+  // C4: run-total of rows stamped plaid_removed_at (now excluded from reports/backlog/close).
+  if (summary.removed > 0) {
+    console.log(`  Plaid sync: stamped ${summary.removed} removed txn(s) this run (excluded from reports).`);
+  }
 
   return summary;
 }
