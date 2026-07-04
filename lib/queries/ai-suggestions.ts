@@ -10,7 +10,9 @@ function isMissingAiSuggestionsTable(error: { message?: string } | null) {
 }
 
 async function getPersonalEntityId(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const { data } = await supabase.from("entities").select("id").eq("slug", AI_ENTITY_SLUG).single();
+  // A6: maybeSingle, not single — .single() 406s when RLS yields 0 rows under a stale session (the
+  // live 406 log noise), and this runs on every shell render via the AI badge. 0 rows → null.
+  const { data } = await supabase.from("entities").select("id").eq("slug", AI_ENTITY_SLUG).maybeSingle();
   return data?.id ?? null;
 }
 
@@ -44,6 +46,8 @@ async function listCurrentAiSuggestionTransactionIds(
       .from("ai_suggestions")
       .select("transaction_id")
       .eq("is_current", true)
+      // B3: unique tiebreaker so offset paging can't skip/dup rows across pages (income.ts already done).
+      .order("id")
       .range(from, from + 999);
 
     if (error) {

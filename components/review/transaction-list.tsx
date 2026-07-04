@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -81,7 +80,6 @@ export function TransactionList({
   const [sortKey, setSortKey] = useState<"date" | "name" | "amount">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  const router = useRouter();
   const [, startQuick] = useTransition();
   const [quickClassifyingId, setQuickClassifyingId] = useState<string | null>(null);
   const [inlineSuggestions, setInlineSuggestions] = useState<Record<string, CategorySuggestion | null>>({});
@@ -208,7 +206,7 @@ export function TransactionList({
   function quickClassify(tx: TransactionWithDetails, suggestion: CategorySuggestion) {
     setQuickClassifyingId(tx.id);
     startQuick(async () => {
-      const result = await reclassifyTransaction({
+      await reclassifyTransaction({
         classificationId: tx.classification.id,
         entityId: tx.classification.entity_id,
         categoryId: suggestion.categoryId,
@@ -226,7 +224,8 @@ export function TransactionList({
         },
       });
       setQuickClassifyingId(null);
-      if (!result.error) router.refresh();
+      // C2: no router.refresh() — the action's revalidatePath already re-renders this RSC. A second
+      // refresh here doubled every classify click into ~60-80 backend calls.
     });
   }
 
@@ -577,7 +576,6 @@ function ReclassifyDialog({
   entitySlug,
   onClose,
 }: ReclassifyDialogProps) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [entityId, setEntityId] = useState(transaction.classification.entity_id);
   const [categoryId, setCategoryId] = useState<string | null>(transaction.classification.category_id);
@@ -683,7 +681,7 @@ function ReclassifyDialog({
       }
 
       onClose();
-      router.refresh();
+      // C2: revalidatePath in the action already refreshes the RSC; no redundant router.refresh().
     });
   }
 
@@ -778,7 +776,6 @@ function BulkAssignDialog({
   onClose,
   onComplete,
 }: BulkAssignDialogProps) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [entityId, setEntityId] = useState(defaultEntityId);
   const [categoryId, setCategoryId] = useState<string | null>(null);
@@ -889,7 +886,7 @@ function BulkAssignDialog({
       }
 
       onComplete();
-      router.refresh();
+      // C2: revalidatePath in the action already refreshes the RSC; no redundant router.refresh().
     });
   }
 

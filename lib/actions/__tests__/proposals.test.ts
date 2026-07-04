@@ -106,6 +106,29 @@ describe('commitApprovedProposals', () => {
       event_type: 'reject', suggested_category_id: 'cat-A', chosen_category_id: 'cat-B',
     });
   });
+
+  // B1: the approved-proposals read is paginated (paginateAll + .order('id')), and the URL-side
+  // .in() loops chunk at 200 — a commit spanning >1000 rows (past the page boundary and many chunks)
+  // must commit ALL of them, not silently drop past 1000.
+  it('B1: commits every approved proposal past the 1000-row page boundary', async () => {
+    const n = 1050;
+    const transactions = Array.from({ length: n }, (_, i) => ({ id: `tx-${i}`, description: 'X', vendor: null }));
+    const classification_proposals = Array.from({ length: n }, (_, i) => ({
+      id: `p-${i}`, transaction_id: `tx-${i}`, entity_id: 'ent-A', chosen_entity_id: null,
+      source: 'confirmed_history', proposed_category_id: 'cat-A', chosen_category_id: null,
+      rationale: null, status: 'approved', entity_slug: 'ent-a',
+    }));
+    const { client, db } = makeClient({
+      categories: [{ id: 'cat-A', entity_id: 'ent-A' }],
+      transactions, classifications: [], classification_proposals, suggestion_events: [],
+    });
+    mockAll(client);
+    const { commitApprovedProposals } = await import('@/lib/actions/proposals');
+    const res = await commitApprovedProposals();
+    expect(res).toMatchObject({ success: true, count: n });
+    expect(db.classifications).toHaveLength(n);
+    expect(db.classification_proposals.every((p: any) => p.status === 'committed')).toBe(true);
+  });
 });
 
 describe('setProposalDecision', () => {
@@ -154,5 +177,20 @@ describe('setProposalDecision', () => {
     const res = await setProposalDecision(['p-1', 'p-2'], 'approved');
     expect(res).toEqual({ success: true, count: 1 }); // only p-1 flipped; p-2 stays committed
     expect(client.db.classification_proposals.find((p: any) => p.id === 'p-2').status).toBe('committed');
+  });
+
+  // A1: the id list is chunked at 200 (an "Approve all" over >420 ids would otherwise 400 on the URL).
+  // Approving 450 pending proposals must flip all 450 and return the full matched count.
+  it('A1: chunks a large id list and returns the full matched count', async () => {
+    const n = 450;
+    const classification_proposals = Array.from({ length: n }, (_, i) => ({
+      id: `p-${i}`, transaction_id: `tx-${i}`, entity_id: 'ent-A', status: 'pending', entity_slug: 'ent-a',
+    }));
+    const client = makeClient({ classification_proposals });
+    mockAll(client.client);
+    const { setProposalDecision } = await import('@/lib/actions/proposals');
+    const res = await setProposalDecision(classification_proposals.map((p) => p.id), 'approved');
+    expect(res).toEqual({ success: true, count: n });
+    expect(client.db.classification_proposals.every((p: any) => p.status === 'approved')).toBe(true);
   });
 });

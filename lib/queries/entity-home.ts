@@ -2,6 +2,7 @@ import type { PeriodRange } from "@/lib/period";
 import { isBookedOperatingExpense } from "@/lib/category-expense";
 import { getCpaReviewCategoryIdSet, needsReviewCategory } from "@/lib/category-review";
 import { createClient } from "@/lib/supabase/server";
+import { pgError } from "@/lib/supabase/errors";
 import { fetchPeriodTransactions } from "@/lib/queries/fetch-period-transactions";
 
 export type EntityHomeStats = {
@@ -137,7 +138,9 @@ export async function getAllEntityHomeStats(period: PeriodRange): Promise<Entity
     .eq("is_classifiable", true)
     .order("display_order");
 
-  if (error) throw error;
+  // E1: throw a structured Error (not the raw PostgREST object, whose .message is often '' → the
+  // ×463 unrecoverable "{ message: '' }" sidebar logs). Original error preserved as `cause`.
+  if (error) throw pgError("entity-home entities", error);
 
   const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
 
@@ -183,27 +186,40 @@ export async function getSidebarEntityNav(period: PeriodRange): Promise<SidebarE
     .eq("is_classifiable", true)
     .order("display_order");
 
-  if (error) throw error;
+  // E1: throw a structured Error (not the raw PostgREST object, whose .message is often '' → the
+  // ×463 unrecoverable "{ message: '' }" sidebar logs). Original error preserved as `cause`.
+  if (error) throw pgError("entity-home entities", error);
 
-  const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
+  const cpaReviewIds = [...(await getCpaReviewCategoryIdSet(supabase))];
 
-  // OPT-04: one period fetch + JS count instead of N per-entity count queries. The JS
-  // predicate needsReviewCategory(category_id) (null OR a CPA-review id) is exactly the
-  // reviewBacklogOrClause the count queries used, over the same !inner-joined rows.
-  const transactions = await fetchEntityPeriodTransactions(supabase, period.start, period.end);
-  const backlogByEntity = new Map<string, number>();
-  for (const tx of transactions) {
-    if (needsReviewCategory(tx.classification.category_id, cpaReviewIds)) {
-      const eid = tx.classification.entity_id;
-      backlogByEntity.set(eid, (backlogByEntity.get(eid) ?? 0) + 1);
-    }
-  }
+  // C1: per-entity HEAD counts instead of scanning the entire YTD ledger on every sidebar render.
+  // Backlog = rows with a null category OR a CPA-review ("Ask My Accountant") category, per entity,
+  // in-period, excluding Plaid-reversed rows. Two indexed counts (null + AMA) mirror the exact,
+  // production-proven top-level embedded-filter shape of countPersonalUncategorizedBacklog — the fake
+  // harness can't exercise embedded `.is/.in` filters, so this is smoke-verified, not unit-tested.
+  const counts = await Promise.all(
+    (entities ?? []).map(async (entity) => {
+      const base = () =>
+        supabase
+          .from("transactions")
+          .select("id, classification:classifications!inner(entity_id, category_id)", {
+            count: "exact",
+            head: true,
+          })
+          .eq("classification.entity_id", entity.id)
+          .is("plaid_removed_at", null)
+          .gte("transaction_date", period.start)
+          .lt("transaction_date", period.end);
 
-  const counts = (entities ?? []).map((entity) => ({
-    slug: entity.slug,
-    name: entity.name,
-    unclassifiedCount: backlogByEntity.get(entity.id) ?? 0,
-  }));
+      const nullRes = await base().is("classification.category_id", null);
+      let unclassifiedCount = nullRes.count ?? 0;
+      if (cpaReviewIds.length > 0) {
+        const amaRes = await base().in("classification.category_id", cpaReviewIds);
+        unclassifiedCount += amaRes.count ?? 0;
+      }
+      return { slug: entity.slug, name: entity.name, unclassifiedCount };
+    }),
+  );
 
   return counts.sort((a, b) => b.unclassifiedCount - a.unclassifiedCount);
 }

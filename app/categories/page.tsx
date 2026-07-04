@@ -29,14 +29,22 @@ export default async function CategoriesPage({ searchParams }: PageProps) {
   const activeSlug = entity && entities.some((e) => e.slug === entity) ? entity : (entities[0]?.slug ?? "personal");
   const activeEntity = entities.find((e) => e.slug === activeSlug);
 
-  const sb = (await createClient()) as unknown as SupabaseClient;
-  const { data, error } = await sb
-    .from("categories")
-    .select("id, full_path, kind")
-    .eq("entity_id", activeEntity?.id ?? "")
-    .eq("is_active", true)
-    .order("full_path");
-  const cats = (data ?? []) as { id: string; full_path: string; kind: CategoryKind | null }[];
+  // A5: under a stale/empty session (authenticated-only RLS) getClassifiableEntities() returns [],
+  // so activeEntity is undefined. Guard before querying — `.eq("entity_id", "")` emits `entity_id=eq.`
+  // → a live PostgREST 400. Render the empty state instead of firing a doomed request.
+  let cats: { id: string; full_path: string; kind: CategoryKind | null }[] = [];
+  let error: { message: string } | null = null;
+  if (activeEntity) {
+    const sb = (await createClient()) as unknown as SupabaseClient;
+    const res = await sb
+      .from("categories")
+      .select("id, full_path, kind")
+      .eq("entity_id", activeEntity.id)
+      .eq("is_active", true)
+      .order("full_path");
+    cats = (res.data ?? []) as { id: string; full_path: string; kind: CategoryKind | null }[];
+    error = res.error;
+  }
 
   const byKind = new Map<CategoryKind, { full_path: string; description?: string }[]>();
   for (const c of cats) {

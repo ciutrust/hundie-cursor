@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { paginateAll } from "@/lib/supabase/paginate";
@@ -48,9 +49,9 @@ const CLASSIFIABLE_SLUGS = ["gbsl", "keller", "personal", "acaa-austin", "pfluge
 
 /** Pending/approved proposal counts per entity, for the entity tabs. Uses server-side head counts
  *  (count:exact, head:true) so there is no 1000-row PostgREST cap. */
-export async function getProposalEntityCounts(): Promise<
+export const getProposalEntityCounts = cache(async (): Promise<
   Record<string, { pending: number; approved: number }>
-> {
+> => {
   const db = await proposalsTable();
   const out: Record<string, { pending: number; approved: number }> = {};
   await Promise.all(
@@ -71,7 +72,7 @@ export async function getProposalEntityCounts(): Promise<
     }),
   );
   return out;
-}
+});
 
 /** All actionable (pending+approved) proposals for one entity, with transaction details. */
 export async function getProposalsForEntity(entitySlug: string): Promise<Proposal[]> {

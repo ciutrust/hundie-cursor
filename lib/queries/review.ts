@@ -12,19 +12,13 @@ import { getAiPreclassifiedCount } from "@/lib/queries/ai-suggestions";
 import { fetchPeriodTransactions } from "@/lib/queries/fetch-period-transactions";
 import { fetchOrphanCountsByEntityMonth, UNASSIGNED_ENTITY_KEY } from "@/lib/queries/orphans";
 import { fetchChangedTransactionIds } from "@/lib/queries/transaction-history";
-import { paginateAll } from "@/lib/supabase/paginate";
 import type { CategoryGroup, EntitySummary, MonthlyCategoryRow, MonthlyEntityRow, ReviewDashboardStats, TransactionWithDetails } from "@/lib/types/database";
 const TRANSACTION_SELECT = `
   id,
-  account_id,
   transaction_date,
-  posted_date,
   amount,
   description,
   vendor,
-  raw_category,
-  import_hash,
-  created_at,
   account:accounts!inner(id, display_name, slug, account_type),
   classification:classifications!inner(
     id,
@@ -158,45 +152,31 @@ export type CategorizationProgress = {
 export async function getCategorizationProgress(): Promise<CategorizationProgress> {
   const supabase = await createClient();
 
-  const [{ count: total }, { count: categorized }, events] = await Promise.all([
+  // C8: grouped HEAD counts instead of streaming the entire (unbounded, append-only) suggestion_events
+  // table on every /review load. Each predicate mirrors the old JS counter exactly.
+  const DETERMINISTIC = ["qb_training", "confirmed_history", "blended", "amount_match"];
+  const [
+    { count: total },
+    { count: categorized },
+    { count: aiAcc },
+    { count: aiRej },
+    { count: detAcc },
+  ] = await Promise.all([
     supabase.from("classifications").select("id", { count: "exact", head: true }),
-    supabase
-      .from("classifications")
-      .select("id", { count: "exact", head: true })
-      .not("category_id", "is", null),
-    // OPT-02: paginate the suggestion_events scan so it isn't silently truncated at 1000.
-    paginateAll<{ event_type: string | null; suggestion_source: string | null }>(
-      async (from, pageSize) => {
-        const { data, error } = await supabase
-          .from("suggestion_events")
-          .select("event_type, suggestion_source")
-          .order("id", { ascending: true })
-          .range(from, from + pageSize - 1);
-        return { data, error };
-      },
-    ),
+    supabase.from("classifications").select("id", { count: "exact", head: true }).not("category_id", "is", null),
+    supabase.from("suggestion_events").select("id", { count: "exact", head: true }).eq("suggestion_source", "ai_llm").eq("event_type", "accept"),
+    supabase.from("suggestion_events").select("id", { count: "exact", head: true }).eq("suggestion_source", "ai_llm").eq("event_type", "reject"),
+    supabase.from("suggestion_events").select("id", { count: "exact", head: true }).eq("event_type", "accept").in("suggestion_source", DETERMINISTIC),
   ]);
 
-  const rows = events;
-  const DETERMINISTIC = new Set(["qb_training", "confirmed_history", "blended", "amount_match"]);
-  let aiAccepted = 0;
-  let aiRejected = 0;
-  let deterministicAccepted = 0;
-  for (const event of rows) {
-    if (event.suggestion_source === "ai_llm") {
-      if (event.event_type === "accept") aiAccepted += 1;
-      else if (event.event_type === "reject") aiRejected += 1;
-    } else if (event.event_type === "accept" && DETERMINISTIC.has(event.suggestion_source ?? "")) {
-      deterministicAccepted += 1;
-    }
-  }
-
+  const aiAccepted = aiAcc ?? 0;
+  const aiRejected = aiRej ?? 0;
   return {
     total: total ?? 0,
     categorized: categorized ?? 0,
     aiAccepted,
     aiAcceptRate: aiAccepted + aiRejected > 0 ? aiAccepted / (aiAccepted + aiRejected) : null,
-    deterministicAccepted,
+    deterministicAccepted: detAcc ?? 0,
   };
 }
 

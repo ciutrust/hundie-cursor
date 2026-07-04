@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -40,7 +40,9 @@ export function AiReviewPanel({ transactions, entities, categoriesByEntity }: Ai
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [askSelectedIds, setAskSelectedIds] = useState<Set<string>>(() => new Set());
   // Which transactions get the assignment when you click Assign on a group. Default: all.
-  const [assignSelectedIds, setAssignSelectedIds] = useState<Set<string>>(() => new Set());
+  // C11: track UNSELECTED ids (default: everything selected). Inverting the Set means an RSC refresh
+  // no longer wipes the operator's deliberate unchecks (ProposalsPanel uses this same pattern).
+  const [assignUnselectedIds, setAssignUnselectedIds] = useState<Set<string>>(() => new Set());
   // Per-group entity/category overrides (undefined = use the AI-derived default).
   const [assignEntity, setAssignEntity] = useState<Record<string, string>>({});
   const [assignCategory, setAssignCategory] = useState<Record<string, string | null>>({});
@@ -89,11 +91,6 @@ export function AiReviewPanel({ transactions, entities, categoriesByEntity }: Ai
   const withAiCount = transactions.filter((tx) => tx.ai_suggestion).length;
   const askSelectedCount = askSelectedIds.size;
 
-  // Default: every backlog transaction is selected for assignment.
-  useEffect(() => {
-    setAssignSelectedIds(new Set(transactions.map((tx) => tx.id)));
-  }, [transactions]);
-
   function toggleGroupExpand(key: string) {
     setExpandedGroups((current) => {
       const next = new Set(current);
@@ -133,7 +130,8 @@ export function AiReviewPanel({ transactions, entities, categoriesByEntity }: Ai
   }
 
   function toggleAssignSelection(id: string) {
-    setAssignSelectedIds((current) => {
+    // toggling an id's selection = toggling its membership in the UNSELECTED set.
+    setAssignUnselectedIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -142,22 +140,22 @@ export function AiReviewPanel({ transactions, entities, categoriesByEntity }: Ai
   }
 
   function setGroupAssignSelection(group: VendorGroup, checked: boolean) {
-    setAssignSelectedIds((current) => {
+    setAssignUnselectedIds((current) => {
       const next = new Set(current);
       for (const tx of group.transactions) {
-        if (checked) next.add(tx.id);
-        else next.delete(tx.id);
+        if (checked) next.delete(tx.id); // select → remove from unselected
+        else next.add(tx.id); // deselect → add to unselected
       }
       return next;
     });
   }
 
   function isAssignGroupFullySelected(group: VendorGroup) {
-    return group.transactions.every((tx) => assignSelectedIds.has(tx.id));
+    return group.transactions.every((tx) => !assignUnselectedIds.has(tx.id));
   }
 
   function isAssignGroupPartiallySelected(group: VendorGroup) {
-    const n = group.transactions.filter((tx) => assignSelectedIds.has(tx.id)).length;
+    const n = group.transactions.filter((tx) => !assignUnselectedIds.has(tx.id)).length;
     return n > 0 && n < group.transactions.length;
   }
 
@@ -202,7 +200,7 @@ export function AiReviewPanel({ transactions, entities, categoriesByEntity }: Ai
       return;
     }
     const categoryId = currentCategoryId(group);
-    const selected = group.transactions.filter((tx) => assignSelectedIds.has(tx.id));
+    const selected = group.transactions.filter((tx) => !assignUnselectedIds.has(tx.id));
     if (selected.length === 0) {
       setError(`No transactions selected in ${group.label}`);
       return;
@@ -410,7 +408,7 @@ export function AiReviewPanel({ transactions, entities, categoriesByEntity }: Ai
             const entitySlug = currentEntitySlug(group);
             const categoryId = currentCategoryId(group);
             const entityCategories = categoriesByEntity[entitySlug] ?? [];
-            const selectedCount = group.transactions.filter((tx) => assignSelectedIds.has(tx.id)).length;
+            const selectedCount = group.transactions.filter((tx) => !assignUnselectedIds.has(tx.id)).length;
 
             return (
               <div key={group.vendorKey} className="rounded-lg border border-border bg-card">
@@ -516,7 +514,7 @@ export function AiReviewPanel({ transactions, entities, categoriesByEntity }: Ai
                           type="checkbox"
                           className="mt-0.5 h-4 w-4 rounded border-border accent-violet-500"
                           title="Include this row in Assign"
-                          checked={assignSelectedIds.has(tx.id)}
+                          checked={!assignUnselectedIds.has(tx.id)}
                           onChange={() => toggleAssignSelection(tx.id)}
                         />
                         <div className="min-w-0 flex-1">

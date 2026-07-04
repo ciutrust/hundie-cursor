@@ -9,6 +9,7 @@ import {
 } from "@/lib/ai/vendor-group-classify";
 import type { BacklogTransaction } from "@/lib/ai/vendor-groups";
 import { logSuggestionEvent, type SuggestionOutcome } from "@/lib/actions/suggestion-events";
+import { chunk } from "@/lib/supabase/chunk";
 import { requireUser } from "@/lib/auth/require-user";
 import {
   getEntityChartsForAi,
@@ -186,18 +187,24 @@ export async function requestAiSuggestions(
     // leaving the operator with zero; and staling by prior-id can't accidentally hit the new rows.
     if (rows.length > 0) {
       const staleTxIds = transactions.map((tx) => tx.id);
-      const { data: priorRows } = await supabase
-        .from("ai_suggestions")
-        .select("id")
-        .in("transaction_id", staleTxIds)
-        .eq("is_current", true);
-      const priorIds = (priorRows ?? []).map((r) => r.id as string);
+      // A4: chunk the prior-suggestion lookup — one AI batch's vendor groups can carry >420 txn ids,
+      // and `.in()` rides the request URL.
+      const priorIds: string[] = [];
+      for (const idsChunk of chunk(staleTxIds, 200)) {
+        const { data: priorRows } = await supabase
+          .from("ai_suggestions")
+          .select("id")
+          .in("transaction_id", idsChunk)
+          .eq("is_current", true);
+        for (const r of priorRows ?? []) priorIds.push(r.id as string);
+      }
 
       const { error } = await supabase.from("ai_suggestions").insert(rows);
       if (error) return { error: error.message };
 
-      if (priorIds.length > 0) {
-        await supabase.from("ai_suggestions").update({ is_current: false }).in("id", priorIds);
+      // A4: chunk the stale-mark write too.
+      for (const idsChunk of chunk(priorIds, 200)) {
+        await supabase.from("ai_suggestions").update({ is_current: false }).in("id", idsChunk);
       }
     }
 
@@ -298,11 +305,12 @@ export async function acceptAiSuggestions(
     await logSuggestionEvent(outcome, createdBy);
   }
 
-  if (acceptedTxIds.length > 0) {
+  // A4: chunk the accepted stale-mark — a large select-all accept can exceed ~420 txn ids.
+  for (const idsChunk of chunk(acceptedTxIds, 200)) {
     await supabase
       .from("ai_suggestions")
       .update({ is_current: false })
-      .in("transaction_id", acceptedTxIds)
+      .in("transaction_id", idsChunk)
       .eq("is_current", true);
   }
 

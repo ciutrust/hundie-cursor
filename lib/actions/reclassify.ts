@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { logSuggestionEvent, type SuggestionOutcome } from "@/lib/actions/suggestion-events";
+import { chunk } from "@/lib/supabase/chunk";
 import { createClient } from "@/lib/supabase/server";
 
 export type ReclassifyInput = {
@@ -103,18 +104,23 @@ export async function bulkReclassifyTransactions(input: BulkReclassifyInput) {
     }
   }
 
-  const { error } = await supabase
-    .from("classifications")
-    .update({
-      entity_id: input.entityId,
-      category_id: input.categoryId,
-      classified_by: user.email ?? user.id,
-      classified_at: new Date().toISOString(),
-    })
-    .in("id", input.classificationIds);
+  // A2: chunk the id list — select-all / find-similar can exceed ~420 ids, and `.in()` on a PATCH
+  // rides the URL, so an unchunked bulk reclassify would 400 and save nothing.
+  const classifiedAt = new Date().toISOString();
+  for (const ids of chunk(input.classificationIds, 200)) {
+    const { error } = await supabase
+      .from("classifications")
+      .update({
+        entity_id: input.entityId,
+        category_id: input.categoryId,
+        classified_by: user.email ?? user.id,
+        classified_at: classifiedAt,
+      })
+      .in("id", ids);
 
-  if (error) {
-    return { error: error.message };
+    if (error) {
+      return { error: error.message };
+    }
   }
 
   if (input.suggestionOutcome) {

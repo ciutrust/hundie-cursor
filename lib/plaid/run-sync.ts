@@ -7,6 +7,7 @@ import {
   type PlaidDropSummary,
 } from "@/lib/plaid/ledger-filter";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
+import { chunk } from "@/lib/supabase/chunk";
 // The proven CSV write path (dedupe via import_hash, entity routing, classification upsert).
 // Plain JS — reused verbatim so Plaid is "just another import source".
 import {
@@ -167,15 +168,21 @@ export async function stampRemovedTransactions(
   nowIso: string,
 ): Promise<number> {
   if (accountIds.length === 0 || removedExternalIds.length === 0) return 0;
-  const { data, error } = await admin
-    .from("transactions")
-    .update({ plaid_removed_at: nowIso })
-    .in("account_id", accountIds)
-    .in("external_id", removedExternalIds)
-    .is("plaid_removed_at", null)
-    .select("id");
-  if (error) throw new Error(`Failed to stamp removed transactions: ${error.message}`);
-  return (data ?? []).length;
+  // A7: chunk removedExternalIds — both `.in()` filters ride the URL on PATCH, so a large removal
+  // event would overflow the gateway and fail the whole sync. accountIds is one connection's accounts.
+  let stamped = 0;
+  for (const idsChunk of chunk(removedExternalIds, 200)) {
+    const { data, error } = await admin
+      .from("transactions")
+      .update({ plaid_removed_at: nowIso })
+      .in("account_id", accountIds)
+      .in("external_id", idsChunk)
+      .is("plaid_removed_at", null)
+      .select("id");
+    if (error) throw new Error(`Failed to stamp removed transactions: ${error.message}`);
+    stamped += (data ?? []).length;
+  }
+  return stamped;
 }
 
 /**
