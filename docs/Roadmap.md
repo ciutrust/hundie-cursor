@@ -92,4 +92,5 @@ Several Phase-4 tables already exist in the DB (migrations applied) but have **n
 - **Jun 2026:** Schema, parsers, initial backfill, Phase 1 UI shipped
 - **Jun 2026:** Phase 2 suggestions + Phase 3 learning loop, category charts, amount-aware rules
 - **Now:** Month/Tax close readiness views, Mortgage/HELOC categories, AI-Review inline assign + override, find-similar bulk categorize, dashboard speedup; Alex classifies Jan–Jun backlog; reports polish
+- **Jul 2026 (review remediations, shipped):** Track 1 correctness C4–C21 (PR #10); Track 2/3 security + tooling S2–S12/T4–T9 + missing categories (PR #11); performance review — the bulk-`.in()` URL bug, silent 1000-row commit cap, live 400/406, sidebar/render costs, DDL indexes (PR #12). See [CHANGELOG.md](./CHANGELOG.md).
 - **Later:** Claudia, Keller QBO, banks, QBO API

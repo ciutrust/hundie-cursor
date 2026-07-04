@@ -99,12 +99,14 @@ SQL migrations live in `supabase/migrations/`. Apply with Supabase CLI (`supabas
 | `20260701120000_mortgage_heloc_payment_categories` | Counted `Mortgage payment` + `HELOC payment` on Pflugerville, Austin ACAA, Personal |
 | `20260701130000_perf_indexes` | Indexes on `transactions(transaction_date)` + `classifications(entity_id, category_id)` |
 
-Later migrations (Stage-2 through the 2026-07-01 review remediation, `20260702*`–`20260709*`) live in `supabase/migrations/` and were applied to the remote via Supabase MCP `apply_migration`. The two shipped by the Track-2/3 pass:
+Later migrations (Stage-2 through the 2026-07-02 perf review, `20260702*`–`20260710*`) live in `supabase/migrations/` and were applied to the remote via Supabase MCP `apply_migration`. The remediation-pass migrations:
 
 | Migration | Description |
 |-----------|-------------|
+| `20260706120000`–`20260706150000` (4) | Categories: Job W2 Expenses, Income tax — federal (prior year), Keller Phone & Internet, Keller CC payment |
 | `20260709120000_harden_audit_triggers` | **Security (S2/S8):** `changed_by` from JWT identity + `revoke execute` on both audit trigger fns |
 | `20260709121000_fk_covering_indexes` | **Perf (T6):** covering indexes for FKs on the active tables |
+| `20260710120000_perf_indexes` | **Perf (D1/D2/D4):** proposals `(entity_slug,status,vendor_key,id)` composite (drop mismatched entity_id-keyed); `pg_trgm` GIN indexes for ILIKE scans; drop dead small-table indexes |
 
 ## Card CSV import
 

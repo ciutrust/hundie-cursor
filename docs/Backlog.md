@@ -81,6 +81,34 @@ AI Review override loop, find-similar, mortgage/HELOC categories, dashboard perf
 
 ---
 
+## Done — Security & tooling + categories (2026-07-03)
+
+From [REVIEW-2026-07-01.md](REVIEW-2026-07-01.md) Track 2 (S2–S12) + Track 3 (T4–T9), PR #11 (`f6bd029`).
+
+- [x] **Audit-trigger hardening** — `changed_by` from JWT identity + revoke-execute (S2/S8, migration `20260709120000`)
+- [x] **Access-control** — getConnections auth (S3), acceptAiSuggestions entity guard (S4), `/categories` auth (S5), Plaid UUID validation (S12)
+- [x] **Plaid disconnect keeps the row on a failed revoke (S7); decryptSecret length guard (S10)**
+- [x] **AI-run resilience** — timeout/retry, per-batch persist, insert-before-stale (T4); first `lib/ai` tests (T5)
+- [x] **FK covering indexes (T6, `20260709121000`); removed prod-SQL dot-scripts + MCP-SDK dep (T7); deleted dead preclassify.ts (T8)**
+- [x] **Missing categories** — Job W2 Expenses, Income tax — federal (prior year), Keller Phone & Internet, Keller CC payment (`20260706120000`–`150000`)
+- [ ] **Operator (dashboard-only):** enable HIBP leaked-password protection (S9); rate-limit / Vercel WAF (S11); `aal2` write policies after MFA enrollment (S2); confirm Anthropic retention (S6); keyFingerprint HMAC (S10) — see [SUPABASE.md](SUPABASE.md)
+
+---
+
+## Done — Performance review (2026-07-04)
+
+From [PERF-REVIEW-2026-07-02.md](PERF-REVIEW-2026-07-02.md), PR #12 (`082fdf4`). Perf verified by tests + build + a 400/406 smoke check (not live latency).
+
+- [x] **The bulk-`.in()` URL bug** — chunk all URL-side `.in()` writes at 200 (`lib/supabase/chunk.ts`); "Approve all" over 2,000+ proposals no longer 400s (A1–A4, A7)
+- [x] **Silent 1000-row commit cap** — `commitApprovedProposals` paginates its read (B1)
+- [x] **Live 400/406** — `/categories` guard (A5), `.maybeSingle()` (A6), order tiebreaker (B3), throw-on-error (B4)
+- [x] **Render cost** — dropped redundant `router.refresh()` (C2), trimmed RSC select (C10), fixed AI-panel selection wipe (C11), structured error logging (E1)
+- [x] **Query shape** — sidebar per-entity HEAD counts (C1), cached proposal counts (C5), grouped categorization counts (C8)
+- [x] **DDL** — proposals composite index + pg_trgm GINs + drop dead indexes (D1/D2/D4, `20260710120000`)
+- [x] **Config** — loading.tsx skeletons ×4; dropped dead `date-fns` (E2)
+
+---
+
 ## Now
 
 - [ ] Alex classifies Jan–Jun backlog (operator work)
@@ -149,7 +177,8 @@ capital contribution / owner funding flow — kept OUT of the P&L. Surface in a 
 
 ## Icebox
 
-- [ ] **Effects cleanup (T9, Review 2026-07-01)** — resolve the 10 `react-hooks/set-state-in-effect` warnings (surfaced as warnings, not gate-blocking; a dedicated effects pass without risking working UI). Current count by file: `components/review/transaction-list.tsx` (4 — L122, L184, L602, L811), `components/layout/app-shell.tsx` (2 — L159, L179), and `app/settings/security/mfa-setup.tsx`, `components/review/ai-review-panel.tsx`, `components/review/filter-multi-select.tsx`, `components/theme/theme-provider.tsx` (1 each).
+- [ ] **Effects cleanup (T9, Review 2026-07-01)** — resolve the remaining **9** `react-hooks/set-state-in-effect` warnings (surfaced as warnings, not gate-blocking; a dedicated effects pass without risking working UI). In `transaction-list.tsx`, `app-shell.tsx`, `mfa-setup.tsx`, `filter-multi-select.tsx`, `theme-provider.tsx`. (The AI-panel one was removed by the perf review's C11.)
+- [ ] **Deferred perf items (PERF-REVIEW-2026-07-02)** — from the overnight run; need live/visual verification the fake harness can't provide: **C3** (hoist the 50× `suggestion_events` fetch out of the vendor loop + content-hash effect key), **C7** (push the unclassified backlog predicate into SQL via `.or` on the embedded classification), **C6** (middleware `getClaims()` + lazy AAL — auth-sensitive), **C9** (virtualize the 2,000-row proposals/AI panels + shared category picker), **OPT-01** (regenerate `database.generated.ts` — 581-line file, format-cascade risk; the live types include `classification_proposals` + `categories.kind`), **OPT-10** (split the 774-line `review.ts`).
 - [ ] QuickBooks write-back
 - [ ] Transaction splits — the splits-writer PR must add the sum-to-parent invariant + rollup exclusion + parity test (C18, deferred; see the note in `supabase/migrations/20260705122000_transaction_splits.sql`)
 - [ ] Full intercompany automation

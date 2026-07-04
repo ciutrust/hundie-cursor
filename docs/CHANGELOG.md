@@ -4,6 +4,49 @@ All notable changes to the Hundie project. Format based on [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### 2026-07-02 performance review — remediation shipped 2026-07-04 (PR #12, merge `082fdf4`)
+
+Closes the open findings from [PERF-REVIEW-2026-07-02.md](PERF-REVIEW-2026-07-02.md) in six batches. Perf verified by tests (415 green) + Vercel build + a `400`/`406` smoke check — not by live latency.
+
+**Fixed**
+
+- **"Approve all" / bulk actions no longer 400 at 1000+ rows (A1–A4, A7).** supabase-js puts `.in()` filters in the request URL on PATCH/DELETE, so a large id list overflowed the gateway (~420 ids). New `lib/supabase/chunk.ts` chunks every URL-side `.in()` at 200 — proposals approve/commit, bulk reclassify, AI stale-mark/accept, Plaid removal-stamping.
+- **Silent 1000-row commit cap (B1).** `commitApprovedProposals` reads approved proposals via `paginateAll` + `.order("id")` (was an unpaginated select that committed only the first 1,000 and reported success).
+- **Live `400` on `/categories` (A5).** Guards `if (activeEntity)` before querying, so an empty session no longer emits `entity_id=eq.` → PostgREST 400.
+- **Live `406` on the AI badge (A6).** `getPersonalEntityId` uses `.maybeSingle()`.
+- **Unstable paging (B3)** — `listCurrentAiSuggestionTransactionIds` gained an `.order("id")` tiebreaker. **Swallowed AMA-backlog errors (B4)** — `getCpaReviewCategoryIdSet` throws on error instead of coercing to an empty set.
+
+**Changed**
+
+- **Halved per-classify cost (C2).** Dropped the redundant `router.refresh()` after classify/bulk actions — the action's `revalidatePath` already re-renders the RSC.
+- **Sidebar no longer scans the full YTD ledger every render (C1).** `getSidebarEntityNav` uses per-entity HEAD counts; proposal counts are cached (C5) and grouped `suggestion_events` counts (C8) replace the full-table stream.
+- **Smaller RSC payload (C10)** — trimmed unused columns from the review select. **AI-panel selection (C11)** — inverted to an "unselected" set so a refresh no longer wipes your unchecks. **Structured error logging (E1)** — new `lib/supabase/errors.ts` (fixes the ×463 `{ message: '' }` sidebar logs).
+
+**Added**
+
+- **Perf indexes (D1/D2/D4).** Migration `20260710120000_perf_indexes`: `classification_proposals(entity_slug, status, vendor_key, id)` composite (drop the mismatched entity_id-keyed ones); `pg_trgm` GIN indexes for the ILIKE suggestion scans; drop dead small-table indexes. *Applied to prod + advisor-verified.*
+- **`loading.tsx` skeletons** on `/categories`, `/month-close`, `/tax-close`, `/settings`; removed the dead `date-fns` dependency (E2).
+
+**Deferred** (need live/visual verification; none is the bug): C3 (suggestion_events hoist + effect key), C6 (middleware `getClaims`), C7 (SQL backlog predicate), C9 (panel virtualization), OPT-01 (regen DB types), OPT-10 (split `review.ts`).
+
+### 2026-07-01 review — Track 2 (security) + Track 3 (tooling) + categories — shipped 2026-07-03 (PR #11, merge `f6bd029`; categories `115b57f`)
+
+Closes S2–S12 + T4–T9 from [REVIEW-2026-07-01.md](REVIEW-2026-07-01.md) (S1 / T1–T3 were already done).
+
+**Fixed / hardened**
+
+- **Audit-trail integrity (S2/S8).** `log_classification_change` + `log_transaction_change` derive `changed_by` from the authenticated JWT email (not the client-settable `classified_by`); `EXECUTE` revoked on both trigger fns. Migration `20260709120000_harden_audit_triggers`.
+- **Defense-in-depth (S3, S5).** `getConnections()` requires an authenticated user; `/categories` added to the auth matcher. **Cross-entity guard (S4)** — `acceptAiSuggestions` enforces category-belongs-to-entity.
+- **Plaid disconnect (S7).** A failed token revoke keeps the connection row (retry) instead of orphaning a live bank authorization. **Crypto (S10)** — `decryptSecret` rejects short payloads. **Plaid routes (S12)** — UUID validation → 400 not 500.
+
+**Changed / Added**
+
+- **AI-run resilience (T4)** — request timeout + retry; a failed batch no longer discards succeeded batches; insert-before-stale. **First `lib/ai` tests (T5); FK covering indexes (T6, migration `20260709121000`).**
+- **Removed the tracked prod-SQL dot-scripts + `@modelcontextprotocol/sdk` dep (T7); deleted dead `preclassify.ts` (T8).**
+- **Missing entity categories (2026-07-03).** Job W2 Expenses (transfer), Income tax — federal (prior year), Keller Phone & Internet, Keller Credit card payment (migrations `20260706120000`–`20260706150000`).
+
+**Operator follow-ups** (dashboard-only, documented in [SUPABASE.md](SUPABASE.md)): enable HIBP leaked-password protection (S9), rate-limiting / Vercel WAF (S11), the `aal2` write-policy tightening (S2, gated on MFA enrollment), confirm Anthropic retention (S6), the S10 fingerprint-HMAC.
+
 ### 2026-07-01 review — Track 1: correctness & architecture (C4–C21) — shipped 2026-07-03 (PR #10, merge `5acabb9`)
 
 Closes the 17 open correctness/architecture findings from [REVIEW-2026-07-01.md](REVIEW-2026-07-01.md), across 6 TDD batches; each adversarially reviewed, and a whole-branch review additionally caught a C4 gap in `getIncomeSummary`.
