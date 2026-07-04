@@ -206,7 +206,7 @@ export function TransactionList({
   function quickClassify(tx: TransactionWithDetails, suggestion: CategorySuggestion) {
     setQuickClassifyingId(tx.id);
     startQuick(async () => {
-      const result = await reclassifyTransaction({
+      await reclassifyTransaction({
         classificationId: tx.classification.id,
         entityId: tx.classification.entity_id,
         categoryId: suggestion.categoryId,
