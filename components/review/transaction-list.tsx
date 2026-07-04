@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,6 +23,7 @@ import { CategorySuggestionChips } from "@/components/review/category-suggestion
 import { TransactionSearchBar } from "@/components/review/transaction-search-bar";
 import { bulkReclassifyTransactions, reclassifyTransaction } from "@/lib/actions/reclassify";
 import { groupUndoRestores, type UndoRestore } from "@/lib/review/undo";
+import { keyToAction, nextCursor } from "@/lib/review/keyboard";
 import type { SuggestionOutcome } from "@/lib/actions/suggestion-events";
 import { getAiCategorySuggestion } from "@/lib/actions/ai-category-suggestion";
 import {
@@ -92,6 +93,9 @@ export function TransactionList({
   // #2: transient one-click Undo after a quick-classify / bulk-assign.
   const [undo, setUndo] = useState<{ label: string; restores: UndoRestore[] } | null>(null);
   const [undoing, startUndo] = useTransition();
+
+  // #7: virtual row cursor for the keyboard flow (j/k). -1 = no row focused.
+  const [focusedIndex, setFocusedIndex] = useState(-1);
 
   useEffect(() => {
     if (!undo) return;
@@ -321,6 +325,64 @@ export function TransactionList({
     }
   }
 
+  // #7: keyboard flow. A single window listener; a ref keeps the handler reading fresh state without
+  // re-binding on every keystroke. The pure keyToAction guards editable targets (no typing hijack).
+  // Latest-ref pattern: refresh the handler after each render (ref access in an effect, never in
+  // render) so the single window listener always sees fresh state without re-binding per keystroke.
+  const keyboardRef = useRef<(event: KeyboardEvent) => void>(() => {});
+  useEffect(() => {
+    keyboardRef.current = (event: KeyboardEvent) => {
+      const action = keyToAction(event.key, event.target as HTMLElement | null);
+      if (action.type === "none") return;
+
+      if (action.type === "clear") {
+        clearSelection();
+        setFocusedIndex(-1);
+        return;
+      }
+      if (action.type === "move") {
+        event.preventDefault();
+        setFocusedIndex((current) => nextCursor(current, action.delta, sortedTransactions.length));
+        return;
+      }
+
+      const tx = sortedTransactions[focusedIndex];
+      if (!tx) return;
+
+      if (action.type === "toggleSelect") {
+        event.preventDefault();
+        toggleOne(tx.id);
+      } else if (action.type === "findSimilar") {
+        event.preventDefault();
+        findSimilar(tx);
+      } else if (action.type === "accept") {
+        const suggestion = !tx.classification.category_id
+          ? (inlineSuggestions[transactionVendorKey(tx)] ?? null)
+          : null;
+        if (suggestion) {
+          event.preventDefault();
+          quickClassify(tx, suggestion);
+        }
+      }
+    };
+  });
+
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => keyboardRef.current(event);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
+
+  // Scroll the focused row into view as the cursor moves (no effect on state → no cascading render).
+  useEffect(() => {
+    if (focusedIndex < 0) return;
+    document.querySelector(`[data-review-index="${focusedIndex}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [focusedIndex]);
+
+  // Clamp at read time so a shrinking list (a row drops off after classify) never highlights a stale row.
+  const activeCursor =
+    focusedIndex >= 0 && focusedIndex < sortedTransactions.length ? focusedIndex : -1;
+
   const undoBanner = undo ? (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 shadow-sm">
       <p className="text-sm">
@@ -453,24 +515,33 @@ export function TransactionList({
         </div>
       </div>
 
+      <p className="hidden text-xs text-muted-foreground sm:block">
+        Keyboard: <span className="font-medium">j</span>/<span className="font-medium">k</span> move ·{" "}
+        <span className="font-medium">Enter</span> accept · <span className="font-medium">x</span>{" "}
+        select · <span className="font-medium">s</span> similar
+      </p>
+
       {filteredTransactions.length === 0 ? (
         <p className="text-sm text-muted-foreground">No transactions match your search.</p>
       ) : (
         <>
 
       <div className="divide-y divide-border rounded-lg border border-border bg-card">
-        {sortedTransactions.map((tx) => {
+        {sortedTransactions.map((tx, index) => {
           const isSelected = selectedIds.has(tx.id);
           const isUnclassified = !tx.classification.category_id;
           const suggestion = isUnclassified ? inlineSuggestions[transactionVendorKey(tx)] ?? null : null;
           const isQuickClassifying = quickClassifyingId === tx.id;
+          const isFocused = index === activeCursor;
 
           return (
             <div
               key={tx.id}
+              data-review-index={index}
               className={cn(
                 "flex flex-col gap-2 px-4 py-3 transition-colors sm:flex-row sm:items-center sm:gap-4",
                 isSelected ? "bg-accent/40" : "hover:bg-muted/30",
+                isFocused && "ring-2 ring-inset ring-primary",
               )}
             >
               <div className="flex min-w-0 flex-1 items-start gap-3">
