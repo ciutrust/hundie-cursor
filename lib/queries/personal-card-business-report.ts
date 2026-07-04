@@ -2,7 +2,7 @@ import type { PeriodRange } from "@/lib/period";
 import { rowsToCsv } from "@/lib/csv";
 import { isBookedOperatingExpense } from "@/lib/category-expense";
 import { createClient } from "@/lib/supabase/server";
-import { paginateAll } from "@/lib/supabase/paginate";
+import { fetchLedgerExpenseLines } from "@/lib/queries/ledger-expense-lines";
 
 /** Personal credit cards only — not checking (transfers are separate). */
 export const PERSONAL_CARD_SLUGS = [
@@ -47,48 +47,29 @@ export async function getPersonalCardBusinessReport(period: PeriodRange): Promis
 
   const personalCardIds = accounts.map((a) => a.id);
 
-  const data = await paginateAll(async (from, pageSize) => {
-    const { data: page, error } = await supabase
-      .from("transactions")
-      .select(
-        `
-        transaction_date,
-        description,
-        vendor,
-        amount,
-        account_id,
-        account:accounts!inner(display_name, slug),
-        classification:classifications!inner(
-          notes,
-          entity_id,
-          category:categories(full_path)
-        )
-      `,
-      )
-      .in("account_id", personalCardIds)
-      .eq("classification.entity_id", gbsl.id)
-      .gte("transaction_date", start)
-      .lt("transaction_date", end)
-      .gt("amount", 0)
-      // C4: exclude Plaid-reversed charges so the personal-card business report doesn't overstate.
-      .is("plaid_removed_at", null)
-      .order("transaction_date")
-      .order("id")
-      .range(from, from + pageSize - 1);
-
-    return { data: page ?? [], error };
+  // Splits: a personal-card charge split so a portion is GBSL surfaces as a GBSL leg (leg.entity=gbsl,
+  // parent account ∈ personal cards). The materializer handles both whole rows and legs; legs mirror
+  // the parent sign, so the business portion of a positive charge is positive (kept by amount > 0).
+  const lines = await fetchLedgerExpenseLines({
+    supabase,
+    start,
+    end,
+    entityId: gbsl.id,
+    accountIds: personalCardIds,
   });
 
-  const all: PersonalCardBusinessRow[] = data.map((row) => ({
-    transaction_date: row.transaction_date,
-    account_name: row.account.display_name,
-    account_slug: row.account.slug,
-    category_name: row.classification.category?.full_path ?? "Uncategorized",
-    description: row.description,
-    vendor: row.vendor,
-    amount: Number(row.amount),
-    notes: row.classification.notes,
-  }));
+  const all: PersonalCardBusinessRow[] = lines
+    .filter((line) => line.amount > 0)
+    .map((line) => ({
+      transaction_date: line.transaction_date,
+      account_name: line.account?.display_name ?? "",
+      account_slug: line.account?.slug ?? "",
+      category_name: line.classification.category?.full_path ?? "Uncategorized",
+      description: line.description,
+      vendor: line.vendor,
+      amount: line.amount,
+      notes: line.classification.notes,
+    }));
 
   // BUG-04/QA-01: shared predicate excludes AMA from grandTotal. Rows are pre-filtered to amount>0
   // (line above), so signed == positive here — netting refunds would need removing .gt("amount", 0).

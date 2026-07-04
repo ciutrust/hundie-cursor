@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import { CategorySearchSelect } from "@/components/review/category-search-select";
 import { CategorySuggestionChips } from "@/components/review/category-suggestion-chips";
+import { SplitTransactionDialog } from "@/components/review/split-transaction-dialog";
 import { TransactionSearchBar } from "@/components/review/transaction-search-bar";
 import { bulkReclassifyTransactions, reclassifyTransaction } from "@/lib/actions/reclassify";
 import { groupUndoRestores, type UndoRestore } from "@/lib/review/undo";
@@ -80,6 +81,7 @@ export function TransactionList({
 }: TransactionListProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailTransaction, setDetailTransaction] = useState<TransactionWithDetails | null>(null);
+  const [splitTarget, setSplitTarget] = useState<TransactionWithDetails | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [filters, setFilters] = useState<TransactionFilterState>(EMPTY_TRANSACTION_FILTERS);
 
@@ -529,7 +531,8 @@ export function TransactionList({
       <div className="divide-y divide-border rounded-lg border border-border bg-card">
         {sortedTransactions.map((tx, index) => {
           const isSelected = selectedIds.has(tx.id);
-          const isUnclassified = !tx.classification.category_id;
+          const isSplit = (tx.splits?.length ?? 0) >= 2;
+          const isUnclassified = !isSplit && !tx.classification.category_id;
           const suggestion = isUnclassified ? inlineSuggestions[transactionVendorKey(tx)] ?? null : null;
           const isQuickClassifying = quickClassifyingId === tx.id;
           const isFocused = index === activeCursor;
@@ -554,11 +557,19 @@ export function TransactionList({
                 />
                 <button
                   type="button"
-                  onClick={() => setDetailTransaction(tx)}
+                  onClick={() => (isSplit ? setSplitTarget(tx) : setDetailTransaction(tx))}
                   className="min-w-0 flex-1 text-left"
                 >
                   <p className="flex items-center gap-2 font-medium">
                     <span className="truncate">{tx.description}</span>
+                    {isSplit ? (
+                      <span
+                        className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400"
+                        title="Split into multiple legs — click to edit"
+                      >
+                        Split
+                      </span>
+                    ) : null}
                     {aiSuggestionTxIds?.has(tx.id) ? (
                       <span
                         className="shrink-0 rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400"
@@ -570,9 +581,13 @@ export function TransactionList({
                   </p>
                   <p className="mt-0.5 truncate text-sm text-muted-foreground">
                     {tx.transaction_date} · {tx.account.display_name}
-                    {tx.classification.category
-                      ? ` · ${tx.classification.category.full_path}`
-                      : " · Unclassified"}
+                    {isSplit
+                      ? ` · ${tx.splits!
+                          .map((s) => `${shortCategoryName(s.category_full_path ?? "?")} ${formatCurrency(s.amount)}`)
+                          .join("  +  ")}`
+                      : tx.classification.category
+                        ? ` · ${tx.classification.category.full_path}`
+                        : " · Unclassified"}
                   </p>
                 </button>
               </div>
@@ -599,14 +614,35 @@ export function TransactionList({
                     )}
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => findSimilar(tx)}
-                  title="Select all transactions from this vendor for bulk assign"
-                  className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                >
-                  Similar
-                </button>
+                {isSplit ? (
+                  <button
+                    type="button"
+                    onClick={() => setSplitTarget(tx)}
+                    title="Edit this split"
+                    className="shrink-0 rounded-md border border-amber-500/40 px-2 py-1 text-xs text-amber-700 transition-colors hover:bg-amber-500/10 dark:text-amber-400"
+                  >
+                    Edit split
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => findSimilar(tx)}
+                      title="Select all transactions from this vendor for bulk assign"
+                      className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    >
+                      Similar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSplitTarget(tx)}
+                      title="Split this charge across categories / entities"
+                      className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    >
+                      Split
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           );
@@ -640,6 +676,16 @@ export function TransactionList({
           month={month}
           entitySlug={entitySlug}
           onClose={() => setDetailTransaction(null)}
+        />
+      ) : null}
+
+      {splitTarget ? (
+        <SplitTransactionDialog
+          transaction={splitTarget}
+          entities={entities}
+          categoriesByEntity={categoriesByEntity}
+          entitySlug={entitySlug}
+          onClose={() => setSplitTarget(null)}
         />
       ) : null}
 

@@ -2,33 +2,7 @@ import type { PeriodRange } from "@/lib/period";
 import { rowsToCsv } from "@/lib/csv";
 import { isBookedOperatingExpense } from "@/lib/category-expense";
 import { createClient } from "@/lib/supabase/server";
-import { fetchPeriodTransactions } from "@/lib/queries/fetch-period-transactions";
-
-const REPORT_SELECT = `
-  transaction_date,
-  description,
-  vendor,
-  amount,
-  account:accounts!inner(display_name),
-  classification:classifications!inner(
-    notes,
-    entity:entities!inner(name, slug),
-    category:categories(full_path)
-  )
-`;
-
-type ReportTxRow = {
-  transaction_date: string;
-  description: string;
-  vendor: string | null;
-  amount: number;
-  account: { display_name: string };
-  classification: {
-    notes: string | null;
-    entity: { name: string; slug: string };
-    category: { full_path: string } | null;
-  };
-};
+import { fetchLedgerExpenseLines } from "@/lib/queries/ledger-expense-lines";
 
 export type ReportTransactionRow = {
   transaction_date: string;
@@ -50,35 +24,38 @@ export async function getReportTransactions(
 ): Promise<ReportTransactionRow[]> {
   const supabase = await createClient();
 
-  // OPT-08: same select/filters/ascending order via the shared period fetcher.
-  const rows = await fetchPeriodTransactions<ReportTxRow>({
+  // Splits: each split leg exports as its own CPA row (parent's date/desc/vendor/account + the leg's
+  // entity/category/amount). A split parent's whole line is dropped. The column still sums to the
+  // netted entity total because the legs sum to the parent.
+  const lines = await fetchLedgerExpenseLines({
     supabase,
-    select: REPORT_SELECT,
     start: period.start,
     end: period.end,
     entitySlug,
-    order: "asc",
   });
 
-  return rows.map((row) => {
-    const categoryPath = row.classification.category?.full_path ?? null;
-    // BUG-04/QA-01: book by category kind (AMA + uncategorized excluded); signed expense_amount
-    // so a refund row exports -50, not 0, and the column sums to the netted entity total.
-    const isBooked = isBookedOperatingExpense(categoryPath);
-    return {
-      transaction_date: row.transaction_date,
-      entity_name: row.classification.entity.name,
-      entity_slug: row.classification.entity.slug,
-      account_name: row.account.display_name,
-      description: row.description,
-      vendor: row.vendor,
-      amount: Number(row.amount),
-      category_name: categoryPath ?? "Uncategorized",
-      notes: row.classification.notes,
-      counts_as_expense: isBooked,
-      expense_amount: isBooked ? Number(row.amount) : 0,
-    };
-  });
+  return lines
+    .slice()
+    .sort((a, b) => a.transaction_date.localeCompare(b.transaction_date))
+    .map((line) => {
+      const categoryPath = line.classification.category?.full_path ?? null;
+      // BUG-04/QA-01: book by category kind (AMA + uncategorized excluded); signed expense_amount
+      // so a refund row exports -50, not 0, and the column sums to the netted entity total.
+      const isBooked = isBookedOperatingExpense(categoryPath);
+      return {
+        transaction_date: line.transaction_date,
+        entity_name: line.classification.entity?.name ?? "",
+        entity_slug: line.classification.entity?.slug ?? "",
+        account_name: line.account?.display_name ?? "",
+        description: line.description,
+        vendor: line.vendor,
+        amount: line.amount,
+        category_name: categoryPath ?? "Uncategorized",
+        notes: line.classification.notes,
+        counts_as_expense: isBooked,
+        expense_amount: isBooked ? line.amount : 0,
+      };
+    });
 }
 
 export function reportTransactionsToCsv(rows: ReportTransactionRow[]) {
@@ -118,23 +95,6 @@ export function reportTransactionsToCsv(rows: ReportTransactionRow[]) {
 // transfers); anything still unclassified OR mapped to a category with no tax line lands in a separate
 // "CPA review needed" section so nothing is silently dropped. The DB read stays thin; the grouping is a
 // pure function so the exclusions are unit-tested on a flat fixture.
-
-const TAX_SELECT = `
-  amount,
-  classification:classifications!inner(
-    category_id,
-    entity:entities!inner(slug),
-    category:categories(full_path, tax_form, tax_line)
-  )
-`;
-
-type TaxTxRow = {
-  amount: number;
-  classification: {
-    category_id: string | null;
-    category: { full_path: string; tax_form: string | null; tax_line: string | null } | null;
-  };
-};
 
 export type TaxRollupInput = {
   amount: number;
@@ -244,21 +204,21 @@ export function buildTaxLineRollup(rows: TaxRollupInput[]): TaxLineRollup {
 
 export async function getTaxLineRollup(entitySlug: string, year: number): Promise<TaxLineRollup> {
   const supabase = await createClient();
-  const rows = await fetchPeriodTransactions<TaxTxRow>({
+  // Splits: legs roll up by their own entity + tax line (parent excluded), so the Anita rental-utility
+  // leg of a Personal-card bill lands on the ACAA Schedule E rollup.
+  const lines = await fetchLedgerExpenseLines({
     supabase,
-    select: TAX_SELECT,
     start: `${year}-01-01`,
     end: `${year + 1}-01-01`,
     entitySlug,
-    order: "asc",
   });
 
   return buildTaxLineRollup(
-    rows.map((row) => ({
-      amount: Number(row.amount),
-      categoryPath: row.classification.category?.full_path ?? null,
-      taxForm: row.classification.category?.tax_form ?? null,
-      taxLine: row.classification.category?.tax_line ?? null,
+    lines.map((line) => ({
+      amount: line.amount,
+      categoryPath: line.classification.category?.full_path ?? null,
+      taxForm: line.classification.category?.tax_form ?? null,
+      taxLine: line.classification.category?.tax_line ?? null,
     })),
   );
 }

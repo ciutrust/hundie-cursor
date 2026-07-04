@@ -1,10 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 // getIncomeSummary calls createClient() from "@/lib/supabase/server"; we mock that module so the test
-// drives a purpose-built in-memory client. The income query embeds `classifications(...)` as a nested
-// PostgREST select, which the generic fake-supabase's naive comma-split projection cannot reconstruct,
-// so this client returns pre-shaped IncomeRow objects directly and — crucially — honors the
-// `.is("plaid_removed_at", null)` filter the C4 fix must apply.
+// drives a purpose-built in-memory client. getIncomeSummary now sources rows via
+// fetchLedgerExpenseLines (splits applied), which reads `transactions` (embed `classification(...)`)
+// plus `transaction_splits`. This fake shapes `transactions` rows into that ledger-line embed and
+// honors the `.is("plaid_removed_at", null)` filter the C4 fix must apply; `transaction_splits`
+// returns no legs (these fixtures have no splits).
 
 const mockCreateClient = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({
@@ -38,6 +39,8 @@ function fakeClient(entities: Array<{ id: string; name: string; slug: string; di
       lt: chain,
       order: chain,
       range: chain,
+      eq: chain,
+      in: chain,
       is: (col: string, val: unknown) => {
         filters.push({ col, val });
         return q;
@@ -45,17 +48,45 @@ function fakeClient(entities: Array<{ id: string; name: string; slug: string; di
       then: (resolve: (v: { data: unknown[]; error: null }) => unknown) => {
         const removedFilter = filters.some((f) => f.col === "plaid_removed_at" && f.val === null);
         const surviving = txns.filter((t) => (removedFilter ? t.plaid_removed_at == null : true));
+        // Materializer Fetch A embed shape (classification/category singular, + account/date/desc/vendor).
         const data = surviving.map((t) => ({
           id: t.id,
+          transaction_date: "2026-03-01",
           amount: t.amount,
-          classifications: {
+          description: "seed " + t.id,
+          vendor: null,
+          account: { id: "acc-1", display_name: "Acct", slug: "acct", account_type: "checking" },
+          classification: {
             entity_id: t.entity_id,
             category_id: "cat-" + t.id,
-            categories: { full_path: t.full_path },
+            notes: null,
+            entity: { id: t.entity_id, name: t.entity_id, slug: "gbsl" },
+            category: t.full_path
+              ? { id: "cat-" + t.id, full_path: t.full_path, tax_form: null, tax_line: null }
+              : null,
           },
         }));
         return resolve({ data, error: null });
       },
+    });
+    return q;
+  }
+
+  // Fetch B (transaction_splits) — these fixtures have no legs.
+  function splitsBuilder() {
+    const q: Record<string, unknown> = {};
+    const chain = () => q;
+    Object.assign(q, {
+      select: chain,
+      gte: chain,
+      lt: chain,
+      is: chain,
+      order: chain,
+      range: chain,
+      eq: chain,
+      in: chain,
+      then: (resolve: (v: { data: unknown[]; error: null }) => unknown) =>
+        resolve({ data: [], error: null }),
     });
     return q;
   }
@@ -72,7 +103,11 @@ function fakeClient(entities: Array<{ id: string; name: string; slug: string; di
   }
 
   return {
-    from: (table: string) => (table === "entities" ? entitiesBuilder() : transactionsBuilder()),
+    from: (table: string) => {
+      if (table === "entities") return entitiesBuilder();
+      if (table === "transaction_splits") return splitsBuilder();
+      return transactionsBuilder();
+    },
   };
 }
 

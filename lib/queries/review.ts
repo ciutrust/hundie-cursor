@@ -10,9 +10,12 @@ import { createClient } from "@/lib/supabase/server";
 import type { MonthCloseCell } from "@/lib/month-close";
 import { getAiPreclassifiedCount } from "@/lib/queries/ai-suggestions";
 import { fetchPeriodTransactions } from "@/lib/queries/fetch-period-transactions";
+import { fetchLedgerExpenseLines } from "@/lib/queries/ledger-expense-lines";
 import { fetchOrphanCountsByEntityMonth, UNASSIGNED_ENTITY_KEY } from "@/lib/queries/orphans";
 import { fetchChangedTransactionIds } from "@/lib/queries/transaction-history";
-import type { CategoryGroup, EntitySummary, MonthlyCategoryRow, MonthlyEntityRow, ReviewDashboardStats, TransactionWithDetails } from "@/lib/types/database";
+import type { CategoryGroup, EntitySummary, MonthlyCategoryRow, MonthlyEntityRow, ReviewDashboardStats, TransactionSplitLeg, TransactionWithDetails } from "@/lib/types/database";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { chunk } from "@/lib/supabase/chunk";
 const TRANSACTION_SELECT = `
   id,
   transaction_date,
@@ -33,16 +36,6 @@ const TRANSACTION_SELECT = `
   )
 `;
 
-const SUMMARY_TRANSACTION_SELECT = `
-  id,
-  amount,
-  classification:classifications!inner(
-    entity_id,
-    category_id,
-    category:categories(full_path)
-  )
-`;
-
 type SummaryTransaction = {
   id: string;
   amount: number;
@@ -53,21 +46,26 @@ type SummaryTransaction = {
   };
 };
 
-function fetchPeriodSummaryTransactions(
+async function fetchPeriodSummaryTransactions(
   supabase: Awaited<ReturnType<typeof createClient>>,
   start: string,
   end: string,
   options?: { entityId?: string },
 ): Promise<SummaryTransaction[]> {
-  // OPT-08: same select/filters/ascending order as before, now via the shared fetcher.
-  return fetchPeriodTransactions<SummaryTransaction>({
-    supabase,
-    select: SUMMARY_TRANSACTION_SELECT,
-    start,
-    end,
-    entityId: options?.entityId,
-    order: "asc",
-  });
+  // Splits: source expense lines (split parents replaced by their legs, keyed on each leg's own
+  // entity) so a leg lands in its entity's summary. Mapped down to the summary shape.
+  const lines = await fetchLedgerExpenseLines({ supabase, start, end, entityId: options?.entityId });
+  return lines.map((line) => ({
+    id: line.legId ?? line.id,
+    amount: line.amount,
+    classification: {
+      entity_id: line.classification.entity_id,
+      category_id: line.classification.category_id,
+      category: line.classification.category
+        ? { full_path: line.classification.category.full_path }
+        : null,
+    },
+  }));
 }
 
 function fetchPeriodTransactionDetails(
@@ -77,6 +75,9 @@ function fetchPeriodTransactionDetails(
   options?: { entityId?: string; categoryId?: string },
 ): Promise<TransactionWithDetails[]> {
   // OPT-08: descending order is load-bearing — getEntityTransactions returns this array to the UI.
+  // Splits: the review LIST shows split parents (as "Split" rows so they can be edited), so it opts
+  // OUT of the default split-parent exclusion. Split parents are then hydrated + kept out of the
+  // category-group totals in getEntityTransactions.
   return fetchPeriodTransactions<TransactionWithDetails>({
     supabase,
     select: TRANSACTION_SELECT,
@@ -85,7 +86,53 @@ function fetchPeriodTransactionDetails(
     entityId: options?.entityId,
     categoryId: options?.categoryId,
     order: "desc",
+    excludeSplitParents: false,
   });
+}
+
+/** Attach `splits` (transaction_splits legs) to any split parents in the list, for row rendering. */
+async function hydrateTransactionSplits(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  transactions: TransactionWithDetails[],
+): Promise<void> {
+  const ids = transactions.map((t) => t.id);
+  if (ids.length === 0) return;
+  const db = supabase as unknown as SupabaseClient;
+  const byTx = new Map<string, TransactionSplitLeg[]>();
+  for (const idChunk of chunk(ids, 200)) {
+    const { data, error } = await db
+      .from("transaction_splits")
+      .select(
+        "id, transaction_id, entity_id, category_id, amount, entity:entities(slug, name), category:categories(full_path)",
+      )
+      .in("transaction_id", idChunk);
+    if (error) throw error;
+    for (const row of (data ?? []) as unknown as Array<{
+      id: string;
+      transaction_id: string;
+      entity_id: string;
+      category_id: string | null;
+      amount: number | string;
+      entity: { slug: string; name: string } | null;
+      category: { full_path: string } | null;
+    }>) {
+      const list = byTx.get(row.transaction_id) ?? [];
+      list.push({
+        id: row.id,
+        entity_id: row.entity_id,
+        entity_slug: row.entity?.slug ?? "",
+        entity_name: row.entity?.name ?? "",
+        category_id: row.category_id,
+        category_full_path: row.category?.full_path ?? null,
+        amount: Number(row.amount),
+      });
+      byTx.set(row.transaction_id, list);
+    }
+  }
+  for (const t of transactions) {
+    const legs = byTx.get(t.id);
+    if (legs && legs.length > 0) t.splits = legs;
+  }
 }
 
 function isNullCategory(categoryId: string | null | undefined) {
@@ -325,6 +372,8 @@ export async function getTotalBacklogCount(): Promise<number> {
     .select("id, classification:classifications!inner(category_id)", { count: "exact", head: true })
     // C4: a Plaid-reversed charge is not backlog to clear — exclude it from the count.
     .is("plaid_removed_at", null)
+    // Splits: a split parent is resolved (its legs are all categorized) — not backlog.
+    .is("split_at", null)
     .or(reviewBacklogOrClause(cpaReviewIds));
 
   if (error) throw error;
@@ -354,28 +403,27 @@ function monthFromDate(date: string) {
   return Number(date.slice(5, 7));
 }
 
-const MATRIX_SELECT = `
-  id,
-  amount,
-  transaction_date,
-  classification:classifications!inner(
-    entity_id,
-    category_id,
-    category:categories(id, full_path)
-  )
-`;
-
 async function fetchYearMatrixTransactions(year: number, entityId?: string): Promise<MatrixTransaction[]> {
   const supabase = await createClient();
-  // OPT-08: same select/filters/ascending order over the [year, year+1) window.
-  return fetchPeriodTransactions<MatrixTransaction>({
+  // Splits: source expense lines over [year, year+1) so a split parent is replaced by its legs
+  // (each carrying the parent's date for month bucketing + the leg's entity/category). Mapped to the
+  // matrix shape; leg ids keep rows distinct.
+  const lines = await fetchLedgerExpenseLines({
     supabase,
-    select: MATRIX_SELECT,
     start: `${year}-01-01`,
     end: `${year + 1}-01-01`,
     entityId,
-    order: "asc",
   });
+  return lines.map((line) => ({
+    id: line.legId ?? line.id,
+    amount: line.amount,
+    transaction_date: line.transaction_date,
+    classification: {
+      entity_id: line.classification.entity_id,
+      category_id: line.classification.category_id,
+      category: line.classification.category,
+    },
+  }));
 }
 
 export function buildMonthlyRow(
@@ -620,12 +668,19 @@ export async function getEntityTransactions(
       categoryFilter && categoryFilter !== "unclassified" ? categoryFilter : undefined,
   });
 
+  if (entitySlug === "unclassified") {
+    transactions = await fetchPeriodTransactionDetails(supabase, start, end);
+  }
+
+  // Splits: hydrate legs so split parents render as "Split" rows (and so a split parent is treated as
+  // resolved below — never in the backlog, never counted whole in a category group).
+  await hydrateTransactionSplits(supabase, transactions);
+  const isSplit = (tx: TransactionWithDetails) => (tx.splits?.length ?? 0) >= 2;
+
   if (entitySlug === "unclassified" || categoryFilter === "unclassified") {
-    if (entitySlug === "unclassified") {
-      transactions = await fetchPeriodTransactionDetails(supabase, start, end);
-    }
     transactions = transactions.filter(
       (tx) =>
+        !isSplit(tx) &&
         needsReviewCategory(tx.classification.category_id, cpaReviewIds) &&
         (flow === "inflow" ? Number(tx.amount) < 0 : Number(tx.amount) > 0),
     );
@@ -633,6 +688,8 @@ export async function getEntityTransactions(
   const groupMap = new Map<string, CategoryGroup>();
 
   for (const tx of transactions) {
+    // A split parent is shown as its own "Split" row, not folded into a single category total.
+    if (isSplit(tx)) continue;
     const categoryId = tx.classification.category?.id ?? null;
     const categoryName = isCpaReviewCategory(tx.classification.category?.full_path)
       ? "Ask My Accountant (CPA review)"

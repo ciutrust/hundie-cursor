@@ -87,6 +87,8 @@ function transactionCategoryFilterId(tx: TransactionWithDetails): string {
 }
 
 export function isReviewBacklogTransaction(tx: TransactionWithDetails): boolean {
+  // A split transaction is resolved (its legs are all categorized) — never backlog.
+  if (tx.splits && tx.splits.length >= 2) return false;
   const fullPath = tx.classification.category?.full_path;
   return !fullPath || isCpaReviewCategory(fullPath);
 }
