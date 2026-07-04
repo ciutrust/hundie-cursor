@@ -19,7 +19,7 @@ Phased plan aligned with [PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md).
 | Classification audit history | Done |
 | Next.js monthly review UI | Done |
 | Search, bulk reclassify, category/account filters | Done |
-| Manual intercompany flag | Not started |
+| Manual intercompany flag (±3-day mirror window, C19) | Done |
 
 **Alex can:** run locally → sign in → open a month → see entity totals → search/filter → reclassify single or bulk → totals refresh.
 
@@ -63,6 +63,9 @@ See [RUN.md](../RUN.md) for start instructions.
 | AI Review inline assign + category override (override trains the engine) | Done |
 | Find-similar bulk categorize on review list | Done |
 | Review dashboard performance pass (dedup + parallel queries + indexes) | Done |
+| 2026-07-01 review — Track 1 correctness/architecture hardening (C4–C21) | Done (2026-07-03, PR #10) |
+
+**Hardening:** the 2026-07-01 multi-agent review's Track 1 (17 correctness/architecture findings, C4–C21) shipped 2026-07-03 — reversed-charge exclusion, orphan-aware close, re-link/CSV overlap guards, income-capture parity, proposal-commit correctness, and a `transaction_history` audit trail. Still open: Track 2 (security) + Track 3 (tooling) from that review, and the separate [PERF-REVIEW-2026-07-02.md](./PERF-REVIEW-2026-07-02.md) (74 findings, incl. the bulk-`.in()` URL 400s).
 
 **Plans:** [PHASE3_PLAN.md](./PHASE3_PLAN.md) · [CLASSIFICATION.md](./CLASSIFICATION.md)
 

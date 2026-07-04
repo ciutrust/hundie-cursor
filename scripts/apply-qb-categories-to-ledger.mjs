@@ -134,6 +134,11 @@ function pickBestMatch(card, indexedCandidates, maxDateSlack = 0) {
 
 const args = process.argv.slice(2);
 const dryRun = !args.includes("--apply");
+// Read-only audit: report already-categorized rows that a CONFIDENT QBO match
+// disagrees with. Never writes, even with --apply. Use to find genuine
+// manual-vs-QBO conflicts without risking correct manual work.
+const reportConflicts = args.includes("--report-conflicts");
+const entitySlug = argValue("--entity") ?? "gbsl";
 const fromDate = argValue("--from") ?? "2026-01-01";
 const toDate = argValue("--to") ?? "2026-07-01";
 const accountSlug = argValue("--account");
@@ -154,11 +159,11 @@ const supabase = createClient(url, serviceKey);
 const { data: entity, error: entityError } = await supabase
   .from("entities")
   .select("id")
-  .eq("slug", "gbsl")
+  .eq("slug", entitySlug)
   .single();
 
 if (entityError || !entity) {
-  console.error("GBSL entity not found", entityError?.message);
+  console.error(`Entity not found: ${entitySlug}`, entityError?.message);
   process.exit(1);
 }
 
@@ -195,6 +200,7 @@ async function fetchAllLedgerRows() {
         classification:classifications!inner(
           id,
           category_id,
+          classified_by,
           category:categories(full_path)
         )
       `,
@@ -208,7 +214,8 @@ async function fetchAllLedgerRows() {
 
     if (accountId) {
       query = query.eq("account_id", accountId);
-    } else {
+    } else if (!reportConflicts) {
+      // Conflict audit needs already-categorized rows too; the fill path only wants blanks.
       query = query.is("classification.category_id", null);
     }
 
@@ -293,12 +300,88 @@ function consumeMatch(card) {
 const categorizedRows = cardRows.filter((row) => row.classification.category_id != null);
 const uncategorizedRows = cardRows.filter((row) => row.classification.category_id == null);
 
+if (reportConflicts) {
+  // Non-consuming match: find the single best confident QBO line per row, ignoring
+  // reservation, so a real disagreement is never hidden by another row's claim.
+  function findBestMatchNoConsume(card) {
+    const candidates = [];
+    const seen = new Set();
+    for (const key of dateAmountKeys(card, dateSlackDays)) {
+      for (const item of qbByDateAmount.get(key) ?? []) {
+        if (seen.has(item.index)) continue;
+        seen.add(item.index);
+        candidates.push(item);
+      }
+    }
+    return pickBestMatch(card, candidates, dateSlackDays);
+  }
+
+  // A match scores 10 for exact date+amount alone; each shared vendor word adds 4.
+  // Require >= 14 so a coincidental same-day/same-amount collision (zero word overlap)
+  // is not reported as a real conflict.
+  const WORD_MATCH_THRESHOLD = 14;
+  const conflicts = [];
+  // How many auto-filled (qb_backfill) rows rest only on a date+amount coincidence
+  // with no vendor-word agreement — i.e., possibly the wrong QBO category.
+  let qbBackfillWeak = 0;
+  const weakFills = [];
+  for (const card of categorizedRows) {
+    const best = findBestMatchNoConsume(card);
+    if (!best?.qb.category_id) continue;
+    if (best.score < WORD_MATCH_THRESHOLD) {
+      if (card.classification.classified_by === "qb_backfill") {
+        qbBackfillWeak += 1;
+        weakFills.push({
+          date: card.transaction_date,
+          amount: card.amount,
+          description: (card.description ?? "").slice(0, 50),
+          applied: card.classification.category?.full_path ?? "(unknown)",
+        });
+      }
+      continue;
+    }
+    if (best.qb.category_id === card.classification.category_id) continue;
+    conflicts.push({
+      date: card.transaction_date,
+      amount: card.amount,
+      description: (card.description ?? "").slice(0, 50),
+      classifiedBy: card.classification.classified_by,
+      current: card.classification.category?.full_path ?? "(unknown)",
+      qbo: best.qb.category_name,
+      qboSource: best.qb.source_account,
+    });
+  }
+
+  console.log(`QBO conflict audit for '${entitySlug}' (${fromDate} → ${toDate}) — READ ONLY`);
+  console.log(`  Date slack: ±${dateSlackDays} days`);
+  console.log(`  Already-categorized rows scanned: ${categorizedRows.length}`);
+  console.log(`  Weak auto-fills (qb_backfill on date+amount only, no vendor word): ${qbBackfillWeak}`);
+  console.log(`  Confident QBO disagreements: ${conflicts.length}`);
+  if (weakFills.length > 0) {
+    console.log("\n  Weak auto-fills to review (category rests on date+amount only):");
+    for (const w of weakFills) {
+      console.log(`  ${w.date}  ${String(w.amount).padStart(10)}  ${w.description}  →  ${w.applied}`);
+    }
+  }
+  if (conflicts.length > 0) {
+    console.log("");
+    for (const c of conflicts) {
+      console.log(`  ${c.date}  ${String(c.amount).padStart(10)}  ${c.description}`);
+      console.log(`      you: ${c.current}  [${c.classifiedBy}]`);
+      console.log(`      QBO: ${c.qbo}  (${c.qboSource})`);
+    }
+  }
+  console.log("\n  No changes written (audit mode).");
+  process.exit(0);
+}
+
 const results = {
   ledgerTotal: cardRows.length,
   alreadyCategorized: categorizedRows.length,
   uncategorized: uncategorizedRows.length,
   reservedQbo: 0,
   matchedToApply: 0,
+  lowConfidence: 0,
   skipped: 0,
   cpaReview: 0,
   byCategory: new Map(),
@@ -317,6 +400,8 @@ for (const card of uncategorizedRows) {
   }
 
   results.matchedToApply += 1;
+  // score 10 == exact date+amount but no shared vendor word (coincidental collision risk)
+  if (best.score < 14) results.lowConfidence += 1;
   if (best.qb.category_name === "Ask My Accountant") results.cpaReview += 1;
   results.byCategory.set(best.qb.category_name, (results.byCategory.get(best.qb.category_name) ?? 0) + 1);
 
@@ -332,9 +417,9 @@ for (const card of uncategorizedRows) {
 
 const scopeLabel = accountSlug
   ? `${accountSlug}${qbSource ? ` ↔ QBO ${qbSource}` : ""}`
-  : "all GBSL uncategorized cards";
+  : `all ${entitySlug} uncategorized cards`;
 
-console.log(`GBSL QB category backfill (${fromDate} → ${toDate})`);
+console.log(`${entitySlug} QB category backfill (${fromDate} → ${toDate})`);
 console.log(`  Scope: ${scopeLabel}`);
 console.log(`  Date slack: ±${dateSlackDays} days`);
 console.log(`  Mode: ${dryRun ? "DRY RUN" : "APPLY"}`);
@@ -344,6 +429,7 @@ console.log(`  QBO lines reserved by categorized matches: ${results.reservedQbo}
 console.log(`  Still uncategorized: ${results.uncategorized}`);
 console.log(`  QB training rows: ${qbRows.length}`);
 console.log(`  Matched to apply: ${results.matchedToApply}`);
+console.log(`    ...of which low-confidence (date+amount only, no vendor-word overlap): ${results.lowConfidence}`);
 console.log(`  Skipped (no confident match): ${results.skipped}`);
 console.log(`  Includes Ask My Accountant (CPA review): ${results.cpaReview}`);
 console.log("\n  By category (new applies only):");

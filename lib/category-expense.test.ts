@@ -36,6 +36,7 @@ describe("category-expense", () => {
       "Mixed / pending allocation",
       "Sales Tax Payable",
       "Credit card rewards / cash back",
+      "Job W2 Expenses",
       // funding
       "Intercompany — pending",
       "Owner Contribution",

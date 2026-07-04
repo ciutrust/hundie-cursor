@@ -4,6 +4,36 @@ All notable changes to the Hundie project. Format based on [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### 2026-07-01 review — Track 1: correctness & architecture (C4–C21) — shipped 2026-07-03 (PR #10, merge `5acabb9`)
+
+Closes the 17 open correctness/architecture findings from [REVIEW-2026-07-01.md](REVIEW-2026-07-01.md), across 6 TDD batches; each adversarially reviewed, and a whole-branch review additionally caught a C4 gap in `getIncomeSummary`.
+
+**Fixed**
+
+- **Reversed Plaid charges no longer count (C4).** `plaid_removed_at` rows are excluded from every report roll-up, the backlog count, month/tax close, and `/reports/income`.
+- **Orphaned charges keep a month open (C9).** A transaction with no classification row now counts toward close/backlog (a separate `orphanCount`), so a month can't read "closed" with unbooked charges; an "Unassigned (no entity)" row surfaces orphans on entity-less accounts.
+- **Stable proposal pagination (C10).** `getProposalsForEntity` + the generator page by a unique `id` tiebreaker, so >1000-row backlogs can't skip/duplicate rows.
+- **Heterogeneous vendor-group approve (C13).** A mixed group (rows with different proposed categories/entities) can no longer be one-click approved into `proposals[0]`'s category **or entity** — approve keeps each row's own.
+- **Proposal decision guards (C14).** `setProposalDecision` won't flip a committed/skipped proposal back to approved; it returns the real matched count.
+- **Signed bulk suggestion amount (C15).** The bulk representative keeps its sign so refunds don't collapse into the charge bucket.
+- **Override training signal (C16).** Committing an override logs a `reject` of the proposed category, not an `accept`, so the engine's accept-rate isn't inflated.
+- **Entity date-rules require both bounds (C17).** A rule with `from` and `until` matches only inside the window (was matching on `until` alone).
+- **Modified-then-ineligible Plaid rows (C20).** A `modified` event that becomes ledger-ineligible stamps the stale row removed instead of leaving it; a re-eligible row is un-stamped.
+- **Wells Fargo parent/child merge one-for-one (C21).** N identical parent charges against one child no longer collapse to one.
+- **CSV→Plaid cutover off-by-one (whole-branch review).** The CSV window cap meets the Plaid seam exactly (was dropping the day before the cutover).
+
+**Changed**
+
+- **Payment-name drop scoped to card accounts (C12).** Depository "ZELLE PAYMENT FROM …" rent income and "AUTO PAY" mortgage debits are now KEPT (income capture) — only card payments are dropped; each import logs a dropped-row summary. *Expect these rows to start appearing uncategorized on the next sync/import.*
+- **Re-link / CSV overlap guards (C5, C6).** A backdated Plaid cutover that would re-import a synced window is refused (`force` to override); a CSV import into a Plaid-linked account is capped at that account's `sync_from_date` unless `--force`.
+- **Intercompany mirror window (C19).** Mirror-leg detection widened from same-day to ±3 days (flag-only, for human review).
+- **/categories kind + errors (C11).** QB-imported (kind-NULL) categories render under their true P&L kind, the page surfaces query errors, and QB imports stamp `kind` at upsert.
+
+**Added**
+
+- **Transaction audit trail (C8).** New `transaction_history` table + trigger records amount/date/description changes (audit-only, non-blocking), surfaced as a "changed since close" chip on Month/Tax Close. *Migration `20260708120000` applied to prod 2026-07-03.*
+- *(C18 — `transaction_splits` sum-to-parent invariant intentionally deferred to the future splits-writer; doc note only, no code.)*
+
 ### Added
 
 - **`cleanup:ledger-dupes`** — one-time script to remove duplicate ledger rows (same account, date, amount, description). Keeps oldest or categorized row; `--entity` / `--account` filters. Dry-run by default; `--apply` deletes.

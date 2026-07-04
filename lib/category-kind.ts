@@ -32,6 +32,7 @@ const TRANSFER_PATHS = new Set<string>([
   "Mixed / pending allocation",
   "Sales Tax Payable",
   "Credit card rewards / cash back",
+  "Job W2 Expenses", // reimbursed W2 employer travel (Egencia/Navan) — a wash, not personal spend
 ]);
 
 /** Equity / capital financing between Alex's own entities — kept off the P&L. */
