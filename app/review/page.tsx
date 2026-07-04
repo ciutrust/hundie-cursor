@@ -3,7 +3,9 @@ import Link from "next/link";
 import { DormantEntitiesCard } from "@/components/review/dormant-entities-card";
 import { PeriodPicker } from "@/components/review/period-picker";
 import { ReviewKpiStrip } from "@/components/review/review-kpi-strip";
+import { SyncHealthCard } from "@/components/review/sync-health-card";
 import { getCategorizationProgress, getDormantEntities, getReviewDashboardStats } from "@/lib/queries/review";
+import { getSyncHealth } from "@/lib/queries/sync-health";
 import { activeMonthPeriod, parsePeriodParams } from "@/lib/period";
 import { formatCurrency } from "@/lib/utils";
 
@@ -15,10 +17,11 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
   const params = await searchParams;
   const period = parsePeriodParams(params, activeMonthPeriod());
 
-  const [stats, dormantEntities, progress] = await Promise.all([
+  const [stats, dormantEntities, progress, syncHealth] = await Promise.all([
     getReviewDashboardStats(period),
     getDormantEntities(),
     getCategorizationProgress(),
+    getSyncHealth(),
   ]);
 
   const summaries = stats.summaries;
@@ -52,6 +55,8 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
       </div>
 
       <ReviewKpiStrip stats={stats} />
+
+      <SyncHealthCard health={syncHealth} />
 
       <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
