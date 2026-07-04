@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 import { getSidebarEntityNav } from "@/lib/queries/entity-home";
-import { activeMonthPeriod, shiftPeriod, ytdPeriod } from "@/lib/period";
+import { activeMonthPeriod, periodQueryString, shiftPeriod, ytdPeriod } from "@/lib/period";
 import { buildWeeklyDigest, mergeDigestWindows } from "@/lib/digest";
 import { sendEmail } from "@/lib/email";
 
@@ -34,18 +34,24 @@ export async function GET(request: Request) {
 
     const thisMonth = activeMonthPeriod();
     const lastMonth = shiftPeriod(thisMonth, -1);
+    const ytd = ytdPeriod();
     const [ytdItems, lastItems, thisItems] = await Promise.all([
-      getSidebarEntityNav(ytdPeriod(), admin),
+      getSidebarEntityNav(ytd, admin),
       getSidebarEntityNav(lastMonth, admin),
       getSidebarEntityNav(thisMonth, admin),
     ]);
     const rows = mergeDigestWindows(ytdItems, lastItems, thisItems);
 
-    const siteUrl =
+    // Normalize away a trailing slash so deep links never become `//review/...`.
+    const baseUrl = (
       process.env.NEXT_PUBLIC_SITE_URL ??
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "")
+    ).replace(/\/+$/, "");
     const digest = buildWeeklyDigest(rows, {
-      reviewUrl: `${siteUrl}/review`,
+      baseUrl,
+      ytdQuery: periodQueryString(ytd),
+      lastMonthQuery: periodQueryString(lastMonth),
+      thisMonthQuery: periodQueryString(thisMonth),
       lastMonthLabel: lastMonth.label,
       thisMonthLabel: thisMonth.label,
     });
