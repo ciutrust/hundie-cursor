@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { pgErrorMessage } from "@/lib/supabase/errors";
 
 type PageResult<T> = {
   data: T[] | null;
@@ -28,7 +29,9 @@ export async function paginateAll<T>(
 
   while (true) {
     const { data, error } = await buildQuery(from, pageSize);
-    if (error) throw new Error(error.message);
+    // E1: preserve code/details/hint (composed) + the original error as `cause`, instead of a bare
+    // `.message` that is often ''.
+    if (error) throw new Error(pgErrorMessage(error), { cause: error });
     const page = data ?? [];
 
     if (seen) {

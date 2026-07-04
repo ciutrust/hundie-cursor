@@ -16,15 +16,10 @@ import { paginateAll } from "@/lib/supabase/paginate";
 import type { CategoryGroup, EntitySummary, MonthlyCategoryRow, MonthlyEntityRow, ReviewDashboardStats, TransactionWithDetails } from "@/lib/types/database";
 const TRANSACTION_SELECT = `
   id,
-  account_id,
   transaction_date,
-  posted_date,
   amount,
   description,
   vendor,
-  raw_category,
-  import_hash,
-  created_at,
   account:accounts!inner(id, display_name, slug, account_type),
   classification:classifications!inner(
     id,

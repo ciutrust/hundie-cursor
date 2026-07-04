@@ -2,6 +2,7 @@ import type { PeriodRange } from "@/lib/period";
 import { isBookedOperatingExpense } from "@/lib/category-expense";
 import { getCpaReviewCategoryIdSet, needsReviewCategory } from "@/lib/category-review";
 import { createClient } from "@/lib/supabase/server";
+import { pgError } from "@/lib/supabase/errors";
 import { fetchPeriodTransactions } from "@/lib/queries/fetch-period-transactions";
 
 export type EntityHomeStats = {
@@ -137,7 +138,9 @@ export async function getAllEntityHomeStats(period: PeriodRange): Promise<Entity
     .eq("is_classifiable", true)
     .order("display_order");
 
-  if (error) throw error;
+  // E1: throw a structured Error (not the raw PostgREST object, whose .message is often '' → the
+  // ×463 unrecoverable "{ message: '' }" sidebar logs). Original error preserved as `cause`.
+  if (error) throw pgError("entity-home entities", error);
 
   const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
 
@@ -183,7 +186,9 @@ export async function getSidebarEntityNav(period: PeriodRange): Promise<SidebarE
     .eq("is_classifiable", true)
     .order("display_order");
 
-  if (error) throw error;
+  // E1: throw a structured Error (not the raw PostgREST object, whose .message is often '' → the
+  // ×463 unrecoverable "{ message: '' }" sidebar logs). Original error preserved as `cause`.
+  if (error) throw pgError("entity-home entities", error);
 
   const cpaReviewIds = await getCpaReviewCategoryIdSet(supabase);
 
