@@ -177,9 +177,17 @@ export type SidebarEntityNavItem = {
   unclassifiedCount: number;
 };
 
-/** Lightweight entity list + review-backlog counts for the sidebar (no full transaction scan). */
-export async function getSidebarEntityNav(period: PeriodRange): Promise<SidebarEntityNavItem[]> {
-  const supabase = await createClient();
+/**
+ * Lightweight entity list + review-backlog counts for the sidebar (no full transaction scan).
+ *
+ * `injectedClient` lets a session-less caller (the weekly-digest cron, #1) pass a service-role client
+ * so the counts run without a user session; UI callers omit it and get the request-scoped client.
+ */
+export async function getSidebarEntityNav(
+  period: PeriodRange,
+  injectedClient?: Awaited<ReturnType<typeof createClient>>,
+): Promise<SidebarEntityNavItem[]> {
+  const supabase = injectedClient ?? (await createClient());
   const { data: entities, error } = await supabase
     .from("entities")
     .select("id, name, slug")
