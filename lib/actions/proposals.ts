@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
+import { chunk } from "@/lib/supabase/chunk";
+import { paginateAll } from "@/lib/supabase/paginate";
 import { extractVendorSearchKey } from "@/lib/suggestions/category-suggestions";
 import { partitionCommitPlan, type ExistingClass } from "@/lib/actions/commit-plan";
 import { classifyProposalEvent } from "@/lib/actions/proposal-event-plan";
@@ -33,16 +35,22 @@ export async function setProposalDecision(
   // Status guard: never flip a committed/skipped proposal back to approved (it would let a
   // terminal proposal be re-committed — compounds C1). Return the REAL matched count, not the
   // requested count, so the UI reports what actually changed (C14).
-  const { data, error } = await db
-    .from("classification_proposals")
-    .update(patch)
-    .in("id", proposalIds)
-    .not("status", "in", '("committed","skipped")')
-    .select("id");
-  if (error) return { error: error.message };
+  // A1: chunk the id list — `.in()` rides the request URL on PATCH, so an "Approve all" over the
+  // full >2,000-proposal backlog would build a ~78KB URL and hard-fail (400/414).
+  let matched = 0;
+  for (const ids of chunk(proposalIds, 200)) {
+    const { data, error } = await db
+      .from("classification_proposals")
+      .update(patch)
+      .in("id", ids)
+      .not("status", "in", '("committed","skipped")')
+      .select("id");
+    if (error) return { error: error.message };
+    matched += data?.length ?? 0;
+  }
 
   revalidatePath("/review/proposals");
-  return { success: true, count: data?.length ?? 0 };
+  return { success: true, count: matched };
 }
 
 type ApprovedRow = {
@@ -76,17 +84,31 @@ export async function commitApprovedProposals(
   // Writes go through the service-role client: classifications has no authenticated INSERT policy,
   // so the bulk upsert (insert-or-update) must bypass RLS. The action is already auth-gated above.
   const admin = createServiceRoleClient();
-  let query = admin
-    .from("classification_proposals")
-    .select(
-      "id, transaction_id, entity_id, chosen_entity_id, source, proposed_category_id, chosen_category_id, rationale, transactions!inner(description, vendor)",
-    )
-    .eq("status", "approved");
-  if (entitySlug) query = query.eq("entity_slug", entitySlug);
-
-  const { data, error } = await query;
-  if (error) return { error: error.message };
-  const rows = (data ?? []) as unknown as ApprovedRow[];
+  // B1: paginate the approved-proposals read. An unpaginated select silently caps at 1,000 rows, so
+  // committing a >1,000-row approval would commit only the first 1,000 and report success. Ordered by
+  // the unique `id` so offset paging is stable (paginateAll's key guard enforces it).
+  let rows: ApprovedRow[];
+  try {
+    rows = await paginateAll<ApprovedRow>(
+      (from, pageSize) => {
+        let q = admin
+          .from("classification_proposals")
+          .select(
+            "id, transaction_id, entity_id, chosen_entity_id, source, proposed_category_id, chosen_category_id, rationale, transactions!inner(description, vendor)",
+          )
+          .eq("status", "approved");
+        if (entitySlug) q = q.eq("entity_slug", entitySlug);
+        return q.order("id").range(from, from + pageSize - 1) as unknown as PromiseLike<{
+          data: ApprovedRow[] | null;
+          error: { message: string } | null;
+        }>;
+      },
+      1000,
+      (r) => r.id,
+    );
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Failed to read approved proposals" };
+  }
   if (rows.length === 0) return { error: "No approved proposals to commit" };
 
   // category -> entity map, to guard that a (possibly reassigned) category belongs to its entity.
@@ -134,18 +156,19 @@ export async function commitApprovedProposals(
   if (plan.length === 0) return { error: `Nothing valid to commit (${skipped} skipped)` };
 
   const now = new Date().toISOString();
-  const CHUNK = 500;
+  const CHUNK = 500; // body-side upserts/inserts — payload travels in the body, larger is fine
+  const URL_CHUNK = 200; // A3: `.in()` reads/writes ride the URL — keep them well under the ~420-id gateway limit
 
   // Freshness guard: re-read the current classification for each candidate txn so we never clobber
   // manual work done AFTER the proposal was generated (the history trigger wouldn't even log a
   // notes-only wipe). Batched IN() reads to stay within URL limits.
   const txIds = plan.map((x) => x.transactionId);
   const existingByTx = new Map<string, ExistingClass>();
-  for (let i = 0; i < txIds.length; i += CHUNK) {
+  for (let i = 0; i < txIds.length; i += URL_CHUNK) {
     const { data: exRows, error: exErr } = await admin
       .from("classifications")
       .select("transaction_id, category_id, classified_by, notes")
-      .in("transaction_id", txIds.slice(i, i + CHUNK));
+      .in("transaction_id", txIds.slice(i, i + URL_CHUNK));
     if (exErr) return { error: `classification read failed: ${exErr.message}` };
     for (const r of exRows ?? [])
       existingByTx.set(r.transaction_id, { category_id: r.category_id, classified_by: r.classified_by, notes: r.notes });
@@ -155,8 +178,8 @@ export async function commitApprovedProposals(
   skipped += staleProposalIds.length;
 
   // Retire stale proposals so they don't linger as 'approved' and get retried next commit.
-  for (let i = 0; i < staleProposalIds.length; i += CHUNK) {
-    const ids = staleProposalIds.slice(i, i + CHUNK);
+  for (let i = 0; i < staleProposalIds.length; i += URL_CHUNK) {
+    const ids = staleProposalIds.slice(i, i + URL_CHUNK);
     const { error: skErr } = await admin
       .from("classification_proposals")
       .update({ status: "skipped", updated_at: now })
@@ -187,8 +210,8 @@ export async function commitApprovedProposals(
   }
 
   // 2) Mark the proposals committed (bulk).
-  for (let i = 0; i < toWrite.length; i += CHUNK) {
-    const ids = toWrite.slice(i, i + CHUNK).map((x) => x.proposalId);
+  for (let i = 0; i < toWrite.length; i += URL_CHUNK) {
+    const ids = toWrite.slice(i, i + URL_CHUNK).map((x) => x.proposalId);
     const { error: stErr } = await admin
       .from("classification_proposals")
       .update({ status: "committed", committed_at: now })
