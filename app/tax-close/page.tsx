@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { CalendarCheck, ChevronLeft, ChevronRight } from "lucide-react";
-import { getMonthCloseMatrix } from "@/lib/queries/review";
+import { getClassifiableEntities, getMonthCloseMatrix } from "@/lib/queries/review";
 import { cellStatus, isChangedSinceClose, rollupStatus, summarizeMonths } from "@/lib/month-close";
+import { CpaPacketButton } from "@/components/tax-close/cpa-packet-button";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 function pad2(n: number) {
@@ -15,7 +16,10 @@ export default async function TaxClosePage({ searchParams }: Props) {
   const now = new Date();
   const year = /^\d{4}$/.test(params.year ?? "") ? Number(params.year) : now.getFullYear();
 
-  const matrix = await getMonthCloseMatrix(year);
+  const [matrix, entities] = await Promise.all([
+    getMonthCloseMatrix(year),
+    getClassifiableEntities(),
+  ]);
   const monthNums = Array.from({ length: 12 }, (_, i) => i + 1);
   const monthStatuses = monthNums.map((m) => rollupStatus(matrix.map((row) => row.months[m])));
   const summary = summarizeMonths(monthStatuses);
@@ -163,6 +167,28 @@ export default async function TaxClosePage({ searchParams }: Props) {
         <span className="text-red-600 dark:text-red-400">red</span> = includes failed-to-book
         transactions (re-run import heal) · · = no activity
       </p>
+
+      <section className="space-y-3 rounded-xl border border-border bg-card p-5 shadow-sm">
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold">CPA packet · {year}</h2>
+          <p className="text-sm text-muted-foreground">
+            Download a per-entity tax-line rollup (grouped by IRS form &amp; line) to hand to your
+            accountant. Personal / non-deductible categories are excluded; anything still unclassified
+            or without a mapped tax line is listed in a &ldquo;Needs CPA review&rdquo; section so
+            nothing is dropped silently.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {entities.map((entity) => (
+            <CpaPacketButton
+              key={entity.slug}
+              entitySlug={entity.slug}
+              entityName={entity.name}
+              year={year}
+            />
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

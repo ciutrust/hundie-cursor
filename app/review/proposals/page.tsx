@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ClipboardCheck } from "lucide-react";
 import { ProposalsPanel } from "@/components/review/proposals-panel";
+import { GenerateControls } from "@/components/review/generate-controls";
 import { getClassifiableEntities, getCategoriesByEntity } from "@/lib/queries/review";
 import { getProposalEntityCounts, getProposalsForEntity } from "@/lib/queries/proposals";
 
@@ -29,21 +30,25 @@ export default async function ProposalsPage({ searchParams }: PageProps) {
       : (ranked[0]?.e.slug ?? entities[0]?.slug ?? "personal");
 
   const proposals = await getProposalsForEntity(activeSlug);
+  const activeEntity = entities.find((e) => e.slug === activeSlug);
 
   return (
     <div className="space-y-6">
-      <div className="space-y-1">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Classify · proposals (test)
-        </p>
-        <div className="flex items-center gap-2">
-          <ClipboardCheck className="h-5 w-5 text-emerald-500" />
-          <h1 className="text-3xl font-semibold tracking-tight">Recommendations</h1>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Classify · proposals
+          </p>
+          <div className="flex items-center gap-2">
+            <ClipboardCheck className="h-5 w-5 text-emerald-500" />
+            <h1 className="text-3xl font-semibold tracking-tight">Recommendations</h1>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Staged classification proposals with confidence + reasoning. Approve / reject / override —
+            nothing touches your ledger until you <strong>Commit approved</strong>.
+          </p>
         </div>
-        <p className="text-sm text-muted-foreground">
-          Staged classification proposals with confidence + reasoning. Approve / reject / override —
-          nothing touches your ledger until you <strong>Commit approved</strong>.
-        </p>
+        <GenerateControls entitySlug={activeSlug} entityName={activeEntity?.name ?? activeSlug} />
       </div>
 
       <nav className="flex flex-wrap gap-2">

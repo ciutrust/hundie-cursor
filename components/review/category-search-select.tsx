@@ -12,6 +12,8 @@ type CategorySearchSelectProps = {
   categories: Pick<Category, "id" | "full_path">[];
   value: string | null;
   onChange: (categoryId: string | null) => void;
+  /** #9: when set, shows a "Category guide" link to /categories for this entity (opens in a new tab). */
+  entitySlug?: string;
 };
 
 export function CategorySearchSelect({
@@ -20,6 +22,7 @@ export function CategorySearchSelect({
   categories,
   value,
   onChange,
+  entitySlug,
 }: CategorySearchSelectProps) {
   const [query, setQuery] = useState("");
 
@@ -39,7 +42,17 @@ export function CategorySearchSelect({
 
   return (
     <div className="space-y-2">
-      <Label htmlFor={id}>{label}</Label>
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor={id}>{label}</Label>
+        <a
+          href={entitySlug ? `/categories?entity=${entitySlug}` : "/categories"}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        >
+          Category guide ↗
+        </a>
+      </div>
 
       {selectedCategory ? (
         <p className="text-sm">

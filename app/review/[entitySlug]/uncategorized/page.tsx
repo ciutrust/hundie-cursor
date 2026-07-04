@@ -11,6 +11,7 @@ import {
   getEntityTransactions,
 } from "@/lib/queries/review";
 import { getPersonalAiBacklog } from "@/lib/queries/ai-suggestions";
+import { getSidebarEntityNav } from "@/lib/queries/entity-home";
 import { formatCurrency } from "@/lib/utils";
 import { isExpenseAmount } from "@/lib/category-expense";
 
@@ -33,16 +34,24 @@ export default async function EntityUncategorizedPage({ params, searchParams }: 
     notFound();
   }
 
-  const [entities, { transactions }, categories, categoriesByEntity, aiBacklog] = await Promise.all([
-    getClassifiableEntities(),
-    getEntityTransactions(period, entitySlug, "unclassified", flow),
-    getCategoriesForEntity(entitySlug),
-    getCategoriesByEntity(),
-    entitySlug === "personal" ? getPersonalAiBacklog() : Promise.resolve([]),
-  ]);
+  const [entities, { transactions }, categories, categoriesByEntity, aiBacklog, entityNav] =
+    await Promise.all([
+      getClassifiableEntities(),
+      getEntityTransactions(period, entitySlug, "unclassified", flow),
+      getCategoriesForEntity(entitySlug),
+      getCategoriesByEntity(),
+      entitySlug === "personal" ? getPersonalAiBacklog() : Promise.resolve([]),
+      getSidebarEntityNav(period),
+    ]);
 
   const entity = entities.find((item) => item.slug === entitySlug);
   if (!entity) notFound();
+
+  // #8: the next entity (other than this one) that still has a review backlog, for the guided empty state.
+  const nextNav = entityNav.find((item) => item.slug !== entitySlug && item.unclassifiedCount > 0);
+  const nextUp = nextNav
+    ? { slug: nextNav.slug, name: nextNav.name, count: nextNav.unclassifiedCount }
+    : null;
 
   const total = isIncome
     ? transactions.reduce((sum, tx) => sum + Math.abs(Number(tx.amount)), 0)
@@ -119,6 +128,7 @@ export default async function EntityUncategorizedPage({ params, searchParams }: 
         month={period.at}
         entitySlug={entitySlug}
         aiSuggestionTxIds={aiSuggestionTxIds.size > 0 ? aiSuggestionTxIds : undefined}
+        nextUp={nextUp}
       />
     </div>
   );

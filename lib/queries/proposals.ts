@@ -2,6 +2,7 @@ import { cache } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { paginateAll } from "@/lib/supabase/paginate";
+import { CLASSIFIABLE_SLUGS } from "@/lib/suggestions/proposal-ranking";
 
 // classification_proposals is a Stage-2 staging table not yet in the generated DB types
 // (no supabase CLI to regen). Access it through an untyped client view; shapes are asserted here.
@@ -45,7 +46,6 @@ type RawRow = Omit<Proposal, "description" | "vendor" | "amount" | "transaction_
 };
 
 const PAGE = 1000;
-const CLASSIFIABLE_SLUGS = ["gbsl", "keller", "personal", "acaa-austin", "pflugerville"];
 
 /** Pending/approved proposal counts per entity, for the entity tabs. Uses server-side head counts
  *  (count:exact, head:true) so there is no 1000-row PostgREST cap. */

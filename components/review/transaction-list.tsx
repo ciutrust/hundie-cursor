@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,6 +22,8 @@ import { CategorySearchSelect } from "@/components/review/category-search-select
 import { CategorySuggestionChips } from "@/components/review/category-suggestion-chips";
 import { TransactionSearchBar } from "@/components/review/transaction-search-bar";
 import { bulkReclassifyTransactions, reclassifyTransaction } from "@/lib/actions/reclassify";
+import { groupUndoRestores, type UndoRestore } from "@/lib/review/undo";
+import { keyToAction, nextCursor } from "@/lib/review/keyboard";
 import type { SuggestionOutcome } from "@/lib/actions/suggestion-events";
 import { getAiCategorySuggestion } from "@/lib/actions/ai-category-suggestion";
 import {
@@ -61,6 +64,8 @@ type TransactionListProps = {
   entitySlug: string;
   /** Transaction ids with a stored AI suggestion — shows violet badge in list */
   aiSuggestionTxIds?: Set<string>;
+  /** #8: the next entity that still has a backlog, for the guided empty state. */
+  nextUp?: { slug: string; name: string; count: number } | null;
 };
 
 export function TransactionList({
@@ -71,6 +76,7 @@ export function TransactionList({
   month,
   entitySlug,
   aiSuggestionTxIds,
+  nextUp,
 }: TransactionListProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailTransaction, setDetailTransaction] = useState<TransactionWithDetails | null>(null);
@@ -83,6 +89,35 @@ export function TransactionList({
   const [, startQuick] = useTransition();
   const [quickClassifyingId, setQuickClassifyingId] = useState<string | null>(null);
   const [inlineSuggestions, setInlineSuggestions] = useState<Record<string, CategorySuggestion | null>>({});
+
+  // #2: transient one-click Undo after a quick-classify / bulk-assign.
+  const [undo, setUndo] = useState<{ label: string; restores: UndoRestore[] } | null>(null);
+  const [undoing, startUndo] = useTransition();
+
+  // #7: virtual row cursor for the keyboard flow (j/k). -1 = no row focused.
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+
+  useEffect(() => {
+    if (!undo) return;
+    const timer = setTimeout(() => setUndo(null), 12000);
+    return () => clearTimeout(timer);
+  }, [undo]);
+
+  function runUndo() {
+    if (!undo) return;
+    const groups = groupUndoRestores(undo.restores);
+    startUndo(async () => {
+      for (const group of groups) {
+        await bulkReclassifyTransactions({
+          classificationIds: group.classificationIds,
+          entityId: group.entityId,
+          categoryId: group.categoryId,
+          entitySlug,
+        });
+      }
+      setUndo(null);
+    });
+  }
 
   const filteredTransactions = useMemo(
     () => filterTransactions(transactions, filters),
@@ -205,6 +240,12 @@ export function TransactionList({
 
   function quickClassify(tx: TransactionWithDetails, suggestion: CategorySuggestion) {
     setQuickClassifyingId(tx.id);
+    // #2: snapshot the prior state BEFORE the write so a mis-click is one click away from reverting.
+    const prior: UndoRestore = {
+      classificationId: tx.classification.id,
+      entityId: tx.classification.entity_id,
+      categoryId: tx.classification.category_id,
+    };
     startQuick(async () => {
       await reclassifyTransaction({
         classificationId: tx.classification.id,
@@ -224,6 +265,10 @@ export function TransactionList({
         },
       });
       setQuickClassifyingId(null);
+      setUndo({
+        label: `Classified “${tx.description}” as ${shortCategoryName(suggestion.fullPath)}`,
+        restores: [prior],
+      });
       // C2: no router.refresh() — the action's revalidatePath already re-renders this RSC. A second
       // refresh here doubled every classify click into ~60-80 backend calls.
     });
@@ -266,17 +311,105 @@ export function TransactionList({
     setFilters((current) => ({ ...current, similarVendorKey: null }));
   }
 
-  function handleBulkComplete() {
+  function handleBulkComplete(restores: UndoRestore[], count: number) {
     setBulkOpen(false);
     clearSelection();
     // After assigning a batch (e.g. a Find-similar set), drop the filters so the view snaps back
     // to the full list instead of getting stuck on a now-empty filtered set.
     setFilters(EMPTY_TRANSACTION_FILTERS);
+    if (restores.length > 0) {
+      setUndo({
+        label: `Assigned ${count} transaction${count === 1 ? "" : "s"}`,
+        restores,
+      });
+    }
   }
 
+  // #7: keyboard flow. A single window listener; a ref keeps the handler reading fresh state without
+  // re-binding on every keystroke. The pure keyToAction guards editable targets (no typing hijack).
+  // Latest-ref pattern: refresh the handler after each render (ref access in an effect, never in
+  // render) so the single window listener always sees fresh state without re-binding per keystroke.
+  const keyboardRef = useRef<(event: KeyboardEvent) => void>(() => {});
+  useEffect(() => {
+    keyboardRef.current = (event: KeyboardEvent) => {
+      const action = keyToAction(event.key, event.target as HTMLElement | null);
+      if (action.type === "none") return;
+
+      if (action.type === "clear") {
+        clearSelection();
+        setFocusedIndex(-1);
+        return;
+      }
+      if (action.type === "move") {
+        event.preventDefault();
+        setFocusedIndex((current) => nextCursor(current, action.delta, sortedTransactions.length));
+        return;
+      }
+
+      const tx = sortedTransactions[focusedIndex];
+      if (!tx) return;
+
+      if (action.type === "toggleSelect") {
+        event.preventDefault();
+        toggleOne(tx.id);
+      } else if (action.type === "findSimilar") {
+        event.preventDefault();
+        findSimilar(tx);
+      } else if (action.type === "accept") {
+        const suggestion = !tx.classification.category_id
+          ? (inlineSuggestions[transactionVendorKey(tx)] ?? null)
+          : null;
+        if (suggestion) {
+          event.preventDefault();
+          quickClassify(tx, suggestion);
+        }
+      }
+    };
+  });
+
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => keyboardRef.current(event);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
+
+  // Scroll the focused row into view as the cursor moves (no effect on state → no cascading render).
+  useEffect(() => {
+    if (focusedIndex < 0) return;
+    document.querySelector(`[data-review-index="${focusedIndex}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [focusedIndex]);
+
+  // Clamp at read time so a shrinking list (a row drops off after classify) never highlights a stale row.
+  const activeCursor =
+    focusedIndex >= 0 && focusedIndex < sortedTransactions.length ? focusedIndex : -1;
+
+  const undoBanner = undo ? (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 shadow-sm">
+      <p className="text-sm">
+        <span aria-hidden>↩ </span>
+        {undo.label}
+      </p>
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" onClick={runUndo} disabled={undoing}>
+          {undoing ? "Undoing…" : "Undo"}
+        </Button>
+        <button
+          type="button"
+          onClick={() => setUndo(null)}
+          aria-label="Dismiss"
+          className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  ) : null;
+
   if (transactions.length === 0) {
+    const thisEntityName = entities.find((entity) => entity.slug === entitySlug)?.name ?? "This entity";
     return (
       <div className="space-y-3">
+        {undoBanner}
         <TransactionSearchBar
           filters={filters}
           onChange={setFilters}
@@ -285,13 +418,31 @@ export function TransactionList({
           categoryOptions={getCategoryFilterOptions([], categories)}
           accountOptions={[]}
         />
-        <p className="text-sm text-muted-foreground">No transactions for this view.</p>
+        {/* #8: guided empty state — celebrate the clear, then point at the next entity with a backlog. */}
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
+          <p className="font-medium text-emerald-700 dark:text-emerald-400">
+            ✓ Nothing to classify for {thisEntityName} here 🎉
+          </p>
+          {nextUp ? (
+            <Link
+              href={`/review/${nextUp.slug}/uncategorized`}
+              className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+            >
+              Next: {nextUp.name} — {nextUp.count} to classify →
+            </Link>
+          ) : (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Everything is classified across all entities. Nice work.
+            </p>
+          )}
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-3">
+      {undoBanner}
       <TransactionSearchBar
         filters={filters}
         onChange={setFilters}
@@ -364,24 +515,33 @@ export function TransactionList({
         </div>
       </div>
 
+      <p className="hidden text-xs text-muted-foreground sm:block">
+        Keyboard: <span className="font-medium">j</span>/<span className="font-medium">k</span> move ·{" "}
+        <span className="font-medium">Enter</span> accept · <span className="font-medium">x</span>{" "}
+        select · <span className="font-medium">s</span> similar
+      </p>
+
       {filteredTransactions.length === 0 ? (
         <p className="text-sm text-muted-foreground">No transactions match your search.</p>
       ) : (
         <>
 
       <div className="divide-y divide-border rounded-lg border border-border bg-card">
-        {sortedTransactions.map((tx) => {
+        {sortedTransactions.map((tx, index) => {
           const isSelected = selectedIds.has(tx.id);
           const isUnclassified = !tx.classification.category_id;
           const suggestion = isUnclassified ? inlineSuggestions[transactionVendorKey(tx)] ?? null : null;
           const isQuickClassifying = quickClassifyingId === tx.id;
+          const isFocused = index === activeCursor;
 
           return (
             <div
               key={tx.id}
+              data-review-index={index}
               className={cn(
                 "flex flex-col gap-2 px-4 py-3 transition-colors sm:flex-row sm:items-center sm:gap-4",
                 isSelected ? "bg-accent/40" : "hover:bg-muted/30",
+                isFocused && "ring-2 ring-inset ring-primary",
               )}
             >
               <div className="flex min-w-0 flex-1 items-start gap-3">
@@ -548,6 +708,7 @@ function ClassificationForm({
           categories={entityCategories}
           value={categoryId}
           onChange={onCategoryChange}
+          entitySlug={selectedEntity?.slug}
         />
       ) : (
         <p className="text-sm text-muted-foreground">
@@ -764,7 +925,7 @@ type BulkAssignDialogProps = {
   defaultEntityId: string;
   entitySlug: string;
   onClose: () => void;
-  onComplete: () => void;
+  onComplete: (restores: UndoRestore[], count: number) => void;
 };
 
 function BulkAssignDialog({
@@ -871,6 +1032,12 @@ function BulkAssignDialog({
 
   function handleSave() {
     setError(null);
+    // #2: snapshot each row's prior entity+category BEFORE the write, so undo can restore each to its own.
+    const restores: UndoRestore[] = transactions.map((tx) => ({
+      classificationId: tx.classification.id,
+      entityId: tx.classification.entity_id,
+      categoryId: tx.classification.category_id,
+    }));
     startTransition(async () => {
       const result = await bulkReclassifyTransactions({
         classificationIds: transactions.map((tx) => tx.classification.id),
@@ -885,7 +1052,7 @@ function BulkAssignDialog({
         return;
       }
 
-      onComplete();
+      onComplete(restores, transactions.length);
       // C2: revalidatePath in the action already refreshes the RSC; no redundant router.refresh().
     });
   }
