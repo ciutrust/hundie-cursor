@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
-import { paginateAll } from "@/lib/supabase/paginate";
 import { categoryKind } from "@/lib/category-kind";
 import { isBookedOperatingExpense } from "@/lib/category-expense";
+import { fetchLedgerExpenseLines } from "@/lib/queries/ledger-expense-lines";
 import type { PeriodRange } from "@/lib/period";
 
 export type IncomeCategoryRow = { category: string; total: number; count: number };
@@ -19,16 +19,6 @@ export type EntityIncome = {
   byCategory: IncomeCategoryRow[];
 };
 
-type IncomeRow = {
-  id: string;
-  amount: number | string;
-  classifications: {
-    entity_id: string | null;
-    category_id: string | null;
-    categories: { full_path: string | null } | null;
-  } | null;
-};
-
 /** Per-entity money-in: income by source + net (income − expenses) for the period. Expense-first; this is
  *  a secondary lens. Income is identified by category kind, not sign (see docs/INCOME_CAPTURE_PLAN.md). */
 export async function getIncomeSummary(period: PeriodRange): Promise<EntityIncome[]> {
@@ -42,45 +32,26 @@ export async function getIncomeSummary(period: PeriodRange): Promise<EntityIncom
     .order("display_order");
   if (entError) throw entError;
 
-  // Stable pagination: order by a UNIQUE column (id) so a >1000-row period never skips/duplicates a
-  // row across pages (which would corrupt the summed income/expense totals). `key` makes paginateAll
-  // throw loudly if that invariant is ever violated. See lib/supabase/paginate.ts.
-  const rows = await paginateAll<IncomeRow>(
-    async (from, pageSize) => {
-      const { data, error } = await supabase
-        .from("transactions")
-        .select("id, amount, classifications(entity_id, category_id, categories(full_path))")
-        .gte("transaction_date", start)
-        .lt("transaction_date", end)
-        // C4: exclude Plaid-reversed charges (row retained + still classified) so /reports/income
-        // does not double-count them into income/expense/net/byCategory. Top-level `transactions`
-        // column — composes with the embed + the gte/lt/order/range. Mirrors
-        // fetch-period-transactions.ts and review.ts::getTotalBacklogCount.
-        .is("plaid_removed_at", null)
-        .order("id")
-        .range(from, from + pageSize - 1);
-      return { data: data as unknown as IncomeRow[] | null, error };
-    },
-    1000,
-    (r) => r.id,
-  );
+  // Splits: a leg can be income/expense in a different entity than the parent — source lines with
+  // splits applied (parent replaced by legs, keyed on each leg's own entity), then group in JS.
+  const lines = await fetchLedgerExpenseLines({ supabase, start, end });
 
   return (entities ?? []).map((entity) => {
-    const entityRows = rows.filter((r) => r.classifications?.entity_id === entity.id);
+    const entityRows = lines.filter((l) => l.classification.entity_id === entity.id);
     const incomeRows = entityRows.filter(
-      (r) => categoryKind(r.classifications?.categories?.full_path) === "income",
+      (l) => categoryKind(l.classification.category?.full_path) === "income",
     );
-    const incomeTotal = incomeRows.reduce((sum, r) => sum + Math.abs(Number(r.amount)), 0);
+    const incomeTotal = incomeRows.reduce((sum, l) => sum + Math.abs(l.amount), 0);
     // BUG-04/QA-01: shared predicate (AMA + uncategorized excluded) + signed sum so refunds net.
     const expenseTotal = entityRows
-      .filter((r) => isBookedOperatingExpense(r.classifications?.categories?.full_path))
-      .reduce((sum, r) => sum + Number(r.amount), 0);
+      .filter((l) => isBookedOperatingExpense(l.classification.category?.full_path))
+      .reduce((sum, l) => sum + l.amount, 0);
 
     const byCat = new Map<string, IncomeCategoryRow>();
-    for (const r of incomeRows) {
-      const category = r.classifications?.categories?.full_path ?? "Income";
+    for (const l of incomeRows) {
+      const category = l.classification.category?.full_path ?? "Income";
       const g = byCat.get(category) ?? { category, total: 0, count: 0 };
-      g.total += Math.abs(Number(r.amount));
+      g.total += Math.abs(l.amount);
       g.count += 1;
       byCat.set(category, g);
     }

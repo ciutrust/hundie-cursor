@@ -7,12 +7,25 @@ export type Transaction = Database["public"]["Tables"]["transactions"]["Row"]
 export type Classification = Database["public"]["Tables"]["classifications"]["Row"]
 export type Account = Database["public"]["Tables"]["accounts"]["Row"]
 
+/** One allocation leg of a split transaction (a row in transaction_splits, hydrated for the UI). */
+export type TransactionSplitLeg = {
+  id: string
+  entity_id: string
+  entity_slug: string
+  entity_name: string
+  category_id: string | null
+  category_full_path: string | null
+  amount: number
+}
+
 export type TransactionWithDetails = Transaction & {
   account: Pick<Account, "id" | "display_name" | "slug" | "account_type">
   classification: Classification & {
     entity: Pick<Entity, "id" | "name" | "slug">
     category: Pick<Category, "id" | "full_path"> | null
   }
+  /** Present with length >= 2 when this transaction has been split (parent flagged split_at). */
+  splits?: TransactionSplitLeg[]
 }
 
 export type EntitySummary = {

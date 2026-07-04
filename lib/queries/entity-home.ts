@@ -3,7 +3,7 @@ import { isBookedOperatingExpense } from "@/lib/category-expense";
 import { getCpaReviewCategoryIdSet, needsReviewCategory } from "@/lib/category-review";
 import { createClient } from "@/lib/supabase/server";
 import { pgError } from "@/lib/supabase/errors";
-import { fetchPeriodTransactions } from "@/lib/queries/fetch-period-transactions";
+import { fetchLedgerExpenseLines } from "@/lib/queries/ledger-expense-lines";
 
 export type EntityHomeStats = {
   slug: string;
@@ -15,15 +15,6 @@ export type EntityHomeStats = {
   topCategory: { name: string; total: number } | null;
 };
 
-const ENTITY_HOME_SELECT = `
-  amount,
-  classification:classifications!inner(
-    entity_id,
-    category_id,
-    category:categories(full_path)
-  )
-`;
-
 type EntityHomeTxn = {
   amount: number;
   classification: {
@@ -33,22 +24,25 @@ type EntityHomeTxn = {
   };
 };
 
-function fetchEntityPeriodTransactions(
+async function fetchEntityPeriodTransactions(
   supabase: Awaited<ReturnType<typeof createClient>>,
   start: string,
   end: string,
   entityId?: string,
 ): Promise<EntityHomeTxn[]> {
-  // OPT-08: same select/filters/ascending order; entityId now optional so the
-  // dashboard/sidebar can fetch the whole period once and group in JS (OPT-04).
-  return fetchPeriodTransactions<EntityHomeTxn>({
-    supabase,
-    select: ENTITY_HOME_SELECT,
-    start,
-    end,
-    entityId,
-    order: "asc",
-  });
+  // Splits: source expense lines (split parents replaced by their legs, keyed on each leg's entity),
+  // then group by entity in JS. entityId optional so the dashboard/sidebar fetch the whole period once.
+  const lines = await fetchLedgerExpenseLines({ supabase, start, end, entityId });
+  return lines.map((line) => ({
+    amount: line.amount,
+    classification: {
+      entity_id: line.classification.entity_id,
+      category_id: line.classification.category_id,
+      category: line.classification.category
+        ? { full_path: line.classification.category.full_path }
+        : null,
+    },
+  }));
 }
 
 function buildStatsFromTransactions(
@@ -216,6 +210,8 @@ export async function getSidebarEntityNav(
           })
           .eq("classification.entity_id", entity.id)
           .is("plaid_removed_at", null)
+          // Splits: a split parent is resolved (legs all categorized) — not backlog.
+          .is("split_at", null)
           .gte("transaction_date", period.start)
           .lt("transaction_date", period.end);
 

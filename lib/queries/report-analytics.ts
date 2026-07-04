@@ -3,7 +3,7 @@ import { isBookedOperatingExpense } from "@/lib/category-expense";
 import { getCpaReviewCategoryIdSet, needsReviewCategory } from "@/lib/category-review";
 import { extractVendorSearchKey } from "@/lib/suggestions/category-suggestions";
 import { createClient } from "@/lib/supabase/server";
-import { fetchPeriodTransactions as fetchPeriodTransactionsBase } from "@/lib/queries/fetch-period-transactions";
+import { fetchLedgerExpenseLines } from "@/lib/queries/ledger-expense-lines";
 
 type TxRow = {
   id: string;
@@ -26,36 +26,39 @@ export function uncategorizedDaysOld(transactionDate: string, now: Date = new Da
   return Math.max(0, Math.floor((now.getTime() - txDate.getTime()) / (1000 * 60 * 60 * 24)));
 }
 
-const ANALYTICS_SELECT = `
-  id,
-  amount,
-  transaction_date,
-  description,
-  vendor,
-  account:accounts!inner(slug, display_name),
-  classification:classifications!inner(
-    entity_id,
-    category_id,
-    entity:entities!inner(slug, name),
-    category:categories(full_path)
-  )
-`;
-
-function fetchPeriodTransactions(
+async function fetchPeriodTransactions(
   supabase: Awaited<ReturnType<typeof createClient>>,
   start: string,
   end: string,
   entitySlug?: string,
 ): Promise<TxRow[]> {
-  // OPT-08: same select/filters/ascending order via the shared period fetcher.
-  return fetchPeriodTransactionsBase<TxRow>({
-    supabase,
-    select: ANALYTICS_SELECT,
-    start,
-    end,
-    entitySlug,
-    order: "asc",
-  });
+  // Splits: source expense lines (split parents replaced by their legs, each leg keyed on its own
+  // entity + carrying the parent's vendor/account) so vendor/account rollups apportion a split charge
+  // across its legs. Backlog-style views (aging/progress) also route through here — legs are always
+  // categorized, and split parents are excluded, so they never read as uncategorized.
+  const lines = await fetchLedgerExpenseLines({ supabase, start, end, entitySlug });
+  return lines.map((line) => ({
+    id: line.legId ?? line.id,
+    amount: line.amount,
+    transaction_date: line.transaction_date,
+    description: line.description,
+    vendor: line.vendor,
+    classification: {
+      entity_id: line.classification.entity_id,
+      category_id: line.classification.category_id,
+      entity: {
+        slug: line.classification.entity?.slug ?? "",
+        name: line.classification.entity?.name ?? "",
+      },
+      category: line.classification.category
+        ? { full_path: line.classification.category.full_path }
+        : null,
+    },
+    account: {
+      slug: line.account?.slug ?? "",
+      display_name: line.account?.display_name ?? "",
+    },
+  }));
 }
 
 export type TopVendorRow = {

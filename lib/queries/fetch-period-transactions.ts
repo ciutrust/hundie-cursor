@@ -28,6 +28,8 @@ export type FetchPeriodTransactionsOptions = {
   entitySlug?: string;
   /** Filter on the embedded `classification.category_id`. */
   categoryId?: string;
+  /** Filter to a set of top-level `account_id`s (e.g. the personal-card business report). */
+  accountIds?: string[];
   /** Add a `transaction_date` primary display sort (with `id` tiebreaker); omit to page in stable `id` order only. */
   order?: "asc" | "desc";
   /**
@@ -35,13 +37,22 @@ export type FetchPeriodTransactionsOptions = {
    * — pass `false` only for a surface that must still see removed rows (none today).
    */
   excludeRemoved?: boolean;
+  /**
+   * Splits: exclude rows with a `split_at` timestamp (a transaction split into legs — its WHOLE
+   * classification must not be counted; its legs are counted via lib/queries/ledger-expense-lines.ts
+   * instead). DEFAULTS TO TRUE, mirroring excludeRemoved — every expense/report/backlog consumer that
+   * routes through this fetcher drops split parents automatically. Pass `false` for the raw review
+   * LIST, which shows a split parent (as a "Split" row) so the user can edit it.
+   */
+  excludeSplitParents?: boolean;
 };
 
 export async function fetchPeriodTransactions<T>(
   opts: FetchPeriodTransactionsOptions,
 ): Promise<T[]> {
-  const { supabase, select, start, end, entityId, entitySlug, categoryId, order } = opts;
+  const { supabase, select, start, end, entityId, entitySlug, categoryId, accountIds, order } = opts;
   const excludeRemoved = opts.excludeRemoved !== false;
+  const excludeSplitParents = opts.excludeSplitParents !== false;
   return paginateAll<T>(async (from, pageSize) => {
     let query = supabase
       .from("transactions")
@@ -52,6 +63,10 @@ export async function fetchPeriodTransactions<T>(
 
     // C4: top-level `transactions` column — composes with the embed select + the other filters.
     if (excludeRemoved) query = query.is("plaid_removed_at", null);
+    // Splits: default-on, same safety argument as excludeRemoved — a split parent's whole
+    // classification is never counted; its legs come from ledger-expense-lines.ts.
+    if (excludeSplitParents) query = query.is("split_at", null);
+    if (accountIds && accountIds.length > 0) query = query.in("account_id", accountIds);
 
     if (order) {
       const ascending = order === "asc";
