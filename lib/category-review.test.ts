@@ -50,6 +50,17 @@ describe("getCpaReviewCategoryIdSet (OPT-07)", () => {
     } as any;
     expect(await getCpaReviewCategoryIdSet(stub)).toEqual(new Set(["ama-id"]));
   });
+
+  it("B4: throws on a query error instead of silently returning an empty set", async () => {
+    const stub = {
+      from: () => ({
+        select: () => ({
+          in: async () => ({ data: null, error: { message: "boom" } }),
+        }),
+      }),
+    } as any;
+    await expect(getCpaReviewCategoryIdSet(stub)).rejects.toThrow(/boom/);
+  });
 });
 
 describe("reviewBacklogOrClause (BUG-14/OPT-06)", () => {

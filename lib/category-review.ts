@@ -13,10 +13,13 @@ export function needsCategoryReview(categoryFullPath: string | null | undefined)
 
 /** Category ids whose full_path is a CPA-review path ("Ask My Accountant"). Centralized (OPT-07). */
 export async function getCpaReviewCategoryIdSet(supabase: SupabaseClient): Promise<Set<string>> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("categories")
     .select("id")
     .in("full_path", [...CPA_REVIEW_CATEGORY_PATHS]);
+  // B4: throw, never coerce a failed query to an empty set — an empty set silently makes every
+  // "Ask My Accountant" row stop counting as backlog (wrong counts, no error) across the whole app.
+  if (error) throw new Error(`getCpaReviewCategoryIdSet failed: ${error.message}`);
   return new Set((data ?? []).map((row: { id: string }) => row.id));
 }
 
