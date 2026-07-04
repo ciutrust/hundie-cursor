@@ -16,6 +16,8 @@ export type ConnectionView = {
   institution: string | null;
   status: string;
   lastSyncedAt: string | null;
+  /** #10: the cutover date — transactions before this are not pulled from Plaid (CSV owns the pre-cutover history). */
+  syncFromDate: string | null;
   links: ConnectionLink[];
 };
 
@@ -36,7 +38,7 @@ export async function getConnections(): Promise<ConnectionView[]> {
   const [{ data: connections, error: cErr }, { data: links, error: lErr }] = await Promise.all([
     admin
       .from("bank_connections")
-      .select("id, institution, status, last_synced_at")
+      .select("id, institution, status, last_synced_at, sync_from_date")
       .order("created_at", { ascending: true }),
     admin
       .from("plaid_account_links")
@@ -67,6 +69,7 @@ export async function getConnections(): Promise<ConnectionView[]> {
     institution: c.institution,
     status: c.status,
     lastSyncedAt: c.last_synced_at,
+    syncFromDate: (c as { sync_from_date?: string | null }).sync_from_date ?? null,
     links: byConnection.get(c.id) ?? [],
   }));
 }

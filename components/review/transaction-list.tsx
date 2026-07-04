@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,6 +22,7 @@ import { CategorySearchSelect } from "@/components/review/category-search-select
 import { CategorySuggestionChips } from "@/components/review/category-suggestion-chips";
 import { TransactionSearchBar } from "@/components/review/transaction-search-bar";
 import { bulkReclassifyTransactions, reclassifyTransaction } from "@/lib/actions/reclassify";
+import { groupUndoRestores, type UndoRestore } from "@/lib/review/undo";
 import type { SuggestionOutcome } from "@/lib/actions/suggestion-events";
 import { getAiCategorySuggestion } from "@/lib/actions/ai-category-suggestion";
 import {
@@ -61,6 +63,8 @@ type TransactionListProps = {
   entitySlug: string;
   /** Transaction ids with a stored AI suggestion — shows violet badge in list */
   aiSuggestionTxIds?: Set<string>;
+  /** #8: the next entity that still has a backlog, for the guided empty state. */
+  nextUp?: { slug: string; name: string; count: number } | null;
 };
 
 export function TransactionList({
@@ -71,6 +75,7 @@ export function TransactionList({
   month,
   entitySlug,
   aiSuggestionTxIds,
+  nextUp,
 }: TransactionListProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailTransaction, setDetailTransaction] = useState<TransactionWithDetails | null>(null);
@@ -83,6 +88,32 @@ export function TransactionList({
   const [, startQuick] = useTransition();
   const [quickClassifyingId, setQuickClassifyingId] = useState<string | null>(null);
   const [inlineSuggestions, setInlineSuggestions] = useState<Record<string, CategorySuggestion | null>>({});
+
+  // #2: transient one-click Undo after a quick-classify / bulk-assign.
+  const [undo, setUndo] = useState<{ label: string; restores: UndoRestore[] } | null>(null);
+  const [undoing, startUndo] = useTransition();
+
+  useEffect(() => {
+    if (!undo) return;
+    const timer = setTimeout(() => setUndo(null), 12000);
+    return () => clearTimeout(timer);
+  }, [undo]);
+
+  function runUndo() {
+    if (!undo) return;
+    const groups = groupUndoRestores(undo.restores);
+    startUndo(async () => {
+      for (const group of groups) {
+        await bulkReclassifyTransactions({
+          classificationIds: group.classificationIds,
+          entityId: group.entityId,
+          categoryId: group.categoryId,
+          entitySlug,
+        });
+      }
+      setUndo(null);
+    });
+  }
 
   const filteredTransactions = useMemo(
     () => filterTransactions(transactions, filters),
@@ -205,6 +236,12 @@ export function TransactionList({
 
   function quickClassify(tx: TransactionWithDetails, suggestion: CategorySuggestion) {
     setQuickClassifyingId(tx.id);
+    // #2: snapshot the prior state BEFORE the write so a mis-click is one click away from reverting.
+    const prior: UndoRestore = {
+      classificationId: tx.classification.id,
+      entityId: tx.classification.entity_id,
+      categoryId: tx.classification.category_id,
+    };
     startQuick(async () => {
       await reclassifyTransaction({
         classificationId: tx.classification.id,
@@ -224,6 +261,10 @@ export function TransactionList({
         },
       });
       setQuickClassifyingId(null);
+      setUndo({
+        label: `Classified “${tx.description}” as ${shortCategoryName(suggestion.fullPath)}`,
+        restores: [prior],
+      });
       // C2: no router.refresh() — the action's revalidatePath already re-renders this RSC. A second
       // refresh here doubled every classify click into ~60-80 backend calls.
     });
@@ -266,17 +307,47 @@ export function TransactionList({
     setFilters((current) => ({ ...current, similarVendorKey: null }));
   }
 
-  function handleBulkComplete() {
+  function handleBulkComplete(restores: UndoRestore[], count: number) {
     setBulkOpen(false);
     clearSelection();
     // After assigning a batch (e.g. a Find-similar set), drop the filters so the view snaps back
     // to the full list instead of getting stuck on a now-empty filtered set.
     setFilters(EMPTY_TRANSACTION_FILTERS);
+    if (restores.length > 0) {
+      setUndo({
+        label: `Assigned ${count} transaction${count === 1 ? "" : "s"}`,
+        restores,
+      });
+    }
   }
 
+  const undoBanner = undo ? (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 shadow-sm">
+      <p className="text-sm">
+        <span aria-hidden>↩ </span>
+        {undo.label}
+      </p>
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" onClick={runUndo} disabled={undoing}>
+          {undoing ? "Undoing…" : "Undo"}
+        </Button>
+        <button
+          type="button"
+          onClick={() => setUndo(null)}
+          aria-label="Dismiss"
+          className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  ) : null;
+
   if (transactions.length === 0) {
+    const thisEntityName = entities.find((entity) => entity.slug === entitySlug)?.name ?? "This entity";
     return (
       <div className="space-y-3">
+        {undoBanner}
         <TransactionSearchBar
           filters={filters}
           onChange={setFilters}
@@ -285,13 +356,31 @@ export function TransactionList({
           categoryOptions={getCategoryFilterOptions([], categories)}
           accountOptions={[]}
         />
-        <p className="text-sm text-muted-foreground">No transactions for this view.</p>
+        {/* #8: guided empty state — celebrate the clear, then point at the next entity with a backlog. */}
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
+          <p className="font-medium text-emerald-700 dark:text-emerald-400">
+            ✓ Nothing to classify for {thisEntityName} here 🎉
+          </p>
+          {nextUp ? (
+            <Link
+              href={`/review/${nextUp.slug}/uncategorized`}
+              className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+            >
+              Next: {nextUp.name} — {nextUp.count} to classify →
+            </Link>
+          ) : (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Everything is classified across all entities. Nice work.
+            </p>
+          )}
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-3">
+      {undoBanner}
       <TransactionSearchBar
         filters={filters}
         onChange={setFilters}
@@ -548,6 +637,7 @@ function ClassificationForm({
           categories={entityCategories}
           value={categoryId}
           onChange={onCategoryChange}
+          entitySlug={selectedEntity?.slug}
         />
       ) : (
         <p className="text-sm text-muted-foreground">
@@ -764,7 +854,7 @@ type BulkAssignDialogProps = {
   defaultEntityId: string;
   entitySlug: string;
   onClose: () => void;
-  onComplete: () => void;
+  onComplete: (restores: UndoRestore[], count: number) => void;
 };
 
 function BulkAssignDialog({
@@ -871,6 +961,12 @@ function BulkAssignDialog({
 
   function handleSave() {
     setError(null);
+    // #2: snapshot each row's prior entity+category BEFORE the write, so undo can restore each to its own.
+    const restores: UndoRestore[] = transactions.map((tx) => ({
+      classificationId: tx.classification.id,
+      entityId: tx.classification.entity_id,
+      categoryId: tx.classification.category_id,
+    }));
     startTransition(async () => {
       const result = await bulkReclassifyTransactions({
         classificationIds: transactions.map((tx) => tx.classification.id),
@@ -885,7 +981,7 @@ function BulkAssignDialog({
         return;
       }
 
-      onComplete();
+      onComplete(restores, transactions.length);
       // C2: revalidatePath in the action already refreshes the RSC; no redundant router.refresh().
     });
   }

@@ -73,6 +73,14 @@ export default async function ConnectionsPage() {
                   ) : (
                     <span className="text-xs text-muted-foreground">Never synced</span>
                   )}
+                  {c.syncFromDate ? (
+                    <span
+                      className="text-xs text-muted-foreground"
+                      title="Plaid pulls transactions on/after this cutover date. Earlier history comes from the CSV import — the two never overlap."
+                    >
+                      Pulling since {new Date(`${c.syncFromDate}T00:00:00`).toLocaleDateString()}
+                    </span>
+                  ) : null}
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                       STATUS_STYLES[c.status] ?? "bg-muted text-muted-foreground"
