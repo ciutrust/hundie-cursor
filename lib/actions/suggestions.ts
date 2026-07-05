@@ -56,6 +56,7 @@ async function fetchLedgerRows(
   supabase: ServerClient,
   entityId: string,
   tokens: string[],
+  flowSign: number | null = null,
 ): Promise<LedgerRow[]> {
   if (tokens.length === 0) return [];
 
@@ -64,7 +65,7 @@ async function fetchLedgerRows(
     return [`vendor.ilike.%${pattern}%`, `description.ilike.%${pattern}%`];
   });
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("transactions")
     .select(
       `
@@ -82,6 +83,16 @@ async function fetchLedgerRows(
     .eq("classification.entity_id", entityId)
     .not("classification.category_id", "is", null)
     .or(orFilters.join(","));
+
+  // Flow separation: only learn from same-direction history. The distinguishing words ("deposit",
+  // "fee", "transfer") are stop-worded out of the search tokens, so the ilike match pulls BOTH a
+  // vendor's daily inflows (merchant DEPOSITS → Membership Income) and its monthly outflows (merchant
+  // FEES → Merchant Fees). Without this filter the 341-vs-46 majority makes income win for a fee row.
+  // Sign is the ground truth for flow (outflow > 0, inflow < 0).
+  if (flowSign && flowSign > 0) query = query.gt("amount", 0);
+  else if (flowSign && flowSign < 0) query = query.lt("amount", 0);
+
+  const { data, error } = await query;
 
   if (error) throw new Error(error.message);
 
@@ -147,9 +158,16 @@ async function fetchBlendedSuggestions(
   }
 
   try {
+    // Flow of the target (outflow > 0, inflow < 0); null = unknown amount → no separation applied.
+    const flowSign =
+      options?.amount != null && options.amount !== 0 ? Math.sign(options.amount) : null;
+
     const [qbRows, ledgerRows, eventRows] = await Promise.all([
-      entitySlug === "gbsl" ? fetchQbTrainingRows(supabase, entityId, tokens) : Promise.resolve([]),
-      fetchLedgerRows(supabase, entityId, tokens),
+      // qb_training_expenses is EXPENSE data — never let it suggest an expense category for an inflow.
+      entitySlug === "gbsl" && flowSign !== -1
+        ? fetchQbTrainingRows(supabase, entityId, tokens)
+        : Promise.resolve([]),
+      fetchLedgerRows(supabase, entityId, tokens, flowSign),
       fetchSuggestionEventRows(supabase, entityId, tokens),
     ]);
 

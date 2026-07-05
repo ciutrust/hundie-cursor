@@ -189,6 +189,33 @@ export function filterTransactions(
   });
 }
 
+/**
+ * Transaction ids that currently show a one-click suggestion "bubble" on the Classify list —
+ * either an inline deterministic pill (keyed by vendor) or a stored AI badge (keyed by id). Pure so
+ * the "Suggested only" toggle and its count are unit-testable without the client component.
+ *
+ * `inlineSuggestions` is the vendor-key → suggestion map the list loads client-side; a null value
+ * means "looked up, no confident match" and must NOT count as a bubble.
+ */
+export function suggestedTransactionIds(
+  transactions: TransactionWithDetails[],
+  inlineSuggestions: Record<string, unknown>,
+  aiSuggestionTxIds?: Set<string>,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const tx of transactions) {
+    if (aiSuggestionTxIds?.has(tx.id)) {
+      ids.add(tx.id);
+      continue;
+    }
+    // A classified (or split) row shows no inline pill — only unclassified rows get one.
+    if (tx.classification.category_id) continue;
+    const key = transactionVendorKey(tx);
+    if (key && inlineSuggestions[key]) ids.add(tx.id);
+  }
+  return ids;
+}
+
 export function hasActiveTransactionFilters(filters: TransactionFilterState): boolean {
   return (
     filters.searchText.trim().length > 0 ||

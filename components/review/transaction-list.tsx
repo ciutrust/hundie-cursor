@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +41,7 @@ import {
   getAccountFilterOptions,
   getCategoryFilterOptions,
   isReviewBacklogTransaction,
+  suggestedTransactionIds,
   transactionVendorKey,
   type TransactionFilterState,
 } from "@/lib/transaction-filters";
@@ -67,6 +69,8 @@ type TransactionListProps = {
   aiSuggestionTxIds?: Set<string>;
   /** #8: the next entity that still has a backlog, for the guided empty state. */
   nextUp?: { slug: string; name: string; count: number } | null;
+  /** The other flow (income↔expenses) and its backlog count, so an empty tab points to where the work is. */
+  crossFlow?: { flowLabel: string; count: number; href: string } | null;
 };
 
 export function TransactionList({
@@ -78,6 +82,7 @@ export function TransactionList({
   entitySlug,
   aiSuggestionTxIds,
   nextUp,
+  crossFlow,
 }: TransactionListProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailTransaction, setDetailTransaction] = useState<TransactionWithDetails | null>(null);
@@ -91,6 +96,10 @@ export function TransactionList({
   const [, startQuick] = useTransition();
   const [quickClassifyingId, setQuickClassifyingId] = useState<string | null>(null);
   const [inlineSuggestions, setInlineSuggestions] = useState<Record<string, CategorySuggestion | null>>({});
+  // "Suggested only" filter + on-demand full-coverage suggestion generation.
+  const [suggestedOnly, setSuggestedOnly] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [generateProgress, setGenerateProgress] = useState<{ done: number; total: number } | null>(null);
 
   // #2: transient one-click Undo after a quick-classify / bulk-assign.
   const [undo, setUndo] = useState<{ label: string; restores: UndoRestore[] } | null>(null);
@@ -121,10 +130,16 @@ export function TransactionList({
     });
   }
 
-  const filteredTransactions = useMemo(
-    () => filterTransactions(transactions, filters),
-    [transactions, filters],
+  // Rows that currently show a suggestion bubble (inline pill or AI badge), for the "Suggested" filter.
+  const suggestedTxIds = useMemo(
+    () => suggestedTransactionIds(transactions, inlineSuggestions, aiSuggestionTxIds),
+    [transactions, inlineSuggestions, aiSuggestionTxIds],
   );
+
+  const filteredTransactions = useMemo(() => {
+    const base = filterTransactions(transactions, filters);
+    return suggestedOnly ? base.filter((tx) => suggestedTxIds.has(tx.id)) : base;
+  }, [transactions, filters, suggestedOnly, suggestedTxIds]);
 
   const sortedTransactions = useMemo(() => {
     const arr = [...filteredTransactions];
@@ -230,15 +245,47 @@ export function TransactionList({
       })),
     })
       .then((result) => {
-        if (!cancelled) setInlineSuggestions(result.suggestions);
+        // Merge (not replace) so pills filled by "Generate suggestions" for the long tail survive
+        // this top-50 auto-load re-firing after a classify changes vendorReps.
+        if (!cancelled) setInlineSuggestions((prev) => ({ ...prev, ...result.suggestions }));
       })
       .catch(() => {
-        if (!cancelled) setInlineSuggestions({});
+        // Keep whatever is already loaded on a transient failure.
       });
     return () => {
       cancelled = true;
     };
   }, [entitySlug, vendorReps]);
+
+  // "Generate suggestions": compute inline suggestions for EVERY unclassified vendor (past the 50-vendor
+  // auto-load cap), in batches, merging into the pill map. Deterministic — no AI, nothing is written to
+  // the ledger until the operator clicks a suggestion.
+  async function generateSuggestions() {
+    if (!supportsSuggestions || vendorReps.length === 0 || generating) return;
+    setGenerating(true);
+    setGenerateProgress({ done: 0, total: vendorReps.length });
+    try {
+      for (let i = 0; i < vendorReps.length; i += 50) {
+        const batch = vendorReps.slice(i, i + 50);
+        const result = await getInlineCategorySuggestions({
+          entitySlug,
+          vendors: batch.map(({ vendorKey, description, vendor, amount }) => ({
+            vendorKey,
+            description,
+            vendor,
+            amount,
+          })),
+        });
+        setInlineSuggestions((prev) => ({ ...prev, ...result.suggestions }));
+        setGenerateProgress({ done: Math.min(i + 50, vendorReps.length), total: vendorReps.length });
+      }
+    } catch {
+      // Fail quiet — rows without a pill still classify via the dialog.
+    } finally {
+      setGenerating(false);
+      setGenerateProgress(null);
+    }
+  }
 
   function quickClassify(tx: TransactionWithDetails, suggestion: CategorySuggestion) {
     setQuickClassifyingId(tx.id);
@@ -306,6 +353,7 @@ export function TransactionList({
     if (!key) return; // no extractable vendor token — nothing meaningful to match
     const matches = transactions.filter((candidate) => transactionVendorKey(candidate) === key);
     setFilters({ ...EMPTY_TRANSACTION_FILTERS, similarVendorKey: key });
+    setSuggestedOnly(false);
     setSelectedIds(new Set(matches.map((candidate) => candidate.id)));
   }
 
@@ -319,6 +367,7 @@ export function TransactionList({
     // After assigning a batch (e.g. a Find-similar set), drop the filters so the view snaps back
     // to the full list instead of getting stuck on a now-empty filtered set.
     setFilters(EMPTY_TRANSACTION_FILTERS);
+    setSuggestedOnly(false);
     if (restores.length > 0) {
       setUndo({
         label: `Assigned ${count} transaction${count === 1 ? "" : "s"}`,
@@ -425,7 +474,15 @@ export function TransactionList({
           <p className="font-medium text-emerald-700 dark:text-emerald-400">
             ✓ Nothing to classify for {thisEntityName} here 🎉
           </p>
-          {nextUp ? (
+          {crossFlow && crossFlow.count > 0 ? (
+            <Link
+              href={crossFlow.href}
+              className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+            >
+              But {crossFlow.count} {crossFlow.flowLabel} transaction{crossFlow.count === 1 ? "" : "s"} still
+              need classifying →
+            </Link>
+          ) : nextUp ? (
             <Link
               href={`/review/${nextUp.slug}/uncategorized`}
               className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
@@ -482,6 +539,32 @@ export function TransactionList({
             >
               Unclassified & AMA
               {!reviewBacklogFilterActive ? ` (${reviewBacklogCount})` : null}
+            </Button>
+          ) : null}
+          {supportsSuggestions && vendorReps.length > 0 ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={generateSuggestions}
+              disabled={generating}
+              title="Compute one-click suggestions for every unclassified vendor (deterministic — no AI, nothing saved until you click a suggestion)"
+            >
+              <RefreshCw className={cn("h-4 w-4", generating && "animate-spin")} />
+              {generating
+                ? `Generating${generateProgress ? ` ${generateProgress.done}/${generateProgress.total}` : ""}…`
+                : "Generate suggestions"}
+            </Button>
+          ) : null}
+          {suggestedTxIds.size > 0 ? (
+            <Button
+              type="button"
+              variant={suggestedOnly ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSuggestedOnly((current) => !current)}
+              title="Show only rows that have a one-click suggestion"
+            >
+              Suggested{!suggestedOnly ? ` (${suggestedTxIds.size})` : ""}
             </Button>
           ) : null}
           {filters.similarVendorKey ? (
