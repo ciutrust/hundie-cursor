@@ -715,6 +715,57 @@ export async function getEntityTransactions(
   return { groups, transactions };
 }
 
+/**
+ * Backlog counts for one entity split by flow — outflow ("Expenses" tab) vs inflow ("Income" tab).
+ * Powers the tab labels + the empty-state cross-link so an all-income backlog (e.g. ACAA's 11
+ * intercompany-funding inflows) isn't hidden behind the expense-first default. HEAD counts (null + AMA
+ * per flow), mirroring getSidebarEntityNav; the amount-sign filter lives on the base transactions table
+ * so it composes with the embedded classification filter, and matches getEntityTransactions' JS split
+ * (inflow = amount < 0, outflow = amount > 0; zero-amount rows fall in neither, as there).
+ */
+export async function getUnclassifiedFlowCounts(
+  period: PeriodRange,
+  entitySlug: string,
+): Promise<{ expense: number; income: number }> {
+  const supabase = await createClient();
+  const { data: entity } = await supabase
+    .from("entities")
+    .select("id")
+    .eq("slug", entitySlug)
+    .single();
+  if (!entity) return { expense: 0, income: 0 };
+
+  const cpaReviewIds = [...(await getCpaReviewCategoryIdSet(supabase))];
+
+  const countFlow = async (flow: "expense" | "income"): Promise<number> => {
+    const base = () => {
+      const q = supabase
+        .from("transactions")
+        .select("id, classification:classifications!inner(entity_id, category_id)", {
+          count: "exact",
+          head: true,
+        })
+        .eq("classification.entity_id", entity.id)
+        .is("plaid_removed_at", null)
+        .is("split_at", null)
+        .gte("transaction_date", period.start)
+        .lt("transaction_date", period.end);
+      return flow === "income" ? q.lt("amount", 0) : q.gt("amount", 0);
+    };
+
+    const nullRes = await base().is("classification.category_id", null);
+    let count = nullRes.count ?? 0;
+    if (cpaReviewIds.length > 0) {
+      const amaRes = await base().in("classification.category_id", cpaReviewIds);
+      count += amaRes.count ?? 0;
+    }
+    return count;
+  };
+
+  const [expense, income] = await Promise.all([countFlow("expense"), countFlow("income")]);
+  return { expense, income };
+}
+
 export async function getTransactionById(id: string): Promise<TransactionWithDetails | null> {
   const supabase = await createClient();
   const { data, error } = await supabase.from("transactions").select(TRANSACTION_SELECT).eq("id", id).maybeSingle();

@@ -16,6 +16,7 @@ export function EntityHomeCards({ stats, period, reportsEntityHref }: EntityHome
   const styles = ENTITY_ACCENT_STYLES[meta.accent];
   const periodQuery = periodQueryString(period);
   const uncategorizedHref = `/review/${stats.slug}/uncategorized?${periodQuery}`;
+  const incomeHref = `${uncategorizedHref}&flow=income`;
   const reportsHref =
     reportsEntityHref ?? `/reports/transactions?entity=${stats.slug}&${periodQuery}`;
 
@@ -34,7 +35,7 @@ export function EntityHomeCards({ stats, period, reportsEntityHref }: EntityHome
         </Link>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Link
           href={reportsHref}
           className={cn(
@@ -54,17 +55,36 @@ export function EntityHomeCards({ stats, period, reportsEntityHref }: EntityHome
           href={uncategorizedHref}
           className={cn(
             "rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:bg-muted/30",
-            stats.unclassifiedCount > 0 ? "border-t-[3px] border-t-destructive" : "border-t-[3px]",
-            stats.unclassifiedCount > 0 ? undefined : styles.border,
+            "border-t-[3px]",
+            stats.unclassifiedExpenseCount > 0 ? "border-t-destructive" : styles.border,
           )}
         >
-          <p className="text-xs font-medium text-muted-foreground">Uncategorized · {period.label}</p>
+          <p className="text-xs font-medium text-muted-foreground">Expenses to classify · {period.label}</p>
           <p className="mt-2 text-2xl font-semibold tabular-nums">
-            {stats.unclassifiedCount.toLocaleString()}
+            {stats.unclassifiedExpenseCount.toLocaleString()}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {stats.unclassifiedCount > 0
-              ? `${formatCurrency(stats.unclassifiedTotal)} to classify →`
+            {stats.unclassifiedExpenseCount > 0
+              ? `${formatCurrency(stats.unclassifiedExpenseTotal)} to classify →`
+              : "All classified"}
+          </p>
+        </Link>
+
+        <Link
+          href={incomeHref}
+          className={cn(
+            "rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:bg-muted/30",
+            "border-t-[3px]",
+            stats.unclassifiedIncomeCount > 0 ? "border-t-destructive" : styles.border,
+          )}
+        >
+          <p className="text-xs font-medium text-muted-foreground">Income to classify · {period.label}</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums">
+            {stats.unclassifiedIncomeCount.toLocaleString()}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {stats.unclassifiedIncomeCount > 0
+              ? `${formatCurrency(stats.unclassifiedIncomeTotal)} to classify →`
               : "All classified"}
           </p>
         </Link>

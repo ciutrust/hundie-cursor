@@ -12,6 +12,12 @@ export type EntityHomeStats = {
   transactionCount: number;
   unclassifiedCount: number;
   unclassifiedTotal: number;
+  // Flow-split backlog (outflow = expenses, inflow = income) so the two cards each show the right
+  // count + dollars — an all-income backlog no longer reads as "$0.00 to classify".
+  unclassifiedExpenseCount: number;
+  unclassifiedExpenseTotal: number;
+  unclassifiedIncomeCount: number;
+  unclassifiedIncomeTotal: number;
   topCategory: { name: string; total: number } | null;
 };
 
@@ -60,6 +66,10 @@ function buildStatsFromTransactions(
   let expenseTotal = 0;
   let unclassifiedCount = 0;
   let unclassifiedTotal = 0;
+  let unclassifiedExpenseCount = 0;
+  let unclassifiedExpenseTotal = 0;
+  let unclassifiedIncomeCount = 0;
+  let unclassifiedIncomeTotal = 0;
   const categoryTotals = new Map<string, number>();
 
   for (const tx of transactions) {
@@ -68,7 +78,17 @@ function buildStatsFromTransactions(
 
     if (isReview) {
       unclassifiedCount += 1;
-      if (Number(tx.amount) > 0) unclassifiedTotal += Number(tx.amount);
+      const amount = Number(tx.amount);
+      // Split by flow to match the Classify tabs (outflow = amount > 0, inflow = amount < 0; a
+      // zero-amount row shows on neither tab, as in getEntityTransactions/getUnclassifiedFlowCounts).
+      if (amount > 0) {
+        unclassifiedExpenseCount += 1;
+        unclassifiedExpenseTotal += amount;
+        unclassifiedTotal += amount;
+      } else if (amount < 0) {
+        unclassifiedIncomeCount += 1;
+        unclassifiedIncomeTotal += Math.abs(amount);
+      }
       continue;
     }
 
@@ -95,6 +115,10 @@ function buildStatsFromTransactions(
     transactionCount: transactions.length,
     unclassifiedCount,
     unclassifiedTotal,
+    unclassifiedExpenseCount,
+    unclassifiedExpenseTotal,
+    unclassifiedIncomeCount,
+    unclassifiedIncomeTotal,
     topCategory,
   };
 }

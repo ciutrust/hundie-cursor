@@ -9,10 +9,11 @@ import {
   getCategoriesForEntity,
   getClassifiableEntities,
   getEntityTransactions,
+  getUnclassifiedFlowCounts,
 } from "@/lib/queries/review";
 import { getPersonalAiBacklog } from "@/lib/queries/ai-suggestions";
 import { getSidebarEntityNav } from "@/lib/queries/entity-home";
-import { formatCurrency } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 import { isExpenseAmount } from "@/lib/category-expense";
 
 export const maxDuration = 300;
@@ -34,7 +35,7 @@ export default async function EntityUncategorizedPage({ params, searchParams }: 
     notFound();
   }
 
-  const [entities, { transactions }, categories, categoriesByEntity, aiBacklog, entityNav] =
+  const [entities, { transactions }, categories, categoriesByEntity, aiBacklog, entityNav, flowCounts] =
     await Promise.all([
       getClassifiableEntities(),
       getEntityTransactions(period, entitySlug, "unclassified", flow),
@@ -42,7 +43,21 @@ export default async function EntityUncategorizedPage({ params, searchParams }: 
       getCategoriesByEntity(),
       entitySlug === "personal" ? getPersonalAiBacklog() : Promise.resolve([]),
       getSidebarEntityNav(period),
+      getUnclassifiedFlowCounts(period, entitySlug),
     ]);
+
+  // Signpost the other flow so an all-income backlog isn't hidden behind the expense-first default.
+  const crossFlow = isIncome
+    ? {
+        flowLabel: "expense",
+        count: flowCounts.expense,
+        href: `/review/${entitySlug}/uncategorized?${periodQuery}`,
+      }
+    : {
+        flowLabel: "income",
+        count: flowCounts.income,
+        href: `/review/${entitySlug}/uncategorized?${periodQuery}&flow=income`,
+      };
 
   const entity = entities.find((item) => item.slug === entitySlug);
   if (!entity) notFound();
@@ -87,28 +102,6 @@ export default async function EntityUncategorizedPage({ params, searchParams }: 
             {isIncome ? "money in" : "remaining"} across {transactions.length} transaction
             {transactions.length === 1 ? "" : "s"} to classify
           </p>
-          <div className="flex gap-1 text-sm">
-            <Link
-              href={`/review/${entitySlug}/uncategorized?${periodQuery}`}
-              className={
-                !isIncome
-                  ? "rounded-md bg-primary/15 px-2 py-1 font-medium text-primary"
-                  : "rounded-md px-2 py-1 text-muted-foreground hover:text-foreground"
-              }
-            >
-              Expenses
-            </Link>
-            <Link
-              href={`/review/${entitySlug}/uncategorized?${periodQuery}&flow=income`}
-              className={
-                isIncome
-                  ? "rounded-md bg-primary/15 px-2 py-1 font-medium text-primary"
-                  : "rounded-md px-2 py-1 text-muted-foreground hover:text-foreground"
-              }
-            >
-              Income
-            </Link>
-          </div>
           {entitySlug === "personal" ? (
             <Link href="/review/ai" className="text-sm font-medium text-violet-600 hover:underline dark:text-violet-400">
               Bulk AI review →
@@ -120,6 +113,37 @@ export default async function EntityUncategorizedPage({ params, searchParams }: 
         </Suspense>
       </div>
 
+      {/* Prominent flow switch — a real segmented control, clearly separated from the title so it's not missed. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm font-medium text-muted-foreground">Showing</span>
+        <div className="inline-flex rounded-lg border border-border bg-card p-1 shadow-sm">
+          <Link
+            href={`/review/${entitySlug}/uncategorized?${periodQuery}`}
+            aria-current={!isIncome ? "page" : undefined}
+            className={cn(
+              "rounded-md px-4 py-2 text-sm font-semibold transition-colors",
+              !isIncome
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Expenses{flowCounts.expense > 0 ? ` (${flowCounts.expense})` : ""}
+          </Link>
+          <Link
+            href={`/review/${entitySlug}/uncategorized?${periodQuery}&flow=income`}
+            aria-current={isIncome ? "page" : undefined}
+            className={cn(
+              "rounded-md px-4 py-2 text-sm font-semibold transition-colors",
+              isIncome
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Income{flowCounts.income > 0 ? ` (${flowCounts.income})` : ""}
+          </Link>
+        </div>
+      </div>
+
       <TransactionList
         transactions={transactions}
         entities={entities}
@@ -129,6 +153,7 @@ export default async function EntityUncategorizedPage({ params, searchParams }: 
         entitySlug={entitySlug}
         aiSuggestionTxIds={aiSuggestionTxIds.size > 0 ? aiSuggestionTxIds : undefined}
         nextUp={nextUp}
+        crossFlow={crossFlow}
       />
     </div>
   );
