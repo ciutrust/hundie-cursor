@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeDueInstances, type BillDef } from "@/lib/bills/instances";
+import { computeDueInstances, computeNextInstance, type BillDef } from "@/lib/bills/instances";
 
 function bill(overrides: Partial<BillDef> = {}): BillDef {
   return {
@@ -99,5 +99,18 @@ describe("computeDueInstances — schedules & guards", () => {
       horizon: 3,
     });
     expect(rows.length).toBe(3);
+  });
+
+  it("does NOT drift month-end due dates when due_day is null (anchored on anchor_date)", () => {
+    // Regression: without a stable resolved due_day, Jan 31 clamps to Feb 28 and sticks on the 28th.
+    const monthEnd = bill({ due_day: null, anchor_date: "2026-01-31" });
+    const rows = computeDueInstances({ bill: monthEnd, latestDueDate: null, today: "2026-04-15" });
+    expect(dueDates(rows)).toEqual(["2026-03-31", "2026-04-30"]);
+  });
+
+  it("computeNextInstance preserves the month-end anchor across a clamped cycle", () => {
+    const monthEnd = bill({ due_day: null, anchor_date: "2026-01-31" });
+    // After Feb 28 (clamped), the next cycle must be Mar 31, not Mar 28.
+    expect(computeNextInstance(monthEnd, "2026-02-28")?.due_date).toBe("2026-03-31");
   });
 });

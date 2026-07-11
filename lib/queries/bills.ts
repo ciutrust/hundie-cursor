@@ -3,10 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { chunk } from "@/lib/supabase/chunk";
 import { getClassifiableEntities } from "@/lib/queries/review";
 import { fetchPeriodTransactions } from "@/lib/queries/fetch-period-transactions";
-import { getEntityDisplay, type EntityDisplayMeta } from "@/lib/entities/display";
 import { extractVendorSearchKey } from "@/lib/suggestions/category-suggestions";
 import { parseIsoDate, toIsoDate, todayIso } from "@/lib/bills/cadence";
-import { deriveBillState, isOutstanding, type BillState } from "@/lib/bills/state";
 import { computeDueInstances, type BillDef, type DueInstanceRow } from "@/lib/bills/instances";
 import {
   detectRecurringBills,
@@ -14,7 +12,16 @@ import {
   MIN_MATCH_SCORE,
   type RecurringCandidate,
 } from "@/lib/bills/match";
-import { dateWindowForCadence, type Bill, type BillInstance } from "@/lib/bills/types";
+import { dateWindowForCadence, numOrNull, type Bill, type BillInstance } from "@/lib/bills/types";
+import {
+  buildBillsDashboard,
+  type BillWithCategory,
+  type BillRow,
+  type EntityBillsGroup,
+  type BillsDashboard,
+} from "@/lib/bills/dashboard";
+
+export type { BillRow, EntityBillsGroup, BillsDashboard };
 
 // bills / bill_instances aren't in the generated DB types (no supabase CLI to regen). Access them
 // through an untyped client view; the row shapes are asserted here (mirrors lib/queries/proposals.ts).
@@ -99,49 +106,10 @@ export async function ensureBillInstances(
 // Dashboard
 // ---------------------------------------------------------------------------
 
-export type BillRow = {
-  bill: Bill;
-  instance: BillInstance;
-  state: BillState;
-  categoryPath: string | null;
-};
-
-export type EntityBillsGroup = {
-  entitySlug: string;
-  entityName: string;
-  display: EntityDisplayMeta;
-  rows: BillRow[];
-  totalDue: number;
-};
-
-export type BillsDashboard = {
-  groups: EntityBillsGroup[];
-  totalDue: number;
-  outstandingCount: number;
-};
-
-const STATE_ORDER: Record<BillState, number> = {
-  overdue: 0,
-  due_soon: 1,
-  upcoming: 2,
-  paid: 3,
-  skipped: 4,
-};
-
-/** One row per bill: the earliest OPEN instance (most urgent), else the latest resolved one. */
-function pickPrimaryInstance(instancesAsc: BillInstance[]): BillInstance | null {
-  const open = instancesAsc.filter((i) => i.status === "open");
-  if (open.length > 0) return open[0];
-  if (instancesAsc.length > 0) return instancesAsc[instancesAsc.length - 1];
-  return null;
-}
-
 export async function getBillsDashboard(entitySlug?: string): Promise<BillsDashboard> {
   const db = await billsTable();
   const today = todayIso();
   const entities = await getClassifiableEntities();
-  const entityById = new Map(entities.map((e) => [e.id, e]));
-  const displayOrder = new Map(entities.map((e, i) => [e.slug, e.display_order ?? i]));
 
   const targetEntityId = entitySlug ? entities.find((e) => e.slug === entitySlug)?.id : undefined;
   if (entitySlug && !targetEntityId) return { groups: [], totalDue: 0, outstandingCount: 0 };
@@ -153,7 +121,7 @@ export async function getBillsDashboard(entitySlug?: string): Promise<BillsDashb
   if (targetEntityId) billsQuery = billsQuery.eq("entity_id", targetEntityId);
   const { data: billData, error: billsError } = await billsQuery.order("name");
   if (billsError) throw billsError;
-  const bills = (billData ?? []) as (Bill & { category: { full_path: string } | null })[];
+  const bills = (billData ?? []) as BillWithCategory[];
   if (bills.length === 0) return { groups: [], totalDue: 0, outstandingCount: 0 };
 
   await ensureBillInstances(db, bills.filter((b) => b.status === "active"), today);
@@ -172,59 +140,9 @@ export async function getBillsDashboard(entitySlug?: string): Promise<BillsDashb
     instances.push(...((data ?? []) as BillInstance[]));
   }
 
-  const byBill = new Map<string, BillInstance[]>();
-  for (const inst of instances) {
-    const list = byBill.get(inst.bill_id) ?? [];
-    list.push(inst);
-    byBill.set(inst.bill_id, list);
-  }
-
-  const groupsMap = new Map<string, EntityBillsGroup>();
-  let totalDue = 0;
-  let outstandingCount = 0;
-
-  for (const bill of bills) {
-    const entity = entityById.get(bill.entity_id);
-    if (!entity) continue;
-    const instancesAsc = (byBill.get(bill.id) ?? []).sort((a, b) =>
-      a.due_date.localeCompare(b.due_date),
-    );
-    const primary = pickPrimaryInstance(instancesAsc);
-    if (!primary) continue;
-
-    const state = deriveBillState({ dueDate: primary.due_date, status: primary.status, today });
-    const group =
-      groupsMap.get(entity.slug) ??
-      ({
-        entitySlug: entity.slug,
-        entityName: entity.name,
-        display: getEntityDisplay(entity.slug),
-        rows: [],
-        totalDue: 0,
-      } satisfies EntityBillsGroup);
-
-    group.rows.push({ bill, instance: primary, state, categoryPath: bill.category?.full_path ?? null });
-    if (isOutstanding(state)) {
-      const amount = primary.expected_amount ?? bill.expected_amount ?? 0;
-      group.totalDue += amount;
-      totalDue += amount;
-      outstandingCount += 1;
-    }
-    groupsMap.set(entity.slug, group);
-  }
-
-  const groups = [...groupsMap.values()]
-    .map((g) => ({
-      ...g,
-      rows: g.rows.sort(
-        (a, b) =>
-          STATE_ORDER[a.state] - STATE_ORDER[b.state] ||
-          a.instance.due_date.localeCompare(b.instance.due_date),
-      ),
-    }))
-    .sort((a, b) => (displayOrder.get(a.entitySlug) ?? 0) - (displayOrder.get(b.entitySlug) ?? 0));
-
-  return { groups, totalDue, outstandingCount };
+  // Grouping + amount coercion + totals live in the pure buildBillsDashboard (unit-tested with the
+  // PostgREST string amounts production actually returns).
+  return buildBillsDashboard({ bills, instances, entities, today });
 }
 
 // ---------------------------------------------------------------------------
@@ -293,18 +211,19 @@ export async function getPaymentSuggestions(entitySlug?: string): Promise<BillPa
   );
   if (openInstances.length === 0) return [];
 
-  // Transactions already linked to some instance must not be re-suggested elsewhere.
+  // Transactions already linked to ANY instance must not be re-suggested — including instances of a
+  // paid one_time / paused / archived bill that no longer has an OPEN instance. Scoping this to only
+  // the bills that currently have an open instance (the previous behavior) missed those links and let
+  // one charge be confirmed against two bills. A transaction is classified to exactly one entity, so a
+  // global exclusion set can never wrongly drop a candidate from a different entity.
   const linkedTxnIds = new Set<string>();
-  const billIds = [...new Set(openInstances.map((i) => i.bill.id))];
-  for (const ids of chunk(billIds, 200)) {
-    const { data } = await db
-      .from("bill_instances")
-      .select("matched_transaction_id")
-      .in("bill_id", ids)
-      .not("matched_transaction_id", "is", null);
-    for (const row of (data ?? []) as { matched_transaction_id: string }[]) {
-      linkedTxnIds.add(row.matched_transaction_id);
-    }
+  const { data: linkedData, error: linkedError } = await db
+    .from("bill_instances")
+    .select("matched_transaction_id")
+    .not("matched_transaction_id", "is", null);
+  if (linkedError) throw linkedError;
+  for (const row of (linkedData ?? []) as { matched_transaction_id: string }[]) {
+    linkedTxnIds.add(row.matched_transaction_id);
   }
 
   const byEntity = new Map<string, OpenInstanceRow[]>();
@@ -341,10 +260,10 @@ export async function getPaymentSuggestions(entitySlug?: string): Promise<BillPa
             bill: {
               match_hint: inst.bill.match_hint,
               name: inst.bill.name,
-              expected_amount: inst.bill.expected_amount,
+              expected_amount: numOrNull(inst.bill.expected_amount),
               amount_varies: inst.bill.amount_varies,
             },
-            instance: { due_date: inst.due_date, expected_amount: inst.expected_amount },
+            instance: { due_date: inst.due_date, expected_amount: numOrNull(inst.expected_amount) },
             txn: { vendor: txn.vendor, description: txn.description, amount, transaction_date: txn.transaction_date },
           },
           { dateWindowDays },
@@ -360,7 +279,7 @@ export async function getPaymentSuggestions(entitySlug?: string): Promise<BillPa
           billName: inst.bill.name,
           entitySlug: entity.slug,
           dueDate: inst.due_date,
-          expectedAmount: inst.expected_amount,
+          expectedAmount: numOrNull(inst.expected_amount),
           transactionId: best.txn.id,
           transactionDescription: best.txn.description,
           transactionVendor: best.txn.vendor,
@@ -389,8 +308,11 @@ export async function getBillById(id: string): Promise<Bill | null> {
   const db = await billsTable();
   const { data, error } = await db.from("bills").select("*").eq("id", id).maybeSingle();
   if (error) throw error;
-  return (data as Bill | null) ?? null;
+  if (!data) return null;
+  const bill = data as Bill;
+  return { ...bill, expected_amount: numOrNull(bill.expected_amount) };
 }
+
 
 type SeedTxn = {
   transaction_date: string;

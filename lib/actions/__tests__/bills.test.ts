@@ -79,6 +79,22 @@ describe("createBill", () => {
   });
 });
 
+describe("updateBill", () => {
+  it("re-syncs bill_instances.entity_id when the bill is moved to another entity", async () => {
+    const { db } = setup({
+      categories: [],
+      bills: [{ ...activeBill, entity_id: "ent-A" }],
+      bill_instances: [openInstance({ entity_id: "ent-A" })],
+    });
+    const { updateBill } = await import("@/lib/actions/bills");
+    const res = await updateBill("bill-1", billInput({ entityId: "ent-B", categoryId: null }));
+    expect(res).toEqual({ success: true });
+    expect(db.bills.find((b) => b.id === "bill-1").entity_id).toBe("ent-B");
+    // The open instance must follow the bill's new entity — else it is matched against the wrong ledger.
+    expect(db.bill_instances.find((i) => i.id === "inst-1").entity_id).toBe("ent-B");
+  });
+});
+
 describe("confirmBillPayment", () => {
   it("marks the instance paid, links the transaction, and creates the next cycle", async () => {
     const { db } = setup({ bills: [{ ...activeBill }], bill_instances: [openInstance()] });

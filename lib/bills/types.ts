@@ -40,6 +40,19 @@ export type BillInstance = {
   updated_at: string;
 };
 
+/**
+ * Coerce a Supabase numeric column to a number (or null). PostgREST serializes Postgres `numeric` as
+ * a JSON STRING, so `expected_amount` / `paid_amount` arrive as strings at runtime even though the
+ * hand-written row types say `number | null`. Summing those with `+=` would string-concatenate and
+ * render `$NaN` — every amount read must pass through here first (mirrors the `Number(...)` coercion
+ * the rest of the app applies to `transactions.amount`).
+ */
+export function numOrNull(value: number | string | null | undefined): number | null {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** A day-window (± days) around the due date to look for a matching charge, widened for long cadences. */
 export function dateWindowForCadence(cadence: Cadence): number {
   switch (cadence) {

@@ -48,6 +48,24 @@ function nextDue(bill: BillDef, fromDueDate: string): string {
   return dueDateInMonth(target.getFullYear(), target.getMonth(), effectiveDueDay);
 }
 
+/**
+ * The stable day-of-month a monthly+ bill anchors on. Resolving it ONCE (from due_day, else the
+ * anchor_date's day, else a fallback date's day) and threading it through generation is what keeps a
+ * month-end bill from drifting: without this, nextDue re-reads the previous (already month-clamped)
+ * cursor's day, so once Jan 31 clamps to Feb 28 the bill would stick on the 28th forever.
+ */
+function resolveMonthlyDueDay(bill: BillDef, fallbackDate: string): number {
+  if (bill.due_day != null) return bill.due_day;
+  if (bill.anchor_date) return parseIsoDate(bill.anchor_date).getDate();
+  return parseIsoDate(fallbackDate).getDate();
+}
+
+/** A copy of the bill with a resolved, stable due_day for monthly+ cadences (weekly/one_time unchanged). */
+function withStableDueDay(bill: BillDef, fallbackDate: string): BillDef {
+  if (bill.cadence === "weekly" || bill.cadence === "one_time") return bill;
+  return { ...bill, due_day: resolveMonthlyDueDay(bill, fallbackDate) };
+}
+
 /** The first date of the schedule to anchor from, before rolling to the current cycle. */
 function initialBase(bill: BillDef, today: string): string {
   if (bill.anchor_date) return bill.anchor_date;
@@ -79,10 +97,11 @@ function seedFirstDue(bill: BillDef, today: string): string {
 export function computeNextInstance(bill: BillDef, afterDueDate: string): DueInstanceRow | null {
   if (bill.cadence === "one_time") return null;
   if (bill.status && bill.status !== "active") return null;
+  const resolved = withStableDueDay(bill, afterDueDate);
   return {
     bill_id: bill.id,
     entity_id: bill.entity_id,
-    due_date: nextDue(bill, afterDueDate),
+    due_date: nextDue(resolved, afterDueDate),
     expected_amount: bill.expected_amount,
   };
 }
@@ -115,19 +134,22 @@ export function computeDueInstances(input: {
     return rows;
   }
 
+  // Resolve a stable monthly anchor day ONCE so month-end bills don't drift (see withStableDueDay).
+  const resolved = withStableDueDay(bill, today);
+
   let cursor: string;
   if (latestDueDate) {
     // If the newest instance is already in the future, the current + next cycles both exist.
     if (latestDueDate > today) return [];
-    cursor = nextDue(bill, latestDueDate);
+    cursor = nextDue(resolved, latestDueDate);
   } else {
-    cursor = seedFirstDue(bill, today);
+    cursor = seedFirstDue(resolved, today);
   }
 
   for (let i = 0; i < horizon; i++) {
     push(cursor);
     if (cursor > today) break; // we've now emitted the first cycle after today (the "next")
-    cursor = nextDue(bill, cursor);
+    cursor = nextDue(resolved, cursor);
   }
 
   return rows;

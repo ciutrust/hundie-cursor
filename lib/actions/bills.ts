@@ -107,6 +107,15 @@ export async function updateBill(
     .eq("id", id);
   if (error) return { error: error.message };
 
+  // A bill can be re-assigned to another entity (the edit form allows it). bill_instances carry a
+  // denormalized entity_id that the dashboard/suggestion reads rely on, so keep it in sync — otherwise
+  // an open instance keeps the OLD entity and gets matched against the wrong entity's ledger.
+  const { error: syncError } = await db
+    .from("bill_instances")
+    .update({ entity_id: input.entityId, updated_at: new Date().toISOString() })
+    .eq("bill_id", id);
+  if (syncError) return { error: syncError.message };
+
   revalidatePath("/bills");
   return { success: true };
 }
