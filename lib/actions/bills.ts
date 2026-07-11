@@ -3,14 +3,16 @@
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireUser } from "@/lib/auth/require-user";
+import { createServiceRoleClient } from "@/lib/supabase/service-role";
 import { chunk } from "@/lib/supabase/chunk";
-import type { Cadence } from "@/lib/bills/cadence";
-import { computeNextInstance, type BillDef } from "@/lib/bills/instances";
+import { todayIso, type Cadence } from "@/lib/bills/cadence";
+import { computeDueInstances, computeNextInstance, type BillDef } from "@/lib/bills/instances";
 import type { BillStatus } from "@/lib/bills/types";
 
 // bills / bill_instances are accessed through an untyped client view (not in the generated DB types).
-// No service-role client is needed: both tables grant authenticated insert/update, and confirming a
-// payment only writes bill_instances — never the ledger (transactions / classifications).
+// Inserts/updates use the authenticated client (both tables grant those to authenticated). DELETEs
+// (only when realigning instances after a schedule edit) go through the service-role client, since
+// bill_instances has no authenticated DELETE policy — the same convention as payees/the ledger tables.
 
 type ActionResult = { success: true } | { error: string };
 
@@ -101,6 +103,14 @@ export async function updateBill(
   const categoryError = await assertCategoryInEntity(db, input.categoryId, input.entityId);
   if (categoryError) return { error: categoryError };
 
+  // Capture the pre-edit schedule so we can tell whether the cycle dates need realigning.
+  const { data: oldRow } = await db
+    .from("bills")
+    .select("cadence, due_day, anchor_date")
+    .eq("id", id)
+    .maybeSingle();
+  const old = oldRow as { cadence: string; due_day: number | null; anchor_date: string | null } | null;
+
   const { error } = await db
     .from("bills")
     .update({ ...billColumns(input), updated_at: new Date().toISOString() })
@@ -116,8 +126,61 @@ export async function updateBill(
     .eq("bill_id", id);
   if (syncError) return { error: syncError.message };
 
+  // If the schedule (cadence / due day / anchor) changed, realign the open cycles: the existing ones
+  // were generated from the OLD schedule and would otherwise linger (e.g. an overdue cycle on the old
+  // due day). Paid/skipped/matched cycles are kept as history.
+  const scheduleChanged =
+    !old ||
+    old.cadence !== input.cadence ||
+    old.due_day !== input.dueDay ||
+    old.anchor_date !== input.anchorDate;
+  if (scheduleChanged) {
+    const realignError = await realignOpenInstances(db, id);
+    if (realignError) return { error: realignError };
+  }
+
   revalidatePath("/bills");
   return { success: true };
+}
+
+/**
+ * Drop a bill's stale OPEN, unmatched cycles and regenerate the current + next from its CURRENT
+ * schedule. Called after a schedule edit so the dashboard reflects the new due date immediately.
+ * Regeneration seeds from the schedule itself (latestDueDate: null), not from old paid history, so a
+ * changed due date can never resurrect an overdue past cycle. Returns an error message or null.
+ */
+async function realignOpenInstances(db: SupabaseClient, billId: string): Promise<string | null> {
+  const { data: billRow, error: billErr } = await db
+    .from("bills")
+    .select(GENERATABLE_SELECT)
+    .eq("id", billId)
+    .maybeSingle();
+  if (billErr) return billErr.message;
+  if (!billRow) return null;
+  const bill = billRow as BillDef;
+
+  // DELETE requires the service-role client (bill_instances has no authenticated DELETE policy).
+  const svc = createServiceRoleClient();
+  const { error: delErr } = await svc
+    .from("bill_instances")
+    .delete()
+    .eq("bill_id", billId)
+    .eq("status", "open")
+    .is("matched_transaction_id", null);
+  if (delErr) return delErr.message;
+
+  if (bill.status && bill.status !== "active") return null; // paused/archived: leave with no open cycle
+
+  const rows = computeDueInstances({ bill, latestDueDate: null, today: todayIso() });
+  if (rows.length === 0) return null;
+  const { error: insErr } = await db
+    .from("bill_instances")
+    .upsert(
+      rows.map((r) => ({ ...r, status: "open" as const })),
+      { onConflict: "bill_id,due_date", ignoreDuplicates: true },
+    );
+  if (insErr) return insErr.message;
+  return null;
 }
 
 export async function setBillStatus(id: string, status: BillStatus): Promise<ActionResult> {

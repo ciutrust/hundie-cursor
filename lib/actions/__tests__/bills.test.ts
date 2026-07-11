@@ -12,6 +12,8 @@ function setup(initial: Record<string, unknown[]>) {
   vi.doMock("@/lib/auth/require-user", () => ({
     requireUser: async () => ({ error: null, user: { id: "u1", email: "u@x.com" }, supabase: client }),
   }));
+  // The realign delete goes through the service-role client — point it at the same in-memory db.
+  vi.doMock("@/lib/supabase/service-role", () => ({ createServiceRoleClient: () => client }));
   vi.doMock("next/cache", () => ({ revalidatePath: () => {} }));
   return { client, db: client.db };
 }
@@ -92,6 +94,32 @@ describe("updateBill", () => {
     expect(db.bills.find((b) => b.id === "bill-1").entity_id).toBe("ent-B");
     // The open instance must follow the bill's new entity — else it is matched against the wrong ledger.
     expect(db.bill_instances.find((i) => i.id === "inst-1").entity_id).toBe("ent-B");
+  });
+
+  it("realigns open cycles when the schedule changes (drops the stale overdue cycle)", async () => {
+    // Mirrors the real report: seeded on due_day 4 (the detected autopay day), then edited to the 1st
+    // starting in August. The old July-4 / Aug-4 cycles must be replaced, not left as an overdue row.
+    const { db } = setup({
+      categories: [],
+      bills: [{ ...activeBill, due_day: 4, anchor_date: null }],
+      bill_instances: [
+        openInstance({ id: "i-jul", due_date: "2026-07-04" }),
+        openInstance({ id: "i-aug", due_date: "2026-08-04" }),
+      ],
+    });
+    const { updateBill } = await import("@/lib/actions/bills");
+    const res = await updateBill(
+      "bill-1",
+      billInput({ entityId: "ent-A", cadence: "monthly", dueDay: 1, anchorDate: "2026-08-01", categoryId: null }),
+    );
+    expect(res).toEqual({ success: true });
+
+    const open = db.bill_instances.filter((i) => i.status === "open");
+    expect(open.some((i) => i.due_date === "2026-07-04")).toBe(false); // stale overdue cycle gone
+    expect(open.some((i) => i.due_date === "2026-08-04")).toBe(false); // stale cycle gone
+    expect(open.length).toBeGreaterThan(0);
+    // Regenerated from the new anchor: every open cycle is on/after Aug 1 — no resurrected overdue cycle.
+    expect(open.every((i) => i.due_date >= "2026-08-01")).toBe(true);
   });
 });
 
