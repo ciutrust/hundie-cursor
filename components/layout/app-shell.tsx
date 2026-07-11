@@ -17,6 +17,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PieChart,
+  Receipt,
   Settings2,
   ShieldCheck,
   TrendingUp,
@@ -76,6 +77,15 @@ const CLASSIFY_ITEMS: NavItem[] = [
     label: "Categories",
     icon: BookOpen,
     match: (path) => path.startsWith("/categories"),
+  },
+];
+
+const BILLS_ITEMS: NavItem[] = [
+  {
+    href: "/bills",
+    label: "Bills",
+    icon: Receipt,
+    match: (path) => path.startsWith("/bills"),
   },
 ];
 
@@ -300,6 +310,13 @@ export function AppShell({
               Classify
             </p>
             <ul className="space-y-0.5">{CLASSIFY_ITEMS.map(renderNavItem)}</ul>
+          </div>
+
+          <div>
+            <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Bills
+            </p>
+            <ul className="space-y-0.5">{BILLS_ITEMS.map(renderNavItem)}</ul>
           </div>
 
           <div>
