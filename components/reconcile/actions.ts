@@ -10,7 +10,12 @@
  */
 
 import { requireUser } from "@/lib/auth/require-user";
-import { getCaptureMatchSuggestion, getUnmatchedCaptures } from "@/lib/queries/expense-captures";
+import {
+  buildCaptureMatchSuggestion,
+  getCaptureMatchSuggestion,
+  getTakenMatchedTransactionIds,
+  getUnmatchedCaptures,
+} from "@/lib/queries/expense-captures";
 
 export type CaptureMatchCandidate = {
   transactionId: string;
@@ -116,14 +121,17 @@ export async function getCaptureMatchPrompts(input: {
   if (waiting.length === 0) return [];
 
   const justAdded = new Set(input.transactionIds);
+  // One taken-scan for the whole batch, and the rows are already in hand — each capture only pays for
+  // its own date-window charge query. (The waiting captures are all unmatched, so the unfiltered taken
+  // set is identical to what a per-capture self-excluding scan would have produced.)
+  const taken = await getTakenMatchedTransactionIds();
   const suggestions = await Promise.all(
-    waiting.map((capture) => getCaptureMatchSuggestion(capture.id)),
+    waiting.map((capture) => buildCaptureMatchSuggestion(capture, taken)),
   );
 
   const prompts: CaptureMatchPrompt[] = [];
 
   for (const suggestion of suggestions) {
-    if (!suggestion) continue;
     if (!suggestion.candidates.some((candidate) => justAdded.has(candidate.transactionId))) continue;
 
     const { capture } = suggestion;

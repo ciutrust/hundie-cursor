@@ -1,4 +1,6 @@
+import { Suspense } from "react";
 import { CaptureForm } from "@/components/capture/capture-form";
+import { RecentCaptures } from "@/components/capture/recent-captures";
 import { getOpenExpenseReports } from "@/lib/queries/expense-reports";
 
 /**
@@ -19,6 +21,12 @@ export default async function CapturePage() {
       </div>
 
       <CaptureForm reports={reports} />
+
+      {/* Streams in after the form paints - the strip fetches its own data inside the boundary,
+          so the camera button never waits on it. */}
+      <Suspense fallback={null}>
+        <RecentCaptures />
+      </Suspense>
     </div>
   );
 }

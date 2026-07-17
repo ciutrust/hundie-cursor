@@ -120,12 +120,16 @@ async function claimTransactions(
   return null;
 }
 
-function revalidateExpenseSurfaces() {
+/** With a concrete report number the one changed report page is busted instead of every report page. */
+function revalidateExpenseSurfaces(reportNumber?: number) {
   revalidatePath("/transactions");
   revalidatePath("/expense-reports");
-  // Dynamic route needs its own invalidation: "/expense-reports" does NOT match "/expense-reports/0001".
-  revalidatePath("/expense-reports/[number]", "page");
-  revalidatePath("/review");
+  // Dynamic route needs its own invalidation: "/expense-reports" does NOT match "/expense-reports/17".
+  if (reportNumber !== undefined) {
+    revalidatePath(`/expense-reports/${reportNumber}`);
+  } else {
+    revalidatePath("/expense-reports/[number]", "page");
+  }
 }
 
 /** One-click: book a selection as the reimbursed-W2 wash, without creating a report. */
@@ -143,6 +147,8 @@ export async function assignJobW2Expenses(
   if (applied.error) return { error: applied.error };
 
   revalidateExpenseSurfaces();
+  // The W2 wash rewrites classifications, and /review's progress numbers count those.
+  revalidatePath("/review");
   return { success: true, count: transactionIds.length };
 }
 
@@ -178,9 +184,11 @@ export async function createExpenseReport(
   if (input.assignJobW2) {
     const applied = await applyJobW2(admin, input.transactionIds, actor);
     if (applied.error) return { error: applied.error };
+    // The W2 wash rewrites classifications, and /review's progress numbers count those.
+    revalidatePath("/review");
   }
 
-  revalidateExpenseSurfaces();
+  revalidateExpenseSurfaces(report.number as number);
   return { id: report.id as string, number: report.number as number };
 }
 
@@ -219,7 +227,7 @@ export async function addToExpenseReport(input: {
 
   const { data: report, error } = await admin
     .from("expense_reports")
-    .select("id, paid_at")
+    .select("id, number, paid_at")
     .eq("id", input.reportId)
     .maybeSingle();
   if (error) return { error: error.message };
@@ -231,7 +239,7 @@ export async function addToExpenseReport(input: {
   const claimError = await claimTransactions(admin, input.reportId, input.transactionIds);
   if (claimError) return { error: claimError };
 
-  revalidateExpenseSurfaces();
+  revalidateExpenseSurfaces(report.number as number);
   return { success: true, count: input.transactionIds.length };
 }
 
@@ -252,7 +260,10 @@ export async function setLineExpensed(input: {
   const { error } = await admin.from(table).update(patch).eq("id", input.id);
   if (error) return { error: error.message };
 
-  revalidateExpenseSurfaces();
+  // The expensed tick is report-page state: /transactions renders neither expensed_at nor report
+  // membership, and the toggle can't change the open-reports list, so skip that path.
+  revalidatePath("/expense-reports");
+  revalidatePath("/expense-reports/[number]", "page");
   return { success: true };
 }
 
@@ -265,13 +276,18 @@ export async function setExpenseReportPaid(input: {
   if (authError) return { error: authError };
 
   const admin = createServiceRoleClient();
-  const { error } = await admin
+  // /transactions stays in the fan-out: its open-reports list is filtered on paid_at, so this toggle
+  // changes what the "Add to existing report" picker offers. The .select() rides the same round trip
+  // purely to name the one report page that changed.
+  const { data: report, error } = await admin
     .from("expense_reports")
     .update({ paid_at: input.paid ? new Date().toISOString() : null })
-    .eq("id", input.id);
+    .eq("id", input.id)
+    .select("number")
+    .maybeSingle();
   if (error) return { error: error.message };
 
-  revalidateExpenseSurfaces();
+  revalidateExpenseSurfaces(report ? (report.number as number) : undefined);
   return { success: true };
 }
 
