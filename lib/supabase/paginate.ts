@@ -22,6 +22,11 @@ export async function paginateAll<T>(
   buildQuery: (from: number, pageSize: number) => PromiseLike<PageResult<T>>,
   pageSize = 1000,
   key?: (row: T) => string | number,
+  /**
+   * Stop paging once this many rows are collected (result is sliced to exactly maxRows). A caller
+   * that needs to know whether rows were left behind should request cap+1 and check the length.
+   */
+  maxRows?: number,
 ): Promise<T[]> {
   const all: T[] = [];
   const seen = key ? new Set<string | number>() : null;
@@ -48,6 +53,7 @@ export async function paginateAll<T>(
     }
 
     all.push(...page);
+    if (maxRows !== undefined && all.length >= maxRows) return all.slice(0, maxRows);
     if (page.length < pageSize) break;
     from += pageSize;
   }

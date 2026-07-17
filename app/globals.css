@@ -72,6 +72,28 @@
     margin: 1.2cm;
   }
 
+  /* Dark-only app, white paper: .dark stays on <html> during print, so without this every
+     text-foreground / border-border class resolves to its dark value - near-white amounts on a
+     white page. Forcing the light token set makes ALL utility classes print as ink, not just
+     elements that inherit from body. Values mirror the @theme defaults above. */
+  .dark {
+    --color-background: oklch(0.985 0.004 265);
+    --color-foreground: oklch(0.18 0.02 265);
+    --color-card: oklch(1 0 0);
+    --color-card-foreground: oklch(0.18 0.02 265);
+    --color-muted: oklch(0.965 0.006 265);
+    --color-muted-foreground: oklch(0.48 0.02 265);
+    --color-border: oklch(0.91 0.01 265);
+    --color-primary: oklch(0.52 0.16 145);
+    --color-primary-foreground: oklch(0.99 0 0);
+    --color-accent: oklch(0.955 0.015 265);
+    --color-accent-foreground: oklch(0.22 0.03 265);
+    --color-destructive: oklch(0.52 0.19 25);
+    --color-ring: oklch(0.52 0.16 145);
+    --color-sidebar: oklch(0.975 0.005 265);
+    --color-sidebar-border: oklch(0.91 0.01 265);
+  }
+
   body {
     background: white !important;
     color: black !important;

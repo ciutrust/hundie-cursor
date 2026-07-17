@@ -22,6 +22,7 @@ export const TRANSACTION_SELECT = `
   amount,
   description,
   vendor,
+  split_at,
   account:accounts!inner(id, display_name, slug, account_type),
   classification:classifications!inner(
     id,
@@ -72,7 +73,7 @@ export function fetchPeriodTransactionDetails(
   supabase: Awaited<ReturnType<typeof createClient>>,
   start: string,
   end: string,
-  options?: { entityId?: string; categoryId?: string; accountIds?: string[] },
+  options?: { entityId?: string; categoryId?: string; accountIds?: string[]; maxRows?: number },
 ): Promise<TransactionWithDetails[]> {
   // OPT-08: descending order is load-bearing — getEntityTransactions returns this array to the UI.
   // Splits: the review LIST shows split parents (as "Split" rows so they can be edited), so it opts
@@ -90,6 +91,7 @@ export function fetchPeriodTransactionDetails(
     accountIds: options?.accountIds,
     order: "desc",
     excludeSplitParents: false,
+    maxRows: options?.maxRows,
   });
 }
 
@@ -98,7 +100,14 @@ export async function hydrateTransactionSplits(
   supabase: Awaited<ReturnType<typeof createClient>>,
   transactions: TransactionWithDetails[],
 ): Promise<void> {
-  const ids = transactions.map((t) => t.id);
+  // Legs only exist on split parents (split_at set), so scanning the other 99% of ids is wasted
+  // round trips - most windows have zero splits and skip the query entirely. The `in` guard matters:
+  // if a caller's select ever omits split_at, undefined would filter EVERY id and silently strip
+  // splits from the UI, so unknown rows fall back to the hydrate-everything behavior instead.
+  const candidates = transactions.every((t) => "split_at" in t)
+    ? transactions.filter((t) => t.split_at != null)
+    : transactions;
+  const ids = candidates.map((t) => t.id);
   if (ids.length === 0) return;
   const db = supabase as unknown as SupabaseClient;
   const byTx = new Map<string, TransactionSplitLeg[]>();
