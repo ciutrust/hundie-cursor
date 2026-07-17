@@ -8,6 +8,7 @@ import {
   BookOpen,
   Brain,
   CalendarCheck,
+  Camera,
   CheckCircle2,
   ClipboardCheck,
   CreditCard,
@@ -25,6 +26,7 @@ import {
   TrendingUp,
   X,
 } from "lucide-react";
+import { BottomNav } from "@/components/layout/bottom-nav";
 import { SidebarEntitiesNav } from "@/components/layout/sidebar-entities-nav";
 import { signOut } from "@/lib/actions/reclassify";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
@@ -100,6 +102,12 @@ const FUNCTIONS_ITEMS: NavItem[] = [
     label: "Expense reports",
     icon: Plane,
     match: (path) => path.startsWith("/expense-reports"),
+  },
+  {
+    href: "/capture",
+    label: "Capture",
+    icon: Camera,
+    match: (path) => path.startsWith("/capture"),
   },
 ];
 
@@ -441,8 +449,15 @@ export function AppShell({
           </div>
         </header>
 
-        <main className="flex-1 px-4 py-6 lg:px-8 lg:py-8">{children}</main>
+        {/* Bottom padding clears the fixed mobile bar (h-16) plus the iOS home indicator, so the
+            last row of a table is never trapped underneath it. */}
+        <main className="flex-1 px-4 pt-6 pb-[calc(5rem+env(safe-area-inset-bottom))] lg:px-8 lg:pt-8 lg:pb-8">
+          {children}
+        </main>
       </div>
+
+      {/* Mobile-only, and self-hiding at lg where the sidebar returns. */}
+      <BottomNav />
     </div>
   );
 }

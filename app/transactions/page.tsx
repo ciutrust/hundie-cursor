@@ -4,6 +4,7 @@ import { TransactionsExport } from "@/components/transactions/transactions-expor
 import { parseDateRange } from "@/lib/date-range";
 import { getAccountTransactions } from "@/lib/queries/account-transactions";
 import { getAccountsWithEntities, type AccountWithEntity } from "@/lib/queries/accounts";
+import { getOpenExpenseReports } from "@/lib/queries/expense-reports";
 import {
   getCategoriesByEntity,
   getCategoriesForEntity,
@@ -41,12 +42,17 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
   const accounts = await getAccountsWithEntities();
   const selectedIds = resolveSelectedAccountIds(query.accounts, accounts);
 
-  const [transactions, entities, categoriesByEntity, personalCategories] = await Promise.all([
-    getAccountTransactions({ start: range.start, end: range.end, accountIds: selectedIds }),
-    getClassifiableEntities(),
-    getCategoriesByEntity(),
-    getCategoriesForEntity("personal"),
-  ]);
+  const [transactions, entities, categoriesByEntity, personalCategories, openReports] =
+    await Promise.all([
+      getAccountTransactions({ start: range.start, end: range.end, accountIds: selectedIds }),
+      getClassifiableEntities(),
+      getCategoriesByEntity(),
+      getCategoriesForEntity("personal"),
+      // Feeds "Add to existing report" AND the reconcile prompt — without it a charge can never join
+      // the capture that's been waiting for it, so nothing would ever suppress and every trip that
+      // used a capture would double-count.
+      getOpenExpenseReports(),
+    ]);
 
   // Signed: a positive amount is an outflow, so refunds and credits net out of the running total.
   const total = transactions.reduce((sum, tx) => sum + Number(tx.amount), 0);
@@ -93,6 +99,7 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
           categories={personalCategories}
           categoriesByEntity={categoriesByEntity}
           month={range.from}
+          openReports={openReports}
         />
       )}
     </div>

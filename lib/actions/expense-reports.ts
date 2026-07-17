@@ -71,6 +71,55 @@ async function applyJobW2(
   return { error: null };
 }
 
+/**
+ * Point transactions at a report (or null to release them).
+ *
+ * Service-role: `transactions` has no authenticated UPDATE policy (same reason the split writer is).
+ * `expensed_at` is ALWAYS cleared in the same write — it is report-scoped state living on a bank-truth
+ * row, so a line re-added to another report would otherwise arrive already ticked green.
+ */
+async function claimTransactions(
+  admin: Admin,
+  reportId: string | null,
+  transactionIds: string[],
+): Promise<string | null> {
+  for (const ids of chunk(transactionIds, 200)) {
+    // Detach any capture matched to a charge that is moving somewhere its capture ISN'T. Leaving the
+    // match would strand the pair (capture in report A, charge in B) — the capture suppresses in
+    // NEITHER report under the same-report rule, so its money silently vanishes from both. This is the
+    // state reconcile_capture's own guard refuses to create; don't let the back door create it either.
+    const { data: matched, error: matchedError } = await admin
+      .from("expense_captures")
+      .select("id, expense_report_id")
+      .in("matched_transaction_id", ids);
+    if (matchedError) return matchedError.message;
+
+    const stranded = ((matched ?? []) as Array<{ id: string; expense_report_id: string | null }>)
+      .filter((capture) => capture.expense_report_id !== reportId)
+      .map((capture) => capture.id);
+
+    if (stranded.length > 0) {
+      const { error } = await admin
+        .from("expense_captures")
+        .update({
+          matched_transaction_id: null,
+          match_status: "unmatched",
+          matched_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .in("id", stranded);
+      if (error) return error.message;
+    }
+
+    const { error } = await admin
+      .from("transactions")
+      .update({ expense_report_id: reportId, expensed_at: null })
+      .in("id", ids);
+    if (error) return error.message;
+  }
+  return null;
+}
+
 function revalidateExpenseSurfaces() {
   revalidatePath("/transactions");
   revalidatePath("/expense-reports");
@@ -109,7 +158,9 @@ export async function createExpenseReport(
 
   const name = input.name.trim();
   if (!name) return { error: "Give the report a name" };
-  if (input.transactionIds.length === 0) return { error: "No transactions selected" };
+  // An EMPTY report is legitimate and is the capture screen's whole flow: he starts "Workidate
+  // Sacramento" at the airport and snaps receipts into it for days before a single charge posts.
+  // (chunk([]) yields nothing, so claimTransactions no-ops, and applyJobW2 is gated on the flag.)
 
   const admin = createServiceRoleClient();
   const actor = user?.email ?? user?.id ?? "unknown";
@@ -121,15 +172,8 @@ export async function createExpenseReport(
     .single();
   if (error) return { error: error.message };
 
-  // Claim the rows. Service-role: `transactions` has no authenticated UPDATE policy (same reason the
-  // split writer is service-role). A transaction already in another report is simply re-pointed here.
-  for (const ids of chunk(input.transactionIds, 200)) {
-    const { error: claimError } = await admin
-      .from("transactions")
-      .update({ expense_report_id: report.id })
-      .in("id", ids);
-    if (claimError) return { error: claimError.message };
-  }
+  const claimError = await claimTransactions(admin, report.id, input.transactionIds);
+  if (claimError) return { error: claimError };
 
   if (input.assignJobW2) {
     const applied = await applyJobW2(admin, input.transactionIds, actor);
@@ -149,29 +193,128 @@ export async function removeFromExpenseReport(
   if (transactionIds.length === 0) return { error: "No lines selected" };
 
   const admin = createServiceRoleClient();
-  for (const ids of chunk(transactionIds, 200)) {
-    const { error } = await admin
-      .from("transactions")
-      .update({ expense_report_id: null })
-      .in("id", ids);
-    if (error) return { error: error.message };
-  }
+  const claimError = await claimTransactions(admin, null, transactionIds);
+  if (claimError) return { error: claimError };
 
   revalidateExpenseSurfaces();
   return { success: true, count: transactionIds.length };
 }
 
-/** Delete a report. Its transactions are released (FK is ON DELETE SET NULL), never deleted. */
-export async function deleteExpenseReport(
-  id: string,
-): Promise<{ error: string } | { success: true }> {
+/**
+ * Add charges to an EXISTING report — how a card charge joins the capture that's been waiting for it.
+ *
+ * Deliberately does NOT reconcile: the caller surfaces the "looks like these are the same spend?"
+ * prompt. Adding a charge next to its unreconciled capture is the default double-count path, so the
+ * UI must offer the match here rather than leaving both lines standing.
+ */
+export async function addToExpenseReport(input: {
+  reportId: string;
+  transactionIds: string[];
+}): Promise<{ error: string } | { success: true; count: number }> {
+  const { error: authError } = await requireUser();
+  if (authError) return { error: authError };
+  if (input.transactionIds.length === 0) return { error: "No transactions selected" };
+
+  const admin = createServiceRoleClient();
+
+  const { data: report, error } = await admin
+    .from("expense_reports")
+    .select("id, paid_at")
+    .eq("id", input.reportId)
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!report) return { error: "That expense report no longer exists" };
+  // A paid report has already been filed and reimbursed; quietly growing it would desync AC from
+  // what Cursor actually paid.
+  if (report.paid_at) return { error: "That report is already marked paid. Start a new one." };
+
+  const claimError = await claimTransactions(admin, input.reportId, input.transactionIds);
+  if (claimError) return { error: claimError };
+
+  revalidateExpenseSurfaces();
+  return { success: true, count: input.transactionIds.length };
+}
+
+/** The per-line Expensed toggle (green/red). Charges and captures live in different tables. */
+export async function setLineExpensed(input: {
+  kind: "transaction" | "capture";
+  id: string;
+  expensed: boolean;
+}): Promise<{ error: string } | { success: true }> {
   const { error: authError } = await requireUser();
   if (authError) return { error: authError };
 
   const admin = createServiceRoleClient();
-  const { error } = await admin.from("expense_reports").delete().eq("id", id);
+  const table = input.kind === "transaction" ? "transactions" : "expense_captures";
+  const patch: Record<string, unknown> = { expensed_at: input.expensed ? new Date().toISOString() : null };
+  if (input.kind === "capture") patch.updated_at = new Date().toISOString();
+
+  const { error } = await admin.from(table).update(patch).eq("id", input.id);
   if (error) return { error: error.message };
 
   revalidateExpenseSurfaces();
   return { success: true };
+}
+
+/** The report's PAID (green) / UNPAID (amber) status — did the reimbursement actually land. */
+export async function setExpenseReportPaid(input: {
+  id: string;
+  paid: boolean;
+}): Promise<{ error: string } | { success: true }> {
+  const { error: authError } = await requireUser();
+  if (authError) return { error: authError };
+
+  const admin = createServiceRoleClient();
+  const { error } = await admin
+    .from("expense_reports")
+    .update({ paid_at: input.paid ? new Date().toISOString() : null })
+    .eq("id", input.id);
+  if (error) return { error: error.message };
+
+  revalidateExpenseSurfaces();
+  return { success: true };
+}
+
+/**
+ * Delete a report. Charges are released (FK is ON DELETE SET NULL) and stay in the ledger.
+ *
+ * Its CAPTURES are deleted with it, photos and all. The FK would merely null their report out, but an
+ * unfiled capture has no screen anywhere (the reconcile queue is card-only; report views require a
+ * report id), so "released" captures are a black hole — and a cash capture is the ONLY record of that
+ * money. Orphaning them would be a silent loss AND leak their storage objects forever. Deleting them
+ * deliberately, with the count surfaced so the UI can say so, is the honest behavior.
+ */
+export async function deleteExpenseReport(
+  id: string,
+): Promise<{ error: string } | { success: true; deletedCaptures: number }> {
+  const { error: authError } = await requireUser();
+  if (authError) return { error: authError };
+
+  const admin = createServiceRoleClient();
+
+  const { data: captures, error: captureError } = await admin
+    .from("expense_captures")
+    .select("id, photo_path")
+    .eq("expense_report_id", id);
+  if (captureError) return { error: captureError.message };
+
+  const rows = (captures ?? []) as Array<{ id: string; photo_path: string | null }>;
+  const paths = rows.map((row) => row.photo_path).filter((path): path is string => Boolean(path));
+
+  if (rows.length > 0) {
+    const { error } = await admin
+      .from("expense_captures")
+      .delete()
+      .in("id", rows.map((row) => row.id));
+    if (error) return { error: error.message };
+  }
+
+  const { error } = await admin.from("expense_reports").delete().eq("id", id);
+  if (error) return { error: error.message };
+
+  // Best-effort, after the rows are gone: a stray object is a leak, not a correctness bug.
+  if (paths.length > 0) await admin.storage.from("receipts").remove(paths);
+
+  revalidateExpenseSurfaces();
+  return { success: true, deletedCaptures: rows.length };
 }

@@ -1,8 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { TRANSACTION_SELECT, hydrateTransactionSplits } from "@/lib/queries/review";
+import {
+  buildExpenseReportLines,
+  sumExpenseReportLines,
+  type ExpenseReportLine,
+  type ExpenseReportTotals,
+  type MemberCapture,
+  type MemberTransaction,
+} from "@/lib/expense-report-lines";
 import { paginateAll } from "@/lib/supabase/paginate";
 import { createClient } from "@/lib/supabase/server";
-import type { TransactionWithDetails } from "@/lib/types/database";
 
 export type ExpenseReportRow = {
   id: string;
@@ -11,26 +17,138 @@ export type ExpenseReportRow = {
   notes: string | null;
   created_by: string | null;
   created_at: string;
+  /** null = UNPAID (amber); set = PAID (green). */
+  paid_at: string | null;
 };
 
-export type ExpenseReportSummary = ExpenseReportRow & {
-  transactionCount: number;
-  /** Signed sum of member amounts (charges are positive outflows in this ledger). */
-  total: number;
-};
+export type ExpenseReportSummary = ExpenseReportRow & ExpenseReportTotals;
 
 /**
- * `expense_reports` + `transactions.expense_report_id` are not in the generated Database type yet
- * (types are regenerated out-of-band), so reads go through one narrow cast — the same pattern
- * lib/queries/proposals.ts and hydrateTransactionSplits already use for transaction_splits.
+ * `expense_reports` / `expense_captures` / the new overlay columns aren't in the generated Database
+ * type yet, so reads go through one narrow cast — the same pattern proposals.ts and
+ * hydrateTransactionSplits already use for their untyped tables.
  */
 function db(supabase: Awaited<ReturnType<typeof createClient>>) {
   return supabase as unknown as SupabaseClient;
 }
 
-const REPORT_SELECT = "id, number, name, notes, created_by, created_at";
+const REPORT_SELECT = "id, number, name, notes, created_by, created_at, paid_at";
 
-/** All expense reports, newest number first, each with its line count + total. */
+/**
+ * A report line's charge. Deliberately NOT the review's TRANSACTION_SELECT:
+ *  - no entity/category embed — a report is a W2 filing artifact, not a categorization surface;
+ *  - `classifications` is a LEFT join (no !inner). TRANSACTION_SELECT's inner join was why the list
+ *    and detail totals could disagree — an unclassified member counted in the list but was invisible
+ *    on the page. Here it shows, with notes simply null.
+ */
+const REPORT_TXN_SELECT = `
+  id,
+  transaction_date,
+  description,
+  vendor,
+  amount,
+  expensed_at,
+  expense_report_id,
+  account:accounts!inner(display_name),
+  classification:classifications(notes)
+`;
+
+const CAPTURE_SELECT = `
+  id, captured_at, vendor, amount, note, capture_kind, match_status, matched_transaction_id,
+  photo_path, photo_status, latitude, longitude, expensed_at, expense_report_id
+`;
+
+type RawTxn = {
+  id: string;
+  transaction_date: string;
+  description: string;
+  vendor: string | null;
+  amount: number | string;
+  expensed_at: string | null;
+  expense_report_id: string;
+  account: { display_name: string } | null;
+  classification: { notes: string | null } | null;
+};
+
+type RawCapture = MemberCapture & { expense_report_id: string };
+
+/**
+ * COUNTED members only. Plaid-reversed and split parents are excluded here, once, so every consumer
+ * (list total, detail total, CSV) agrees — and so the suppression rule in buildExpenseReportLines can
+ * treat "is a member of this array" as "is a counted member of this report".
+ *
+ * Split parents are excluded because an all-or-nothing `expensed_at` on a parent would lie: every
+ * other surface treats it as N legs.
+ */
+async function fetchMemberTransactions(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  reportId?: string,
+): Promise<Array<MemberTransaction & { expense_report_id: string }>> {
+  const rows = await paginateAll<RawTxn>(
+    async (from, size) => {
+      let query = db(supabase)
+        .from("transactions")
+        .select(REPORT_TXN_SELECT)
+        .is("plaid_removed_at", null)
+        .is("split_at", null)
+        .order("id")
+        .range(from, from + size - 1);
+      query = reportId
+        ? query.eq("expense_report_id", reportId)
+        : query.not("expense_report_id", "is", null);
+      const { data, error } = await query;
+      return { data: data as unknown as RawTxn[] | null, error };
+    },
+    1000,
+    (row) => row.id,
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    transaction_date: row.transaction_date,
+    description: row.description,
+    vendor: row.vendor,
+    amount: Number(row.amount),
+    account_name: row.account?.display_name ?? "Unknown account",
+    notes: row.classification?.notes ?? null,
+    expensed_at: row.expensed_at,
+    expense_report_id: row.expense_report_id,
+  }));
+}
+
+async function fetchMemberCaptures(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  reportId?: string,
+): Promise<RawCapture[]> {
+  return paginateAll<RawCapture>(
+    async (from, size) => {
+      let query = db(supabase)
+        .from("expense_captures")
+        .select(CAPTURE_SELECT)
+        .order("id")
+        .range(from, from + size - 1);
+      query = reportId
+        ? query.eq("expense_report_id", reportId)
+        : query.not("expense_report_id", "is", null);
+      const { data, error } = await query;
+      return { data: data as unknown as RawCapture[] | null, error };
+    },
+    1000,
+    (row) => row.id,
+  );
+}
+
+function groupBy<T extends { expense_report_id: string }>(rows: T[]): Map<string, T[]> {
+  const byReport = new Map<string, T[]>();
+  for (const row of rows) {
+    const list = byReport.get(row.expense_report_id);
+    if (list) list.push(row);
+    else byReport.set(row.expense_report_id, [row]);
+  }
+  return byReport;
+}
+
+/** All reports, newest first, each totalled through the SAME pure builder the detail page uses. */
 export async function getExpenseReports(): Promise<ExpenseReportSummary[]> {
   const supabase = await createClient();
 
@@ -43,44 +161,42 @@ export async function getExpenseReports(): Promise<ExpenseReportSummary[]> {
   const reports = (data ?? []) as unknown as ExpenseReportRow[];
   if (reports.length === 0) return [];
 
-  // Aggregate member rows in JS (one scan beats a view or N queries). PAGINATED: this spans members of
-  // EVERY report, not one trip, so it blows past PostgREST's 1000-row cap after ~20 trips and would
-  // silently understate every count + total (the BUG-05 / OPT-02 class). `.order("id")` is the unique
-  // tiebreaker offset paging needs; `key` makes paginateAll throw if a row is ever seen twice.
-  type MemberRow = { id: string; expense_report_id: string; amount: number | string };
-  const members = await paginateAll<MemberRow>(
-    async (from, size) => {
-      const { data, error } = await db(supabase)
-        .from("transactions")
-        .select("id, expense_report_id, amount")
-        .not("expense_report_id", "is", null)
-        .order("id")
-        .range(from, from + size - 1);
-      return { data: data as unknown as MemberRow[] | null, error };
-    },
-    1000,
-    (row) => row.id,
-  );
+  // Two paginated scans for the whole list, then group in JS — never N queries per report.
+  const [transactions, captures] = await Promise.all([
+    fetchMemberTransactions(supabase),
+    fetchMemberCaptures(supabase),
+  ]);
+  const txnsByReport = groupBy(transactions);
+  const capturesByReport = groupBy(captures);
 
-  const stats = new Map<string, { count: number; total: number }>();
-  for (const row of members) {
-    const current = stats.get(row.expense_report_id) ?? { count: 0, total: 0 };
-    current.count += 1;
-    current.total += Number(row.amount);
-    stats.set(row.expense_report_id, current);
-  }
-
-  return reports.map((report) => ({
-    ...report,
-    transactionCount: stats.get(report.id)?.count ?? 0,
-    total: stats.get(report.id)?.total ?? 0,
-  }));
+  return reports.map((report) => {
+    const lines = buildExpenseReportLines(
+      txnsByReport.get(report.id) ?? [],
+      capturesByReport.get(report.id) ?? [],
+    );
+    return { ...report, ...sumExpenseReportLines(lines) };
+  });
 }
 
-/** One report plus its line items, addressed by the human-facing number (0001 -> 1). */
+/** Money AC has bundled but not yet filed — the number he actually cares about. */
+export function outstandingTotal(reports: ExpenseReportSummary[]): { total: number; count: number } {
+  const unpaid = reports.filter((report) => !report.paid_at);
+  return {
+    total: unpaid.reduce((sum, report) => sum + report.total, 0),
+    count: unpaid.length,
+  };
+}
+
+export type ExpenseReportDetail = {
+  report: ExpenseReportRow;
+  lines: ExpenseReportLine[];
+  totals: ExpenseReportTotals;
+};
+
+/** One report and its lines, addressed by the human-facing number (0001 -> 1). */
 export async function getExpenseReportByNumber(
   reportNumber: number,
-): Promise<{ report: ExpenseReportRow; transactions: TransactionWithDetails[] } | null> {
+): Promise<ExpenseReportDetail | null> {
   const supabase = await createClient();
 
   const { data, error } = await db(supabase)
@@ -92,26 +208,23 @@ export async function getExpenseReportByNumber(
   if (!data) return null;
 
   const report = data as unknown as ExpenseReportRow;
+  const [transactions, captures] = await Promise.all([
+    fetchMemberTransactions(supabase, report.id),
+    fetchMemberCaptures(supabase, report.id),
+  ]);
 
-  // Paginated + `.order("id")` after the date sort: reports are trip-sized by design, but nothing
-  // enforces that (a wide date range can be saved in one go), and dates tie constantly — without a
-  // unique tiebreaker offset paging drops/duplicates rows the moment a report exceeds one page.
-  const transactions = await paginateAll<TransactionWithDetails>(
-    async (from, size) => {
-      const { data, error } = await db(supabase)
-        .from("transactions")
-        .select(TRANSACTION_SELECT)
-        .eq("expense_report_id", report.id)
-        .order("transaction_date", { ascending: false })
-        .order("id")
-        .range(from, from + size - 1);
-      return { data: data as unknown as TransactionWithDetails[] | null, error };
-    },
-    1000,
-    (row) => row.id,
-  );
+  const lines = buildExpenseReportLines(transactions, captures);
+  return { report, lines, totals: sumExpenseReportLines(lines) };
+}
 
-  await hydrateTransactionSplits(supabase, transactions);
-
-  return { report, transactions };
+/** Open (unpaid) reports, for the capture screen's target picker. */
+export async function getOpenExpenseReports(): Promise<Pick<ExpenseReportRow, "id" | "number" | "name">[]> {
+  const supabase = await createClient();
+  const { data, error } = await db(supabase)
+    .from("expense_reports")
+    .select("id, number, name")
+    .is("paid_at", null)
+    .order("number", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as unknown as Pick<ExpenseReportRow, "id" | "number" | "name">[];
 }
