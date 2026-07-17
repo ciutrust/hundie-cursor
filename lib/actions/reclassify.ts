@@ -72,6 +72,12 @@ export async function reclassifyTransaction(input: ReclassifyInput) {
   revalidatePath("/review");
   revalidatePath(`/review/${input.entitySlug}`);
   revalidatePath("/review/unclassified");
+  // The /transactions browser and the expense-report detail render these same rows, so an edit made
+  // from either surface has to refresh them too. The detail route needs its own dynamic-path
+  // invalidation — revalidatePath("/expense-reports") does NOT match "/expense-reports/0001".
+  revalidatePath("/transactions");
+  revalidatePath("/expense-reports");
+  revalidatePath("/expense-reports/[number]", "page");
 
   return { success: true };
 }
@@ -130,6 +136,12 @@ export async function bulkReclassifyTransactions(input: BulkReclassifyInput) {
   revalidatePath("/review");
   revalidatePath(`/review/${input.entitySlug}`);
   revalidatePath("/review/unclassified");
+  // The /transactions browser and the expense-report detail render these same rows, so an edit made
+  // from either surface has to refresh them too. The detail route needs its own dynamic-path
+  // invalidation — revalidatePath("/expense-reports") does NOT match "/expense-reports/0001".
+  revalidatePath("/transactions");
+  revalidatePath("/expense-reports");
+  revalidatePath("/expense-reports/[number]", "page");
 
   return { success: true, count: input.classificationIds.length };
 }

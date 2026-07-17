@@ -16,7 +16,7 @@ import { fetchChangedTransactionIds } from "@/lib/queries/transaction-history";
 import type { CategoryGroup, EntitySummary, MonthlyCategoryRow, MonthlyEntityRow, ReviewDashboardStats, TransactionSplitLeg, TransactionWithDetails } from "@/lib/types/database";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { chunk } from "@/lib/supabase/chunk";
-const TRANSACTION_SELECT = `
+export const TRANSACTION_SELECT = `
   id,
   transaction_date,
   amount,
@@ -68,16 +68,18 @@ async function fetchPeriodSummaryTransactions(
   }));
 }
 
-function fetchPeriodTransactionDetails(
+export function fetchPeriodTransactionDetails(
   supabase: Awaited<ReturnType<typeof createClient>>,
   start: string,
   end: string,
-  options?: { entityId?: string; categoryId?: string },
+  options?: { entityId?: string; categoryId?: string; accountIds?: string[] },
 ): Promise<TransactionWithDetails[]> {
   // OPT-08: descending order is load-bearing — getEntityTransactions returns this array to the UI.
   // Splits: the review LIST shows split parents (as "Split" rows so they can be edited), so it opts
   // OUT of the default split-parent exclusion. Split parents are then hydrated + kept out of the
   // category-group totals in getEntityTransactions.
+  // Every filter is optional, so passing ONLY accountIds gives a cross-entity, by-account fetch
+  // (what the /transactions browser needs — "these cards, this window, whatever entity they're in").
   return fetchPeriodTransactions<TransactionWithDetails>({
     supabase,
     select: TRANSACTION_SELECT,
@@ -85,13 +87,14 @@ function fetchPeriodTransactionDetails(
     end,
     entityId: options?.entityId,
     categoryId: options?.categoryId,
+    accountIds: options?.accountIds,
     order: "desc",
     excludeSplitParents: false,
   });
 }
 
 /** Attach `splits` (transaction_splits legs) to any split parents in the list, for row rendering. */
-async function hydrateTransactionSplits(
+export async function hydrateTransactionSplits(
   supabase: Awaited<ReturnType<typeof createClient>>,
   transactions: TransactionWithDetails[],
 ): Promise<void> {
