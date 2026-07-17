@@ -36,3 +36,4 @@ docs/overnight/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+.claude/

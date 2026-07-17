@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { CaptureMatchPrompts } from "@/components/reconcile/capture-match-prompts";
 import { getCaptureMatchPromptForCapture } from "@/components/reconcile/actions";
 import { DeleteReportButton } from "@/components/expense-reports/delete-report-button";
+import { PrintWithReceipts } from "@/components/expense-reports/print-with-receipts";
 import { ReportLines } from "@/components/expense-reports/report-lines";
 import { ReportLinesExport } from "@/components/expense-reports/report-lines-export";
 import { ReportPaidToggle } from "@/components/expense-reports/report-paid-toggle";
@@ -58,6 +59,15 @@ export default async function ExpenseReportPage({ params, searchParams }: Expens
   const signed = await signCapturePhotoUrls(photoPaths);
   const photoUrls = Object.fromEntries(signed);
 
+  // One "Print with receipts" appendix entry per receipt photo on the sheet - a standalone capture's
+  // own photo, or the photo a reconciled capture lends to its charge (a line never has both). Reuses
+  // the batch-signed URLs above; nothing new is signed.
+  const printReceipts = lines.flatMap((line) => {
+    const photoPath = line.capture?.photoPath ?? line.enrichedBy?.photoPath;
+    const url = photoPath ? photoUrls[photoPath] : undefined;
+    return url ? [{ url, vendor: line.label, amount: line.amount, date: line.date }] : [];
+  });
+
   const label = formatExpenseReportNumber(report.number);
   const range = tripDateRange(lines);
 
@@ -98,6 +108,8 @@ export default async function ExpenseReportPage({ params, searchParams }: Expens
         <div className="flex flex-wrap items-start gap-2 print:hidden">
           <ReportPaidToggle id={report.id} paidAt={report.paid_at} />
           <ReportLinesExport lines={lines} filename={`expense-report-${label}.csv`} />
+          {/* Its receipts appendix portals to document.body, so this row's print:hidden can't eat it. */}
+          <PrintWithReceipts receipts={printReceipts} />
           <DeleteReportButton id={report.id} label={`Expense Report ${label}`} />
         </div>
       </div>

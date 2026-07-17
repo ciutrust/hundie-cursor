@@ -88,32 +88,45 @@ function addDays(iso: string, days: number): string {
 }
 
 /**
- * Rank the charges that might have settled this capture.
+ * Transaction ids already backing SOME capture. Charges in this set are excluded from suggestions —
+ * without that, one charge gets suggested for several captures (the bug bills had to work around at
+ * runtime). Fetched separately from the scoring so a batch caller pays for this scan once, not per
+ * capture. `excludeCaptureId` keeps a capture's own current match out of its own taken set.
+ */
+export async function getTakenMatchedTransactionIds(excludeCaptureId?: string): Promise<Set<string>> {
+  const supabase = await createClient();
+  let query = db(supabase)
+    .from("expense_captures")
+    .select("matched_transaction_id")
+    .not("matched_transaction_id", "is", null);
+  if (excludeCaptureId) query = query.neq("id", excludeCaptureId);
+  const { data: takenData } = await query;
+  return new Set(
+    ((takenData ?? []) as unknown as Array<{ matched_transaction_id: string }>).map(
+      (row) => row.matched_transaction_id,
+    ),
+  );
+}
+
+/**
+ * Rank the charges that might have settled this capture — the row + taken-set core.
  *
  * Pre-filters in SQL to what the matcher could possibly accept (a charge posts ON/AFTER the receipt,
  * within MAX_DAYS_AFTER, and at most MAX_TIP_RATIO above it), then applies the real scoring in
- * lib/receipts/match.ts. Charges already backing another capture are excluded — without that, one
- * charge gets suggested for several captures (the bug bills had to work around at runtime).
+ * lib/receipts/match.ts. Takes the capture ROW and a pre-fetched taken set so getCaptureMatchPrompts
+ * can score a whole report's waiting captures off one taken-scan; the per-capture charge query is
+ * inherent (each capture has its own date window).
  */
-export async function getCaptureMatchSuggestion(
-  captureId: string,
-): Promise<CaptureMatchSuggestion | null> {
-  const supabase = await createClient();
-
-  const { data: captureData, error } = await db(supabase)
-    .from("expense_captures")
-    .select(CAPTURE_SELECT)
-    .eq("id", captureId)
-    .maybeSingle();
-  if (error) throw error;
-  if (!captureData) return null;
-
-  const capture = captureData as unknown as CaptureRow;
+export async function buildCaptureMatchSuggestion(
+  capture: CaptureRow,
+  takenTransactionIds: Set<string>,
+): Promise<CaptureMatchSuggestion> {
   // Nothing to match: cash is terminal, and with no amount the matcher has no anchor.
   if (capture.capture_kind === "cash" || capture.amount == null) {
     return { capture, candidates: [], confident: null };
   }
 
+  const supabase = await createClient();
   const day = capture.captured_at.slice(0, 10);
   const { data: chargeData, error: chargeError } = await db(supabase)
     .from("transactions")
@@ -132,21 +145,10 @@ export async function getCaptureMatchSuggestion(
 
   const charges = (chargeData ?? []) as unknown as ChargeLike[];
 
-  const { data: takenData } = await db(supabase)
-    .from("expense_captures")
-    .select("matched_transaction_id")
-    .not("matched_transaction_id", "is", null)
-    .neq("id", captureId);
-  const taken = new Set(
-    ((takenData ?? []) as unknown as Array<{ matched_transaction_id: string }>).map(
-      (row) => row.matched_transaction_id,
-    ),
-  );
-
   const ranked = rankCaptureMatches(
     { vendor: capture.vendor, amount: capture.amount, captured_at: capture.captured_at },
     charges,
-    { excludeTransactionIds: taken },
+    { excludeTransactionIds: takenTransactionIds },
   );
 
   const byId = new Map(charges.map((charge) => [charge.id, charge]));
@@ -158,4 +160,28 @@ export async function getCaptureMatchSuggestion(
     candidates,
     confident: top ? candidates.find((c) => c.transactionId === top.transactionId) ?? null : null,
   };
+}
+
+/** The one-capture entry point: fetch the row + its taken set, then score. Signature unchanged. */
+export async function getCaptureMatchSuggestion(
+  captureId: string,
+): Promise<CaptureMatchSuggestion | null> {
+  const supabase = await createClient();
+
+  const { data: captureData, error } = await db(supabase)
+    .from("expense_captures")
+    .select(CAPTURE_SELECT)
+    .eq("id", captureId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!captureData) return null;
+
+  const capture = captureData as unknown as CaptureRow;
+  // Early out before the taken-scan: cash/amountless captures never needed it.
+  if (capture.capture_kind === "cash" || capture.amount == null) {
+    return { capture, candidates: [], confident: null };
+  }
+
+  const taken = await getTakenMatchedTransactionIds(captureId);
+  return buildCaptureMatchSuggestion(capture, taken);
 }

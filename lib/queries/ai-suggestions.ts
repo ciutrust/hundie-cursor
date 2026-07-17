@@ -69,30 +69,34 @@ async function countBacklogMatches(
   personalId: string,
   transactionIds: string[],
 ) {
-  let total = 0;
-
+  const chunks: string[][] = [];
   for (let i = 0; i < transactionIds.length; i += 200) {
-    const chunk = transactionIds.slice(i, i + 200);
-    const { count, error } = await supabase
-      .from("transactions")
-      .select("id, classification:classifications!inner(category_id, entity_id)", {
-        count: "exact",
-        head: true,
-      })
-      .in("id", chunk)
-      .eq("classification.entity_id", personalId)
-      .is("classification.category_id", null)
-      // C4: keep this "with-AI-suggestion" count consistent with countPersonalUncategorizedBacklog
-      // (both exclude Plaid-reversed charges) so coverage = withAi/total never goes out of range.
-      .is("plaid_removed_at", null)
-      .gte("transaction_date", AI_BACKLOG_START)
-      .lt("transaction_date", AI_BACKLOG_END);
-
-    if (error) throw error;
-    total += count ?? 0;
+    chunks.push(transactionIds.slice(i, i + 200));
   }
 
-  return total;
+  const counts = await Promise.all(
+    chunks.map(async (chunk) => {
+      const { count, error } = await supabase
+        .from("transactions")
+        .select("id, classification:classifications!inner(category_id, entity_id)", {
+          count: "exact",
+          head: true,
+        })
+        .in("id", chunk)
+        .eq("classification.entity_id", personalId)
+        .is("classification.category_id", null)
+        // C4: keep this "with-AI-suggestion" count consistent with countPersonalUncategorizedBacklog
+        // (both exclude Plaid-reversed charges) so coverage = withAi/total never goes out of range.
+        .is("plaid_removed_at", null)
+        .gte("transaction_date", AI_BACKLOG_START)
+        .lt("transaction_date", AI_BACKLOG_END);
+
+      if (error) throw error;
+      return count ?? 0;
+    }),
+  );
+
+  return counts.reduce((sum, count) => sum + count, 0);
 }
 
 const BACKLOG_SELECT = `

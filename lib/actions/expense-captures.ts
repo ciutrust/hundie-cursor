@@ -3,16 +3,30 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
+import { isUuid } from "@/lib/uuid";
 
 const BUCKET = "receipts";
 
-type Admin = ReturnType<typeof createServiceRoleClient>;
+const MAX_AMOUNT = 1_000_000;
+const MAX_VENDOR_CHARS = 200;
+const MAX_NOTE_CHARS = 2000;
 
-function revalidateCaptureSurfaces() {
+/** With a concrete report number the one changed report page is busted instead of every report page. */
+function revalidateCaptureSurfaces(reportNumber?: number) {
   revalidatePath("/capture");
   revalidatePath("/expense-reports");
-  revalidatePath("/expense-reports/[number]", "page");
+  if (reportNumber !== undefined) {
+    revalidatePath(`/expense-reports/${reportNumber}`);
+  } else {
+    revalidatePath("/expense-reports/[number]", "page");
+  }
   revalidatePath("/transactions");
+}
+
+function validateCaptureAmount(amount: number): string | null {
+  if (!Number.isFinite(amount) || amount <= 0) return "Amount must be greater than zero";
+  if (amount > MAX_AMOUNT) return "Amount can't exceed 1,000,000";
+  return null;
 }
 
 export type CreateExpenseCaptureInput = {
@@ -52,21 +66,36 @@ export async function createExpenseCapture(
   const { error: authError, user } = await requireUser();
   if (authError) return { error: authError };
 
+  const vendor = input.vendor?.trim() || null;
+  if (vendor && vendor.length > MAX_VENDOR_CHARS) {
+    return { error: `Vendor is too long (${MAX_VENDOR_CHARS} characters max)` };
+  }
+  const note = input.note?.trim() || null;
+  if (note && note.length > MAX_NOTE_CHARS) {
+    return { error: `Note is too long (${MAX_NOTE_CHARS} characters max)` };
+  }
+  if (input.amount != null) {
+    const amountError = validateCaptureAmount(input.amount);
+    if (amountError) return { error: amountError };
+  }
+
   const admin = createServiceRoleClient();
   const actor = user?.email ?? user?.id ?? "unknown";
 
   // Same guard addToExpenseReport has: a paid report was already filed and reimbursed, so quietly
   // growing it desyncs AC from what Cursor actually paid. The client's picker only lists open reports,
   // but a stale tab is exactly how a since-paid id gets posted — the check belongs on the server.
+  let reportNumber: number | undefined;
   if (input.expenseReportId) {
     const { data: report, error: reportError } = await admin
       .from("expense_reports")
-      .select("paid_at")
+      .select("number, paid_at")
       .eq("id", input.expenseReportId)
       .maybeSingle();
     if (reportError) return { error: reportError.message };
     if (!report) return { error: "That expense report no longer exists" };
     if (report.paid_at) return { error: "That report is already marked paid. Start a new one." };
+    reportNumber = report.number as number;
   }
 
   const { data: capture, error } = await admin
@@ -76,9 +105,9 @@ export async function createExpenseCapture(
       capture_kind: input.captureKind,
       // A cash capture is terminal: there is no charge coming, so it never enters the match queue.
       match_status: input.captureKind === "cash" ? "cash" : "unmatched",
-      vendor: input.vendor?.trim() || null,
+      vendor,
       amount: input.amount ?? null,
-      note: input.note?.trim() || null,
+      note,
       latitude: input.latitude ?? null,
       longitude: input.longitude ?? null,
       location_accuracy_m: input.locationAccuracyM ?? null,
@@ -91,7 +120,7 @@ export async function createExpenseCapture(
 
   const captureId = capture.id as string;
   if (!input.withPhoto) {
-    revalidateCaptureSurfaces();
+    revalidateCaptureSurfaces(reportNumber);
     return { captureId, upload: null };
   }
 
@@ -106,12 +135,12 @@ export async function createExpenseCapture(
   if (signError) {
     // The row survives; he can re-attach the photo from the list later.
     await admin.from("expense_captures").update({ photo_status: "failed" }).eq("id", captureId);
-    revalidateCaptureSurfaces();
+    revalidateCaptureSurfaces(reportNumber);
     return { captureId, upload: null };
   }
 
   await admin.from("expense_captures").update({ photo_path: path }).eq("id", captureId);
-  revalidateCaptureSurfaces();
+  revalidateCaptureSurfaces(reportNumber);
   return { captureId, upload: { path, token: signed.token } };
 }
 
@@ -128,9 +157,27 @@ export async function updateExpenseCapture(input: {
   if (authError) return { error: authError };
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  if (input.vendor !== undefined) patch.vendor = input.vendor?.trim() || null;
-  if (input.amount !== undefined) patch.amount = input.amount;
-  if (input.note !== undefined) patch.note = input.note?.trim() || null;
+  if (input.vendor !== undefined) {
+    const vendor = input.vendor?.trim() || null;
+    if (vendor && vendor.length > MAX_VENDOR_CHARS) {
+      return { error: `Vendor is too long (${MAX_VENDOR_CHARS} characters max)` };
+    }
+    patch.vendor = vendor;
+  }
+  if (input.amount !== undefined) {
+    if (input.amount != null) {
+      const amountError = validateCaptureAmount(input.amount);
+      if (amountError) return { error: amountError };
+    }
+    patch.amount = input.amount;
+  }
+  if (input.note !== undefined) {
+    const note = input.note?.trim() || null;
+    if (note && note.length > MAX_NOTE_CHARS) {
+      return { error: `Note is too long (${MAX_NOTE_CHARS} characters max)` };
+    }
+    patch.note = note;
+  }
   if (input.captureKind !== undefined) {
     patch.capture_kind = input.captureKind;
     patch.match_status = input.captureKind === "cash" ? "cash" : "unmatched";
@@ -167,7 +214,10 @@ export async function markCapturePhotoStatus(input: {
     .eq("id", input.id);
   if (error) return { error: error.message };
 
-  revalidateCaptureSurfaces();
+  // Photo status renders on /capture and the report surfaces; /transactions never shows it.
+  revalidatePath("/capture");
+  revalidatePath("/expense-reports");
+  revalidatePath("/expense-reports/[number]", "page");
   return { success: true };
 }
 
@@ -178,10 +228,24 @@ export async function createCapturePhotoUpload(
   const { error: authError, user } = await requireUser();
   if (authError) return { error: authError };
 
+  // The id is interpolated into a storage object path — a non-UUID ("../...") could escape the
+  // user/month prefix, so gate on format AND on the row actually existing before minting a URL.
+  if (!isUuid(captureId)) return { error: "Invalid capture id" };
+
   const admin = createServiceRoleClient();
+
+  const { data: existing, error: existingError } = await admin
+    .from("expense_captures")
+    .select("id")
+    .eq("id", captureId)
+    .maybeSingle();
+  if (existingError) return { error: existingError.message };
+  if (!existing) return { error: "That capture no longer exists" };
+
   const month = new Date().toISOString().slice(0, 7);
   const path = `${user?.id ?? "unknown"}/${month}/${captureId}.jpg`;
 
+  // upsert stays true: the re-shoot/replace-photo path overwrites the same object on purpose.
   const { data: signed, error } = await admin.storage
     .from(BUCKET)
     .createSignedUploadUrl(path, { upsert: true });

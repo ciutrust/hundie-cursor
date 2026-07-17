@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { ReportStatusBadge } from "@/components/expense-reports/report-status-badge";
+import { StaleCaptureBanner } from "@/components/expense-reports/stale-capture-banner";
 import { formatExpenseReportNumber } from "@/lib/date-range";
 import {
   getExpenseReports,
   outstandingTotal,
   type ExpenseReportSummary,
 } from "@/lib/queries/expense-reports";
+import { getStaleCaptures } from "@/lib/queries/stale-captures";
 import { cn, formatCurrency } from "@/lib/utils";
 
 /**
@@ -21,7 +23,7 @@ function unpaidFirst(reports: ExpenseReportSummary[]): ExpenseReportSummary[] {
 }
 
 export default async function ExpenseReportsPage() {
-  const reports = await getExpenseReports();
+  const [reports, staleCaptures] = await Promise.all([getExpenseReports(), getStaleCaptures()]);
   const outstanding = outstandingTotal(reports);
   const sorted = unpaidFirst(reports);
 
@@ -33,6 +35,8 @@ export default async function ExpenseReportsPage() {
           Each report bundles the charges from one trip so you can file them together.
         </p>
       </div>
+
+      <StaleCaptureBanner captures={staleCaptures} />
 
       {reports.length > 0 ? (
         <div
