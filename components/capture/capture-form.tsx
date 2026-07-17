@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, Check, ImageIcon, Loader2, MapPin, TriangleAlert } from "lucide-react";
+import { Camera, Check, ImageIcon, Loader2, MapPin, PencilLine, TriangleAlert } from "lucide-react";
 import {
   createCapturePhotoUpload,
   createExpenseCapture,
@@ -151,6 +151,8 @@ export function CaptureForm({ reports }: { reports: OpenReport[] }) {
   const [vendor, setVendor] = useState("");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  /** "No receipt" mode: some spend hands you nothing (a cash tip, a parking meter). */
+  const [manualMode, setManualMode] = useState(false);
 
   const [captureId, setCaptureId] = useState<string | null>(null);
   /** What the committed row actually says, which is NOT the toggle — see the toggle's comment. */
@@ -374,6 +376,55 @@ export function CaptureForm({ reports }: { reports: OpenReport[] }) {
     await finishUpload(pending.captureId, minted.path, minted.token, pending.blob);
   }
 
+  /**
+   * Log an expense that never had a receipt — a cash tip, a parking meter, a counter that hands you
+   * nothing.
+   *
+   * Deliberately INVERTED from the photo flow. There the photo IS the artifact, so the row is created
+   * the instant the shutter fires and the typing is optional enrichment. Here the typing is the only
+   * record there will ever be, so a row with nothing on it is worthless: the amount is required and the
+   * row is created on save, not before.
+   */
+  async function handleSaveManual() {
+    const parsed = parseAmount(amount);
+    if (!reportId || busy !== "idle" || parsed == null || parsed <= 0) return;
+
+    setError(null);
+    setBusy("saving");
+    setGeo({ status: "locating" });
+    // Same rule as the photo path: the fix is requested on the ACTION, never on page load (a reflexive
+    // denial is sticky and JS can never re-prompt), and it never blocks the save.
+    const coords = await withDeadline(requestLocation(), GEO_SAVE_DEADLINE_MS);
+    setGeo(coords ? { status: "located", accuracyM: coords.accuracyM } : { status: "none" });
+
+    const result = await createExpenseCapture({
+      expenseReportId: reportId,
+      captureKind,
+      vendor: vendor.trim() || null,
+      amount: parsed,
+      note: note.trim() || null,
+      latitude: coords?.latitude ?? null,
+      longitude: coords?.longitude ?? null,
+      locationAccuracyM: coords?.accuracyM ?? null,
+      withPhoto: false,
+    });
+    setBusy("idle");
+
+    if ("error" in result) {
+      setError(result.error);
+      return;
+    }
+
+    setCaptureId(result.captureId);
+    setCommittedKind(captureKind);
+    setPhotoState("none");
+    setPreviewUrl(null);
+    setDetailsSaved(true);
+    setManualMode(false);
+    // Back to Card for the next one — sticky Cash is the money bug documented in handleFile.
+    setCaptureKind("card");
+  }
+
   async function handleSaveDetails() {
     if (!captureId || busy !== "idle") return;
 
@@ -399,6 +450,69 @@ export function CaptureForm({ reports }: { reports: OpenReport[] }) {
 
   const working = busy !== "idle";
   const canCapture = Boolean(reportId) && !working;
+  // A no-photo capture with no amount is nothing at all — there is no receipt to fall back on and it
+  // would land on the report as a $0 phantom line. The photo path has no such gate: there the image
+  // carries the vendor and amount even when he never types them.
+  const manualAmountValid = (() => {
+    const parsed = parseAmount(amount);
+    return parsed != null && parsed > 0;
+  })();
+
+  /** One definition, rendered by both the post-photo card and the no-receipt card. */
+  const detailFields = (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <Label htmlFor="capture-vendor" className="text-sm">
+          Vendor
+        </Label>
+        <Input
+          id="capture-vendor"
+          className="min-h-14 text-base"
+          placeholder="Where was it"
+          value={vendor}
+          onChange={(event) => {
+            setVendor(event.target.value);
+            setDetailsSaved(false);
+          }}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="capture-amount" className="text-sm">
+          Amount
+        </Label>
+        {/* No autoFocus anywhere on this screen: the keyboard would cover the camera button. */}
+        <Input
+          id="capture-amount"
+          type="text"
+          inputMode="decimal"
+          className="min-h-14 text-base tabular-nums"
+          placeholder="47.00"
+          value={amount}
+          onChange={(event) => {
+            setAmount(event.target.value);
+            setDetailsSaved(false);
+          }}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="capture-note" className="text-sm">
+          Note
+        </Label>
+        <Input
+          id="capture-note"
+          className="min-h-14 text-base"
+          placeholder="Who was there, what for"
+          value={note}
+          onChange={(event) => {
+            setNote(event.target.value);
+            setDetailsSaved(false);
+          }}
+        />
+      </div>
+    </div>
+  );
   const selected = openReports.find((report) => report.id === reportId) ?? null;
 
   return (
@@ -576,7 +690,8 @@ export function CaptureForm({ reports }: { reports: OpenReport[] }) {
             ) : null}
             <div className="min-w-0 space-y-1">
               <p className="flex items-center gap-1.5 text-sm font-semibold text-emerald-700 dark:text-emerald-400">
-                <Check className="h-4 w-4" /> Receipt saved
+                {/* Don't claim a receipt he never took: a no-photo capture saved fine, it just has no image. */}
+                <Check className="h-4 w-4" /> {previewUrl ? "Receipt saved" : "Expense saved"}
               </p>
               {/* Same wording the report lines use, so the two screens read as one system. */}
               <p className="text-xs text-muted-foreground">
@@ -600,72 +715,57 @@ export function CaptureForm({ reports }: { reports: OpenReport[] }) {
                   working ? "pointer-events-none opacity-50" : "hover:text-foreground",
                 )}
               >
-                Replace photo
+                {/* handleReplacePhoto keys off captureId, so a no-photo capture can gain one later for free. */}
+                {previewUrl ? "Replace photo" : "Add a photo"}
               </label>
             </div>
           </div>
 
           {/* Optional, and it says so: the row is already durable, this is just what makes it readable. */}
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="capture-vendor" className="text-sm">
-                Vendor
-              </Label>
-              <Input
-                id="capture-vendor"
-                className="min-h-14 text-base"
-                placeholder="Where was it"
-                value={vendor}
-                onChange={(event) => {
-                  setVendor(event.target.value);
-                  setDetailsSaved(false);
-                }}
-              />
-            </div>
+          {detailFields}
 
-            <div className="space-y-1.5">
-              <Label htmlFor="capture-amount" className="text-sm">
-                Amount
-              </Label>
-              {/* No autoFocus anywhere on this screen: the keyboard would cover the camera button. */}
-              <Input
-                id="capture-amount"
-                type="text"
-                inputMode="decimal"
-                className="min-h-14 text-base tabular-nums"
-                placeholder="47.00"
-                value={amount}
-                onChange={(event) => {
-                  setAmount(event.target.value);
-                  setDetailsSaved(false);
-                }}
-              />
-            </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-14 w-full text-base"
+            disabled={working}
+            onClick={handleSaveDetails}
+          >
+            {busy === "saving" ? "Saving…" : detailsSaved ? "Details saved" : "Save details"}
+          </Button>
+        </div>
+      ) : null}
 
-            <div className="space-y-1.5">
-              <Label htmlFor="capture-note" className="text-sm">
-                Note
-              </Label>
-              <Input
-                id="capture-note"
-                className="min-h-14 text-base"
-                placeholder="Who was there, what for"
-                value={note}
-                onChange={(event) => {
-                  setNote(event.target.value);
-                  setDetailsSaved(false);
-                }}
-              />
-            </div>
+      {/* No receipt: the fields ARE the record here, so nothing is written until he taps Save. */}
+      {manualMode && !captureId ? (
+        <div className="space-y-4 rounded-xl border border-border bg-card p-4">
+          <div className="space-y-1">
+            <p className="text-sm font-semibold">Log it without a photo</p>
+            <p className="text-xs text-muted-foreground">
+              For spend that never gives you a receipt. The amount is what puts it on the report, so
+              it is required here.
+            </p>
+          </div>
 
+          {detailFields}
+
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              className="min-h-14 flex-1 text-base"
+              disabled={working || !manualAmountValid}
+              onClick={handleSaveManual}
+            >
+              {busy === "saving" ? "Saving…" : "Save expense"}
+            </Button>
             <Button
               type="button"
               variant="outline"
-              className="min-h-14 w-full text-base"
+              className="min-h-14 text-base"
               disabled={working}
-              onClick={handleSaveDetails}
+              onClick={() => setManualMode(false)}
             >
-              {busy === "saving" ? "Saving…" : detailsSaved ? "Details saved" : "Save details"}
+              Cancel
             </Button>
           </div>
         </div>
@@ -691,6 +791,24 @@ export function CaptureForm({ reports }: { reports: OpenReport[] }) {
           {/* Says "new" once a capture is on screen, so it can't be mistaken for Replace photo above. */}
           {captureId ? "New capture from library" : "Choose from library"}
         </label>
+
+        {/* Secondary on purpose: most spend hands you a receipt, so the camera stays the primary
+            action. Hidden while the no-receipt card is already open, and while a capture is on screen
+            (tapping it there would start a second line for the same spend). */}
+        {!manualMode && !captureId ? (
+          <button
+            type="button"
+            disabled={!canCapture}
+            onClick={() => setManualMode(true)}
+            className={cn(
+              "flex min-h-14 w-full items-center justify-center gap-2 rounded-lg text-sm text-muted-foreground",
+              canCapture ? "hover:text-foreground" : "pointer-events-none opacity-50",
+            )}
+          >
+            <PencilLine className="h-4 w-4" />
+            No receipt? Log it without a photo
+          </button>
+        ) : null}
       </div>
     </div>
   );
