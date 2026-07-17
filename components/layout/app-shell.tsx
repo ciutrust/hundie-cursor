@@ -63,18 +63,6 @@ const CLASSIFY_ITEMS: NavItem[] = [
     match: (path) => path === "/review",
   },
   {
-    href: "/transactions",
-    label: "Transactions",
-    icon: CreditCard,
-    match: (path) => path.startsWith("/transactions"),
-  },
-  {
-    href: "/expense-reports",
-    label: "Expense reports",
-    icon: Plane,
-    match: (path) => path.startsWith("/expense-reports"),
-  },
-  {
     href: "/review/ai",
     label: "AI review",
     icon: Brain,
@@ -94,12 +82,24 @@ const CLASSIFY_ITEMS: NavItem[] = [
   },
 ];
 
-const BILLS_ITEMS: NavItem[] = [
+const FUNCTIONS_ITEMS: NavItem[] = [
   {
     href: "/bills",
     label: "Bills",
     icon: Receipt,
     match: (path) => path.startsWith("/bills"),
+  },
+  {
+    href: "/transactions",
+    label: "Transactions",
+    icon: CreditCard,
+    match: (path) => path.startsWith("/transactions"),
+  },
+  {
+    href: "/expense-reports",
+    label: "Expense reports",
+    icon: Plane,
+    match: (path) => path.startsWith("/expense-reports"),
   },
 ];
 
@@ -328,9 +328,9 @@ export function AppShell({
 
           <div>
             <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Bills
+              Functions
             </p>
-            <ul className="space-y-0.5">{BILLS_ITEMS.map(renderNavItem)}</ul>
+            <ul className="space-y-0.5">{FUNCTIONS_ITEMS.map(renderNavItem)}</ul>
           </div>
 
           <div>
