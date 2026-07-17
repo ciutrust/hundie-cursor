@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { unstable_rethrow } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -54,6 +55,9 @@ export async function getStaleCaptures(): Promise<StaleCaptureRow[]> {
     const rows = (data ?? []) as unknown as StaleCaptureRow[];
     return rows.filter((row) => row.expense_report?.paid_at == null);
   } catch (error) {
+    // Next's control-flow "errors" (dynamic-server-usage during build prerender, redirects) must
+    // pass through, or the framework mis-learns what this route needs.
+    unstable_rethrow(error);
     console.error("getStaleCaptures failed:", error);
     return [];
   }

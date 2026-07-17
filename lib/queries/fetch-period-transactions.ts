@@ -45,6 +45,11 @@ export type FetchPeriodTransactionsOptions = {
    * LIST, which shows a split parent (as a "Split" row) so the user can edit it.
    */
   excludeSplitParents?: boolean;
+  /**
+   * Stop after this many rows (see paginateAll). ONLY for display surfaces that tell the user rows
+   * were cut off — a capped fetch feeding a SUM or a report would silently undercount.
+   */
+  maxRows?: number;
 };
 
 export async function fetchPeriodTransactions<T>(
@@ -53,7 +58,7 @@ export async function fetchPeriodTransactions<T>(
   const { supabase, select, start, end, entityId, entitySlug, categoryId, accountIds, order } = opts;
   const excludeRemoved = opts.excludeRemoved !== false;
   const excludeSplitParents = opts.excludeSplitParents !== false;
-  return paginateAll<T>(async (from, pageSize) => {
+  const runPage = async (from: number, pageSize: number) => {
     let query = supabase
       .from("transactions")
       .select(select)
@@ -82,5 +87,6 @@ export async function fetchPeriodTransactions<T>(
 
     const { data, error } = await query;
     return { data: data as T[] | null, error };
-  });
+  };
+  return paginateAll<T>(runPage, undefined, undefined, opts.maxRows);
 }

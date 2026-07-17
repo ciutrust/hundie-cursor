@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { unstable_rethrow } from "next/navigation";
 import { ImageIcon } from "lucide-react";
 import { CapturePhotoRetry } from "@/components/capture/capture-photo-retry";
 import { formatExpenseReportNumber } from "@/lib/date-range";
@@ -39,6 +40,9 @@ export async function RecentCaptures() {
         .map((row) => row.photo_path!),
     );
   } catch (error) {
+    // Next's control-flow "errors" (dynamic-server-usage during build prerender, redirects) must
+    // pass through, or the framework mis-learns what this route needs.
+    unstable_rethrow(error);
     console.error("RecentCaptures failed:", error);
     return null;
   }

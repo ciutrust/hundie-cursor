@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { Camera, Loader2 } from "lucide-react";
 import { createCapturePhotoUpload, markCapturePhotoStatus } from "@/lib/actions/expense-captures";
 import { downscaleImage } from "@/lib/receipts/downscale";
-import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
 const BUCKET = "receipts";
@@ -30,6 +29,8 @@ export function CapturePhotoRetry({ captureId }: { captureId: string }) {
   const [error, setError] = useState<string | null>(null);
 
   async function uploadWithBackoff(path: string, token: string, blob: Blob): Promise<boolean> {
+    // Dynamic on purpose, mirroring capture-form: supabase-js only loads once an upload starts.
+    const { createClient } = await import("@/lib/supabase/client");
     const supabase = createClient();
     for (let attempt = 0; ; attempt++) {
       const { error: uploadError } = await supabase.storage

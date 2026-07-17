@@ -74,4 +74,26 @@ describe("paginateAll (stable-order guard via `key`)", () => {
     expect(result).toHaveLength(2500);
     expect(new Set(result.map((r) => r.id)).size).toBe(2500); // no dup, no skip
   });
+
+  it("maxRows stops paging early and slices to exactly maxRows", async () => {
+    const all = Array.from({ length: 5000 }, (_, i) => ({ id: i }));
+    const build = vi.fn(async (from: number, pageSize: number) => ({
+      data: all.slice(from, from + pageSize),
+      error: null,
+    }));
+    const result = await paginateAll(build, 1000, undefined, 2001);
+    expect(result).toHaveLength(2001);
+    expect(result[2000]!.id).toBe(2000);
+    expect(build).toHaveBeenCalledTimes(3); // stops at 3000 collected, not 5 pages
+  });
+
+  it("maxRows above the row count changes nothing", async () => {
+    const all = Array.from({ length: 1500 }, (_, i) => ({ id: i }));
+    const build = vi.fn(async (from: number, pageSize: number) => ({
+      data: all.slice(from, from + pageSize),
+      error: null,
+    }));
+    const result = await paginateAll(build, 1000, undefined, 9999);
+    expect(result).toHaveLength(1500);
+  });
 });

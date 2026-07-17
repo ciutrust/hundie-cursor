@@ -2,7 +2,10 @@ import { AccountRangePicker } from "@/components/transactions/account-range-pick
 import { TransactionsBrowserList } from "@/components/transactions/transaction-selection-actions";
 import { TransactionsExport } from "@/components/transactions/transactions-export";
 import { parseDateRange } from "@/lib/date-range";
-import { getAccountTransactions } from "@/lib/queries/account-transactions";
+import {
+  getAccountTransactions,
+  TRANSACTIONS_BROWSER_CAP,
+} from "@/lib/queries/account-transactions";
 import { getAccountsWithEntities, type AccountWithEntity } from "@/lib/queries/accounts";
 import { getOpenExpenseReports } from "@/lib/queries/expense-reports";
 import { getCategoriesByEntity, getClassifiableEntities } from "@/lib/queries/review";
@@ -38,7 +41,7 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
   const accounts = await getAccountsWithEntities();
   const selectedIds = resolveSelectedAccountIds(query.accounts, accounts);
 
-  const [transactions, entities, categoriesByEntity, openReports] = await Promise.all([
+  const [{ transactions, capped }, entities, categoriesByEntity, openReports] = await Promise.all([
     getAccountTransactions({ start: range.start, end: range.end, accountIds: selectedIds }),
     getClassifiableEntities(),
     getCategoriesByEntity(),
@@ -70,6 +73,18 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
           filename={`transactions-${range.from}_${range.to}.csv`}
         />
       </div>
+
+      {capped ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm dark:border-amber-900/50 dark:bg-amber-950/20">
+          <p className="font-semibold">
+            Showing the first {TRANSACTIONS_BROWSER_CAP.toLocaleString()} transactions
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            The count, total, and CSV above cover only these rows. Narrow the date range or uncheck
+            accounts to see everything.
+          </p>
+        </div>
+      ) : null}
 
       <AccountRangePicker accounts={accounts} selectedIds={selectedIds} range={range} />
 

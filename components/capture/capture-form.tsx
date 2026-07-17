@@ -12,7 +12,6 @@ import {
 import { createExpenseReport } from "@/lib/actions/expense-reports";
 import { formatExpenseReportNumber } from "@/lib/date-range";
 import { downscaleImage } from "@/lib/receipts/downscale";
-import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -230,6 +229,9 @@ export function CaptureForm({ reports }: { reports: OpenReport[] }) {
   }
 
   async function uploadPhoto(path: string, token: string, blob: Blob): Promise<boolean> {
+    // Dynamic on purpose: supabase-js is only needed once a photo is actually being uploaded, and
+    // pulling it out of the initial chunk keeps the counter screen's first paint light.
+    const { createClient } = await import("@/lib/supabase/client");
     const supabase = createClient();
     for (let attempt = 0; ; attempt++) {
       const { error: uploadError } = await supabase.storage
