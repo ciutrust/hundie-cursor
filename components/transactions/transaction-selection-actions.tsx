@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { SaveExpenseReportDialog } from "@/components/transactions/save-expense-report-dialog";
+import {
+  SaveExpenseReportDialog,
+  type OpenExpenseReport,
+} from "@/components/transactions/save-expense-report-dialog";
 import { TransactionList } from "@/components/review/transaction-list";
 import { Button } from "@/components/ui/button";
 import { assignJobW2Expenses } from "@/lib/actions/expense-reports";
@@ -12,10 +15,15 @@ type EntityCategory = Pick<Category, "id" | "full_path">;
 type TransactionSelectionActionsProps = {
   selected: TransactionWithDetails[];
   clearSelection: () => void;
+  openReports?: OpenExpenseReport[];
 };
 
 /** The two /transactions-only bulk actions, injected into TransactionList's selection bar. */
-function TransactionSelectionActions({ selected, clearSelection }: TransactionSelectionActionsProps) {
+function TransactionSelectionActions({
+  selected,
+  clearSelection,
+  openReports,
+}: TransactionSelectionActionsProps) {
   const [error, setError] = useState<string | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -60,6 +68,7 @@ function TransactionSelectionActions({ selected, clearSelection }: TransactionSe
         transactions={selected}
         onOpenChange={setSaveOpen}
         onSaved={clearSelection}
+        openReports={openReports}
       />
     </>
   );
@@ -71,6 +80,11 @@ type TransactionsBrowserListProps = {
   categories: EntityCategory[];
   categoriesByEntity: Record<string, EntityCategory[]>;
   month: string;
+  /**
+   * Unpaid reports, for the save dialog's "add to existing" mode. Fetched by the page — plain data
+   * crosses the boundary fine. Omit it and the dialog degrades to New-report-only.
+   */
+  openReports?: OpenExpenseReport[];
 };
 
 /**
@@ -83,6 +97,7 @@ export function TransactionsBrowserList({
   categories,
   categoriesByEntity,
   month,
+  openReports,
 }: TransactionsBrowserListProps) {
   return (
     <TransactionList
@@ -94,7 +109,11 @@ export function TransactionsBrowserList({
       // Sentinel: not a real entity slug, so the review-only suggestion pills / Generate / backlog toggle stay hidden.
       entitySlug="transactions"
       renderSelectionActions={(selected, { clearSelection }) => (
-        <TransactionSelectionActions selected={selected} clearSelection={clearSelection} />
+        <TransactionSelectionActions
+          selected={selected}
+          clearSelection={clearSelection}
+          openReports={openReports}
+        />
       )}
     />
   );
