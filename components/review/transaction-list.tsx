@@ -71,6 +71,15 @@ type TransactionListProps = {
   nextUp?: { slug: string; name: string; count: number } | null;
   /** The other flow (income↔expenses) and its backlog count, so an empty tab points to where the work is. */
   crossFlow?: { flowLabel: string; count: number; href: string } | null;
+  /**
+   * Extra buttons for the selection bar, rendered beside Clear / Assign category. A render-prop so
+   * this component stays generic: the /transactions page injects its own "Job W2" + "Save as expense
+   * report" actions without this list knowing anything about expense reports.
+   */
+  renderSelectionActions?: (
+    selected: TransactionWithDetails[],
+    helpers: { clearSelection: () => void },
+  ) => React.ReactNode;
 };
 
 export function TransactionList({
@@ -83,6 +92,7 @@ export function TransactionList({
   aiSuggestionTxIds,
   nextUp,
   crossFlow,
+  renderSelectionActions,
 }: TransactionListProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailTransaction, setDetailTransaction] = useState<TransactionWithDetails | null>(null);
@@ -502,16 +512,20 @@ export function TransactionList({
   return (
     <div className="space-y-3">
       {undoBanner}
-      <TransactionSearchBar
-        filters={filters}
-        onChange={setFilters}
-        resultCount={filteredTransactions.length}
-        totalCount={transactions.length}
-        categoryOptions={categoryOptions}
-        accountOptions={accountOptions}
-      />
+      {/* Controls are screen-only: an expense report gets printed for filing, and a paper copy of the
+          search bar / sort / bulk bar is noise. The rows themselves still print. */}
+      <div className="print:hidden">
+        <TransactionSearchBar
+          filters={filters}
+          onChange={setFilters}
+          resultCount={filteredTransactions.length}
+          totalCount={transactions.length}
+          categoryOptions={categoryOptions}
+          accountOptions={accountOptions}
+        />
+      </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
             <input
@@ -600,7 +614,7 @@ export function TransactionList({
         </div>
       </div>
 
-      <p className="hidden text-xs text-muted-foreground sm:block">
+      <p className="hidden text-xs text-muted-foreground sm:block print:hidden">
         Keyboard: <span className="font-medium">j</span>/<span className="font-medium">k</span> move ·{" "}
         <span className="font-medium">Enter</span> accept · <span className="font-medium">x</span>{" "}
         select · <span className="font-medium">s</span> similar
@@ -636,7 +650,7 @@ export function TransactionList({
                   checked={isSelected}
                   onChange={() => toggleOne(tx.id)}
                   aria-label={`Select ${tx.description}`}
-                  className="mt-1 h-4 w-4 shrink-0 rounded border-border accent-primary"
+                  className="mt-1 h-4 w-4 shrink-0 rounded border-border accent-primary print:hidden"
                 />
                 <button
                   type="button"
@@ -678,6 +692,9 @@ export function TransactionList({
                 <span className="mr-auto font-medium tabular-nums sm:mr-0 sm:w-24 sm:text-right">
                   {formatCurrency(Number(tx.amount))}
                 </span>
+                {/* `contents` keeps these buttons in the row's flex layout on screen, while
+                    print:hidden drops the whole interactive cluster from a printed report. */}
+                <div className="contents print:hidden">
                 {suggestion ? (
                   <button
                     type="button"
@@ -726,6 +743,7 @@ export function TransactionList({
                     </button>
                   </>
                 )}
+                </div>
               </div>
             </div>
           );
@@ -733,15 +751,16 @@ export function TransactionList({
       </div>
 
       {selectedIds.size > 0 ? (
-        <div className="sticky bottom-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-4 shadow-md">
+        <div className="sticky bottom-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-4 shadow-md print:hidden">
           <p className="text-sm font-medium">
             {selectedIds.size} transaction{selectedIds.size === 1 ? "" : "s"} selected ·{" "}
             {formatCurrency(selectedTotal)}
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={clearSelection}>
               Clear
             </Button>
+            {renderSelectionActions?.(selectedTransactions, { clearSelection })}
             <Button size="sm" onClick={() => setBulkOpen(true)}>
               Assign category
             </Button>
