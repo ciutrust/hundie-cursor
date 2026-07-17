@@ -33,6 +33,7 @@ export async function updateSession(request: NextRequest) {
     path.startsWith("/review") ||
     path.startsWith("/transactions") ||
     path.startsWith("/expense-reports") ||
+    path.startsWith("/bills") ||
     path.startsWith("/reports") ||
     path.startsWith("/categories") ||
     path.startsWith("/settings") ||
