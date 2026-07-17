@@ -13,8 +13,21 @@ export default function manifest(): MetadataRoute.Manifest {
     // so the splash and system chrome do not flash a different color on launch.
     background_color: "#05070c",
     theme_color: "#05070c",
-    // No `icons` array on purpose: there is no /public directory and no icon file anywhere in
-    // the repo yet. A manifest pointing at a file that does not exist installs worse than one
-    // with no icons at all. Drop a 192px and 512px PNG in /public and add them here later.
+    // 192 + 512 are what Chrome requires before it will offer "Install" at all.
+    //
+    // These are generated FULL-BLEED from AC's source art: the original had a baked-in white border
+    // around a pre-rounded square, which both platforms would have framed in white, because they mask
+    // icons themselves. The white was keyed out to the icon's own green (rgb(23,73,51)) so the art
+    // runs edge to edge and the OS does the rounding.
+    //
+    // The maskable entry is separate and deliberately padded: Android crops a maskable icon to a
+    // circle/squircle, and the full-bleed art sits at ~92% — the "Hundie" wordmark would be sliced.
+    // It is shrunk to 76% on a green bed so everything lands inside the centre safe zone. `any` and
+    // `maskable` are distinct purposes; one file cannot serve both well.
+    icons: [
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+    ],
   };
 }
