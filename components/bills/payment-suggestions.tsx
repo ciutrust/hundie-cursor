@@ -16,7 +16,8 @@ export function PaymentSuggestions({ suggestions }: { suggestions: BillPaymentSu
   // Unchecked ids rather than checked ones: new suggestions arriving after a sync start selected,
   // which is the point of the bulk action (confirm everything that looks right, uncheck the odd one).
   const [unchecked, setUnchecked] = useState<Set<string>>(new Set());
-  const [error, setError] = useState<string | null>(null);
+  // Holds both hard errors and the benign "some were skipped" report.
+  const [notice, setNotice] = useState<string | null>(null);
 
   const visible = useMemo(
     () => suggestions.filter((s) => !dismissed.has(s.instanceId)),
@@ -27,7 +28,9 @@ export function PaymentSuggestions({ suggestions }: { suggestions: BillPaymentSu
     [visible, unchecked],
   );
 
-  if (visible.length === 0) return null;
+  // Keep rendering when the list empties but a notice is pending, so a partial-skip report is
+  // readable — confirming the last suggestions removes them from the refreshed list.
+  if (visible.length === 0 && !notice) return null;
 
   const allSelected = selected.length === visible.length;
 
@@ -45,7 +48,7 @@ export function PaymentSuggestions({ suggestions }: { suggestions: BillPaymentSu
   const dismiss = (instanceId: string) => setDismissed((prev) => new Set(prev).add(instanceId));
 
   const confirmSelected = () => {
-    setError(null);
+    setNotice(null);
     if (selected.length === 0) return;
     startTransition(async () => {
       const res = await confirmBillPayments(
@@ -57,18 +60,31 @@ export function PaymentSuggestions({ suggestions }: { suggestions: BillPaymentSu
         })),
       );
       if ("error" in res) {
-        setError(res.error);
+        setNotice(res.error);
         return;
       }
       if (res.skipped > 0) {
-        setError(
+        setNotice(
           `Confirmed ${res.confirmed}. Skipped ${res.skipped} that were already paid or linked elsewhere.`,
         );
       }
-      setUnchecked(new Set());
+      // `unchecked` is deliberately NOT reset: it holds the rows the operator rejected as bad
+      // matches, and clearing it would re-CHECK them (the set stores unchecked ids, so empty =
+      // everything selected) — re-arming a wrong match for the next click. The rows just confirmed
+      // drop out of the refreshed list on their own (no longer open, and their transaction is now
+      // excluded by linkedTxnIds), so there is nothing here that needs clearing.
       router.refresh();
     });
   };
+
+  // Everything was confirmed away — just report what happened.
+  if (visible.length === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
+        {notice}
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
@@ -78,7 +94,8 @@ export function PaymentSuggestions({ suggestions }: { suggestions: BillPaymentSu
         <button
           type="button"
           onClick={toggleAll}
-          className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          disabled={isPending}
+          className="text-xs text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
         >
           {allSelected ? "Clear all" : "Select all"}
         </button>
@@ -93,7 +110,7 @@ export function PaymentSuggestions({ suggestions }: { suggestions: BillPaymentSu
         </Button>
       </div>
 
-      {error && <p className="mb-2 text-xs text-muted-foreground">{error}</p>}
+      {notice && <p className="mb-2 text-xs text-muted-foreground">{notice}</p>}
 
       <ul className="space-y-2">
         {visible.map((s) => {
