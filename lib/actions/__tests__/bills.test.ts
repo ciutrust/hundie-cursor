@@ -154,6 +154,81 @@ describe("confirmBillPayment", () => {
   });
 });
 
+describe("confirmBillPayments (bulk)", () => {
+  const twoBills = [
+    { ...activeBill, id: "bill-1" },
+    { ...activeBill, id: "bill-2" },
+  ];
+  const twoOpen = [
+    openInstance({ id: "inst-1", bill_id: "bill-1" }),
+    openInstance({ id: "inst-2", bill_id: "bill-2" }),
+  ];
+
+  it("confirms several suggestions and rolls each bill forward", async () => {
+    const { db } = setup({ bills: twoBills, bill_instances: twoOpen });
+    const { confirmBillPayments } = await import("@/lib/actions/bills");
+    const res = await confirmBillPayments([
+      { instanceId: "inst-1", transactionId: "tx-1" },
+      { instanceId: "inst-2", transactionId: "tx-2" },
+    ]);
+    expect(res).toEqual({ success: true, confirmed: 2, skipped: 0 });
+    expect(db.bill_instances.find((i) => i.id === "inst-1").matched_transaction_id).toBe("tx-1");
+    expect(db.bill_instances.find((i) => i.id === "inst-2").matched_transaction_id).toBe("tx-2");
+    // Each paid cycle advances its own bill.
+    expect(db.bill_instances.filter((i) => i.due_date === "2026-08-15" && i.status === "open")).toHaveLength(2);
+  });
+
+  it("never lets one transaction pay two bills in the same batch", async () => {
+    const { db } = setup({ bills: twoBills, bill_instances: twoOpen });
+    const { confirmBillPayments } = await import("@/lib/actions/bills");
+    const res = await confirmBillPayments([
+      { instanceId: "inst-1", transactionId: "tx-dup" },
+      { instanceId: "inst-2", transactionId: "tx-dup" },
+    ]);
+    expect(res).toEqual({ success: true, confirmed: 1, skipped: 1 });
+    const linked = db.bill_instances.filter((i) => i.matched_transaction_id === "tx-dup");
+    expect(linked).toHaveLength(1);
+    expect(db.bill_instances.find((i) => i.id === "inst-2").status).toBe("open");
+  });
+
+  it("skips a transaction already linked elsewhere (stale suggestion list)", async () => {
+    const { db } = setup({
+      bills: twoBills,
+      bill_instances: [
+        ...twoOpen,
+        openInstance({ id: "inst-old", bill_id: "bill-2", status: "paid", matched_transaction_id: "tx-1", due_date: "2026-06-15" }),
+      ],
+    });
+    const { confirmBillPayments } = await import("@/lib/actions/bills");
+    const res = await confirmBillPayments([{ instanceId: "inst-1", transactionId: "tx-1" }]);
+    expect(res).toEqual({ success: true, confirmed: 0, skipped: 1 });
+    expect(db.bill_instances.find((i) => i.id === "inst-1").status).toBe("open");
+  });
+
+  it("skips an instance that is no longer open instead of failing the batch", async () => {
+    const { db } = setup({
+      bills: twoBills,
+      bill_instances: [
+        openInstance({ id: "inst-1", bill_id: "bill-1", status: "paid" }),
+        openInstance({ id: "inst-2", bill_id: "bill-2" }),
+      ],
+    });
+    const { confirmBillPayments } = await import("@/lib/actions/bills");
+    const res = await confirmBillPayments([
+      { instanceId: "inst-1", transactionId: "tx-1" },
+      { instanceId: "inst-2", transactionId: "tx-2" },
+    ]);
+    expect(res).toEqual({ success: true, confirmed: 1, skipped: 1 });
+    expect(db.bill_instances.find((i) => i.id === "inst-2").matched_transaction_id).toBe("tx-2");
+  });
+
+  it("rejects an empty selection", async () => {
+    setup({ bills: twoBills, bill_instances: twoOpen });
+    const { confirmBillPayments } = await import("@/lib/actions/bills");
+    expect(await confirmBillPayments([])).toEqual({ error: "Nothing selected" });
+  });
+});
+
 describe("unlinkBillPayment", () => {
   it("reverts a paid instance back to open and clears the paid fields", async () => {
     const { db } = setup({

@@ -261,6 +261,73 @@ export async function confirmBillPayment(input: {
   return { success: true };
 }
 
+export type ConfirmPaymentInput = {
+  instanceId: string;
+  transactionId: string;
+  paidAmount?: number | null;
+  paidAt?: string | null;
+};
+
+/**
+ * Confirm several suggested payments at once (the "Confirm N selected" bulk action).
+ *
+ * A transaction may only ever pay ONE bill, so this guards twice before writing:
+ *   1. in-batch — the same transaction id can't be applied to two instances in one submit;
+ *   2. against the DB — a charge already linked to any instance is skipped, which matters because
+ *      the suggestion list comes from a page render that may be stale (another tab/session, or a
+ *      confirm that landed after this page loaded).
+ * Each instance still goes through the same status='open' guard as the single confirm, so an
+ * already-resolved cycle is skipped rather than double-paid. Reports real counts, not requested ones.
+ */
+export async function confirmBillPayments(
+  inputs: ConfirmPaymentInput[],
+): Promise<{ success: true; confirmed: number; skipped: number } | { error: string }> {
+  const { error: authError, supabase } = await requireUser();
+  if (authError) return { error: authError };
+  const db = supabase as unknown as SupabaseClient;
+  if (inputs.length === 0) return { error: "Nothing selected" };
+
+  // Guard 2: which of these transactions are already linked to some instance?
+  const alreadyLinked = new Set<string>();
+  const txnIds = [...new Set(inputs.map((i) => i.transactionId))];
+  for (const ids of chunk(txnIds, 200)) {
+    const { data, error } = await db
+      .from("bill_instances")
+      .select("matched_transaction_id")
+      .in("matched_transaction_id", ids);
+    if (error) return { error: error.message };
+    for (const row of (data ?? []) as { matched_transaction_id: string | null }[]) {
+      if (row.matched_transaction_id) alreadyLinked.add(row.matched_transaction_id);
+    }
+  }
+
+  const usedInBatch = new Set<string>(); // Guard 1
+  let confirmed = 0;
+  let skipped = 0;
+
+  for (const input of inputs) {
+    if (alreadyLinked.has(input.transactionId) || usedInBatch.has(input.transactionId)) {
+      skipped += 1;
+      continue;
+    }
+    const result = await markInstancePaid(db, input.instanceId, {
+      matched_transaction_id: input.transactionId,
+      paid_amount: input.paidAmount ?? null,
+      paid_at: input.paidAt ?? new Date().toISOString(),
+    });
+    if ("error" in result) {
+      skipped += 1; // an instance that is no longer open — skip, don't fail the whole batch
+      continue;
+    }
+    usedInBatch.add(input.transactionId);
+    confirmed += 1;
+    await ensureNextCycle(db, result.bill_id, result.due_date);
+  }
+
+  revalidatePath("/bills");
+  return { success: true, confirmed, skipped };
+}
+
 export async function markBillPaidManually(
   instanceId: string,
   input: { paidAmount?: number | null; paidAt?: string | null } = {},
