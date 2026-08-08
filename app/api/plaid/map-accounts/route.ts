@@ -75,6 +75,31 @@ export async function POST(request: Request) {
     );
   }
 
+  // The other half of the mapped/ignored exclusion. /api/plaid/ignore-accounts already 409s an
+  // account that has a link; without this, the reverse direction lands a link on an account the
+  // operator marked "don't track" — and a link WINS in run-sync (it routes transactions), so the
+  // excluded account would quietly start feeding the ledger and the CPA reports while its ignore row
+  // became invisible in the UI and undeletable via the API. Fail closed, before any mutation.
+  const { data: ignoredRows, error: ignErr } = await admin
+    .from("plaid_ignored_accounts")
+    .select("plaid_account_id, plaid_name, plaid_mask")
+    .in(
+      "plaid_account_id",
+      valid.map((l) => l.plaidAccountId),
+    );
+  if (ignErr) return NextResponse.json({ error: ignErr.message }, { status: 500 });
+  if ((ignoredRows ?? []).length > 0) {
+    const labels = (ignoredRows ?? [])
+      .map((r) => r.plaid_name ?? r.plaid_mask ?? r.plaid_account_id)
+      .join(", ");
+    return NextResponse.json(
+      {
+        error: `Marked "don't track": ${labels}. Choose "Track this account again" first, then map it.`,
+      },
+      { status: 409 },
+    );
+  }
+
   // C3: the CSV→Plaid cutover. An explicit operator override wins; otherwise derive it from the
   // ledger as MAX(transaction_date)+1 of the mapped accounts so the gap between the CSV's last row
   // and the Plaid link date is not silently dropped.

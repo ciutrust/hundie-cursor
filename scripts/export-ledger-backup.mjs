@@ -52,6 +52,9 @@ const TABLES = [
   { name: "accounts", wipe: false },
   { name: "bank_connections", wipe: false },
   { name: "plaid_account_links", wipe: false },
+  // Without this a restore silently drops every "don't track this account" decision, and the
+  // connections it was releasing re-park at needs_mapping with no signal that anything was lost.
+  { name: "plaid_ignored_accounts", wipe: false },
   { name: "qb_training_expenses", wipe: false },
 ];
 

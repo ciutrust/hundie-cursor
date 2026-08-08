@@ -9,6 +9,7 @@ const conn = (over: Partial<ConnectionView>): ConnectionView => ({
   lastSyncedAt: null,
   syncFromDate: null,
   links: [],
+  ignored: [],
   ...over,
 });
 

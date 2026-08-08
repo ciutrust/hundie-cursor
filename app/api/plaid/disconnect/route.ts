@@ -11,7 +11,9 @@ export const runtime = "nodejs";
 
 /**
  * Remove a connection: revoke the token at Plaid (best-effort), then delete the connection row
- * (cascades plaid_account_links). Already-imported transactions are kept — only future syncing stops.
+ * (cascades plaid_account_links AND plaid_ignored_accounts — re-linking a bank starts the mapping
+ * conversation over, so its old "don't track" decisions shouldn't survive it). Already-imported
+ * transactions are kept — only future syncing stops.
  */
 export async function POST(request: Request) {
   const originError = requireSameOrigin(request);

@@ -72,18 +72,41 @@ export function resolveSyncFromDate(
 
 /**
  * C2: /transactions/sync is forward-only — a dropped `added` row never re-delivers. If any incoming
- * Plaid account id is unmapped (no plaid_account_links row) we must NOT advance the cursor, or those
- * rows are permanently lost. Returns the unmapped Plaid account ids (empty = safe to persist cursor).
+ * Plaid account is still UNRESOLVED we must NOT advance the cursor, or those rows are permanently
+ * lost. Returns the unresolved Plaid account ids (empty = safe to persist cursor).
+ *
+ * An account is resolved when it is either MAPPED (plaid_account_links) or IGNORED
+ * (plaid_ignored_accounts — the operator said "don't track this"). An ignored account is
+ * deliberately NOT in `accountIdByPlaid`, so it still cannot route a single transaction; passing it
+ * here only releases the cursor so its siblings stop replaying forever.
  */
 export function unmappedPlaidAccountIds(
   incomingPlaidAccountIds: Iterable<string>,
   accountIdByPlaid: Map<string, string>,
+  ignoredPlaidAccountIds: ReadonlySet<string> = new Set(),
 ): string[] {
   const unmapped = new Set<string>();
   for (const id of incomingPlaidAccountIds) {
-    if (!accountIdByPlaid.has(id)) unmapped.add(id);
+    if (accountIdByPlaid.has(id) || ignoredPlaidAccountIds.has(id)) continue;
+    unmapped.add(id);
   }
   return [...unmapped];
+}
+
+/**
+ * The zero-links deferral: a connection with NO plaid_account_links of its own must not burn its
+ * initial full-sync cursor page — a later map-accounts run still needs that history. But an account
+ * the operator marked "don't track" will never be mapped, so counting it here would park the
+ * connection at needs_mapping forever. Defer only while some incoming account is still UNDECIDED
+ * (neither mapped nor ignored); on the no-ignores path this is exactly the old `size > 0` test.
+ */
+export function shouldDeferZeroLinkConnection(
+  connectionHasLinks: boolean,
+  incomingCount: number,
+  ignoredIncomingCount: number,
+): boolean {
+  if (connectionHasLinks) return false;
+  return incomingCount - ignoredIncomingCount > 0;
 }
 
 /**
@@ -215,16 +238,21 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
   const [
     { data: connections, error: cErr },
     { data: links, error: lErr },
+    { data: ignored, error: iErr },
     { data: entities, error: eErr },
   ] = await Promise.all([
     admin
       .from("bank_connections")
       .select("id, institution, access_token_cipher, sync_cursor, status, sync_from_date"),
     admin.from("plaid_account_links").select("plaid_account_id, account_id, connection_id"),
+    // Loaded globally like links: plaid_account_id is globally unique and "not tracked" is a global
+    // fact, so no connection scoping is needed here.
+    admin.from("plaid_ignored_accounts").select("plaid_account_id"),
     admin.from("entities").select("id, slug"),
   ]);
   if (cErr) throw cErr;
   if (lErr) throw lErr;
+  if (iErr) throw iErr;
   if (eErr) throw eErr;
 
   // C12: tally why rows are dropped across the whole run (kept pure via summarizePlaidDrops);
@@ -247,6 +275,13 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
     if (!arr.includes(l.account_id)) arr.push(l.account_id);
     accountIdsByConnection.set(l.connection_id, arr);
   }
+
+  // Accounts the operator marked "don't track". Deliberately NOT added to accountIdByPlaid —
+  // that map is the only thing that can route a transaction into the ledger. This set is read by
+  // the cursor gate ONLY, so ignoring releases the cursor without importing anything.
+  const ignoredPlaidAccountIds = new Set<string>(
+    (ignored ?? []).map((r) => r.plaid_account_id as string),
+  );
 
   const accountById = new Map<string, AccountRow>();
   if (linkedAccountIds.size > 0) {
@@ -347,12 +382,18 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
       }
 
       const connectionHasLinks = (accountIdsByConnection.get(conn.id) ?? []).length > 0;
-      const unmapped = unmappedPlaidAccountIds(byPlaidAccount.keys(), accountIdByPlaid);
-      if (!connectionHasLinks && byPlaidAccount.size > 0) {
+      const incomingIds = [...byPlaidAccount.keys()];
+      const unresolved = unmappedPlaidAccountIds(
+        incomingIds,
+        accountIdByPlaid,
+        ignoredPlaidAccountIds,
+      );
+      const ignoredIncoming = incomingIds.filter((id) => ignoredPlaidAccountIds.has(id)).length;
+      if (shouldDeferZeroLinkConnection(connectionHasLinks, incomingIds.length, ignoredIncoming)) {
         // Zero links yet: don't burn the initial full-sync cursor page — leave cursor untouched so a
         // later map-accounts run can still ingest this history.
         result.status = "needs_mapping";
-        result.error = `${byPlaidAccount.size} Plaid account(s) not yet mapped — sync deferred until accounts are linked.`;
+        result.error = `${incomingIds.length - ignoredIncoming} Plaid account(s) not yet mapped — sync deferred until accounts are linked.`;
         summary.connections.push(result);
         continue;
       }
@@ -450,7 +491,7 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
         }
       }
 
-      if (unmapped.length === 0) {
+      if (unresolved.length === 0) {
         await admin
           .from("bank_connections")
           .update({
@@ -469,7 +510,7 @@ export async function runPlaidSync(admin: Admin): Promise<SyncSummary> {
           .update({ status: "needs_mapping", updated_at: new Date().toISOString() })
           .eq("id", conn.id);
         result.status = "needs_mapping";
-        result.error = `Unmapped Plaid account(s): ${unmapped.join(", ")}. Cursor held — map these accounts, then re-sync.`;
+        result.error = `Unmapped Plaid account(s): ${unresolved.join(", ")}. Cursor held — map these accounts (or mark them "don't track"), then re-sync.`;
         console.warn(`  ${conn.id}: ${result.error}`);
       }
     } catch (e) {

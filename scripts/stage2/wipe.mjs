@@ -42,7 +42,7 @@ const WIPE = [
   "raw_import_rows",
   "import_batches",
 ];
-const KEEP = ["entities", "categories", "accounts", "bank_connections", "plaid_account_links", "qb_training_expenses"];
+const KEEP = ["entities", "categories", "accounts", "bank_connections", "plaid_account_links", "plaid_ignored_accounts", "qb_training_expenses"];
 
 const apply = process.argv.includes("--apply");
 const conn = process.env.DATABASE_URL || loadDotEnv().DATABASE_URL;

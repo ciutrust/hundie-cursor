@@ -1,13 +1,16 @@
 import { Landmark } from "lucide-react";
 import { keyFingerprint } from "@/lib/crypto/secret-box";
 import { getConnections, getMappableAccounts, type ConnectionView } from "@/lib/queries/connections";
+import { getClassifiableEntities } from "@/lib/queries/review";
 import { ConnectBank } from "./connect-bank";
 import { ConnectionActions } from "./connection-actions";
+import { MapAccountsPanel } from "./map-accounts-panel";
 import { SyncNowButton } from "./sync-now-button";
 
 const STATUS_STYLES: Record<string, string> = {
   healthy: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
   needs_reauth: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  needs_mapping: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
   error: "bg-red-500/15 text-red-700 dark:text-red-400",
 };
 
@@ -19,7 +22,16 @@ export default async function ConnectionsPage() {
   } catch {
     configError = true;
   }
-  const accounts = await getMappableAccounts();
+  const [accounts, entities] = await Promise.all([
+    getMappableAccounts(),
+    getClassifiableEntities(),
+  ]);
+
+  // plaid_account_links has unique(account_id), so an account linked to any connection can never
+  // back a second Plaid account. Offering one would guarantee a failed save, so keep them out of
+  // the mapping panel entirely — that is why the panel creates ledger accounts inline.
+  const linkedAccountIds = new Set(connections.flatMap((c) => c.links.map((l) => l.accountId)));
+  const unlinkedAccounts = accounts.filter((a) => !linkedAccountIds.has(a.id));
 
   let encFingerprint: string | null = null;
   try {
@@ -97,10 +109,26 @@ export default async function ConnectionsPage() {
                   mappings and history are kept.
                 </p>
               ) : null}
+              {c.status === "needs_mapping" ? (
+                <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                  Some accounts at this bank have no decision on them yet, so this connection is
+                  holding its place in your history until they do. Not every account has to be
+                  mapped — click <strong>Map accounts</strong> and settle each one, either by
+                  pointing it at a Hundie account or by marking it{" "}
+                  <strong>Don&apos;t track this account</strong> if it should never be in the
+                  ledger. Then <strong>Sync now</strong> — the flag clears on the next sync, not
+                  when you save. Accounts already mapped keep importing normally.
+                </p>
+              ) : null}
               <div className="mt-3 divide-y divide-border border-t border-border">
                 {c.links.length === 0 ? (
+                  // Zero links no longer means zero decisions — every account here may be marked
+                  // "don't track". This list is links-only, so point at the panel rather than
+                  // asserting nothing has been settled.
                   <p className="pt-3 text-sm text-muted-foreground">
-                    No accounts mapped — re-link to map them.
+                    No accounts from this bank feed a Hundie account. Use{" "}
+                    <strong>Map accounts</strong> below — that&apos;s also where accounts marked not
+                    tracked are listed.
                   </p>
                 ) : (
                   c.links.map((l) => (
@@ -119,6 +147,39 @@ export default async function ConnectionsPage() {
                   ))
                 )}
               </div>
+              {c.ignored.length > 0 ? (
+                // Standing record of what is deliberately out of scope. Once these are marked the
+                // connection reads 'healthy', so without this the excluded accounts would be
+                // invisible outside the panel — and which bank accounts are out of scope is
+                // material to anyone reading the books.
+                <div className="mt-3 border-t border-border pt-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Not tracked ({c.ignored.length})
+                  </p>
+                  <div className="mt-1 space-y-1">
+                    {c.ignored.map((ig) => (
+                      <div
+                        key={ig.plaidAccountId}
+                        className="flex items-center justify-between gap-3 text-sm text-muted-foreground"
+                      >
+                        <span>
+                          {ig.plaidName ?? "Account"}
+                          {ig.plaidMask && !(ig.plaidName ?? "").includes(ig.plaidMask)
+                            ? ` ••${ig.plaidMask}`
+                            : ""}
+                        </span>
+                        <span className="text-xs">{ig.reason ?? "never imported"}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              <MapAccountsPanel
+                connectionId={c.id}
+                institution={c.institution}
+                mappableAccounts={unlinkedAccounts}
+                entities={entities}
+              />
             </div>
           ))}
         </div>

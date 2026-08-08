@@ -11,6 +11,14 @@ export type ConnectionLink = {
   accountName: string | null;
 };
 
+/** A Plaid account the operator marked "don't track" — resolved for the sync gate, never imported. */
+export type IgnoredAccount = {
+  plaidAccountId: string;
+  plaidName: string | null;
+  plaidMask: string | null;
+  reason: string | null;
+};
+
 export type ConnectionView = {
   id: string;
   institution: string | null;
@@ -19,6 +27,12 @@ export type ConnectionView = {
   /** #10: the cutover date — transactions before this are not pulled from Plaid (CSV owns the pre-cutover history). */
   syncFromDate: string | null;
   links: ConnectionLink[];
+  /**
+   * Deliberately excluded accounts. Carried here so the page can show them standing: once they are
+   * ignored the connection goes back to 'healthy', and without this the fact that real bank accounts
+   * are out of scope would only be visible behind an MFA-gated live Plaid call.
+   */
+  ignored: IgnoredAccount[];
 };
 
 /**
@@ -35,7 +49,11 @@ export async function getConnections(): Promise<ConnectionView[]> {
   if (authError) return [];
 
   const admin = createServiceRoleClient();
-  const [{ data: connections, error: cErr }, { data: links, error: lErr }] = await Promise.all([
+  const [
+    { data: connections, error: cErr },
+    { data: links, error: lErr },
+    { data: ignoredRows, error: iErr },
+  ] = await Promise.all([
     admin
       .from("bank_connections")
       .select("id, institution, status, last_synced_at, sync_from_date")
@@ -45,9 +63,13 @@ export async function getConnections(): Promise<ConnectionView[]> {
       .select(
         "connection_id, plaid_account_id, plaid_name, plaid_mask, plaid_type, account_id, accounts(display_name)",
       ),
+    admin
+      .from("plaid_ignored_accounts")
+      .select("connection_id, plaid_account_id, plaid_name, plaid_mask, reason"),
   ]);
   if (cErr) throw cErr;
   if (lErr) throw lErr;
+  if (iErr) throw iErr;
 
   const byConnection = new Map<string, ConnectionLink[]>();
   for (const l of links ?? []) {
@@ -64,6 +86,23 @@ export async function getConnections(): Promise<ConnectionView[]> {
     byConnection.set(l.connection_id, arr);
   }
 
+  // A link is the stronger fact: if an account somehow carried both, it IS importing, so listing it
+  // as excluded would be a lie. (map-accounts and ignore-accounts each refuse the other's rows, so
+  // this should be unreachable — it's here so the page can't misreport if it ever happens.)
+  const linkedPlaidIds = new Set((links ?? []).map((l) => l.plaid_account_id));
+  const ignoredByConnection = new Map<string, IgnoredAccount[]>();
+  for (const r of ignoredRows ?? []) {
+    if (linkedPlaidIds.has(r.plaid_account_id)) continue;
+    const arr = ignoredByConnection.get(r.connection_id) ?? [];
+    arr.push({
+      plaidAccountId: r.plaid_account_id,
+      plaidName: r.plaid_name,
+      plaidMask: r.plaid_mask,
+      reason: r.reason,
+    });
+    ignoredByConnection.set(r.connection_id, arr);
+  }
+
   return (connections ?? []).map((c) => ({
     id: c.id,
     institution: c.institution,
@@ -71,6 +110,7 @@ export async function getConnections(): Promise<ConnectionView[]> {
     lastSyncedAt: c.last_synced_at,
     syncFromDate: (c as { sync_from_date?: string | null }).sync_from_date ?? null,
     links: byConnection.get(c.id) ?? [],
+    ignored: ignoredByConnection.get(c.id) ?? [],
   }));
 }
 

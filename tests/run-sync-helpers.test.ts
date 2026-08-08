@@ -1,8 +1,21 @@
-import { describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+
+// runPlaidSync wraps the Plaid network call + token decryption. Stub only those two seams so the
+// rest (link/ignore resolution, the cursor gate, the real ledger import path) runs for real against
+// the fake Supabase — this is the money-critical behaviour we need to prove, not mock away.
+const seams = vi.hoisted(() => ({
+  syncTransactions: vi.fn(),
+  decryptSecret: vi.fn((cipher: string) => `token:${cipher}`),
+}));
+vi.mock("@/lib/aggregator", () => ({ aggregator: { syncTransactions: seams.syncTransactions } }));
+vi.mock("@/lib/crypto/secret-box", () => ({ decryptSecret: seams.decryptSecret }));
+
 import {
   existingExternalIdsForAccount,
   ineligibleModifiedToRemove,
   resolveSyncFromDate,
+  runPlaidSync,
+  shouldDeferZeroLinkConnection,
   stampRemovedTransactions,
   unmappedPlaidAccountIds,
   formatPlaidDropSummaryLine,
@@ -23,6 +36,58 @@ describe("C2 — unmappedPlaidAccountIds (cursor-advance gate)", () => {
   });
   test("dedupes repeated unmapped ids", () => {
     expect(unmappedPlaidAccountIds(["plaid-Z", "plaid-Z"], linkMap)).toEqual(["plaid-Z"]);
+  });
+
+  // An account the operator marked "don't track" is RESOLVED: it will never be mapped, so holding
+  // the forward-only cursor for it parks the connection at needs_mapping forever.
+  const ignored = new Set(["plaid-IGN", "plaid-IGN2"]);
+
+  test("an unmapped BUT ignored account resolves the gate (cursor may advance)", () => {
+    expect(unmappedPlaidAccountIds(["plaid-IGN"], linkMap, ignored)).toEqual([]);
+  });
+  test("mixed batch: only the account that is neither mapped nor ignored is returned", () => {
+    expect(unmappedPlaidAccountIds(["plaid-A", "plaid-IGN", "plaid-Z"], linkMap, ignored)).toEqual([
+      "plaid-Z",
+    ]);
+  });
+  test("every incoming account ignored → empty (the stuck-Wells-Fargo case)", () => {
+    expect(unmappedPlaidAccountIds(["plaid-IGN", "plaid-IGN2"], linkMap, ignored)).toEqual([]);
+  });
+  test("still dedupes when an ignore set is present", () => {
+    expect(unmappedPlaidAccountIds(["plaid-Z", "plaid-Z", "plaid-IGN"], linkMap, ignored)).toEqual([
+      "plaid-Z",
+    ]);
+  });
+  test("an id that is somehow BOTH mapped and ignored is not reported unresolved", () => {
+    expect(unmappedPlaidAccountIds(["plaid-A"], linkMap, new Set(["plaid-A"]))).toEqual([]);
+  });
+  test("omitting the ignore set reproduces the pre-ignore behaviour exactly", () => {
+    expect(unmappedPlaidAccountIds(["plaid-A", "plaid-IGN"], linkMap)).toEqual(["plaid-IGN"]);
+  });
+
+  // THE money invariant: resolving the gate must never make an ignored account routable. Only
+  // accountIdByPlaid can route a transaction, and ignores are deliberately absent from it.
+  test("resolving the gate does NOT put an ignored account into the routing map", () => {
+    expect(unmappedPlaidAccountIds(["plaid-IGN"], linkMap, ignored)).toEqual([]);
+    expect(linkMap.get("plaid-IGN")).toBeUndefined(); // → the per-account `if (!accountId) continue`
+  });
+});
+
+describe("shouldDeferZeroLinkConnection (don't burn the initial full-sync page)", () => {
+  test("zero links + an undecided incoming account → defer (cursor held)", () => {
+    expect(shouldDeferZeroLinkConnection(false, 2, 0)).toBe(true);
+  });
+  test("zero links + every incoming account ignored → do NOT defer (the bug being fixed)", () => {
+    expect(shouldDeferZeroLinkConnection(false, 4, 4)).toBe(false);
+  });
+  test("zero links + some ignored, one still undecided → defer", () => {
+    expect(shouldDeferZeroLinkConnection(false, 3, 2)).toBe(true);
+  });
+  test("zero links + nothing incoming → nothing to defer", () => {
+    expect(shouldDeferZeroLinkConnection(false, 0, 0)).toBe(false);
+  });
+  test("a connection that has links never takes this branch (the final gate decides)", () => {
+    expect(shouldDeferZeroLinkConnection(true, 5, 0)).toBe(false);
   });
 });
 
@@ -214,5 +279,171 @@ describe("C12 — formatPlaidDropSummaryLine (Plaid drop visibility)", () => {
       samples: {},
     });
     expect(line).toBeNull();
+  });
+});
+
+// The real-world case: two Wells Fargo connections pinned at needs_mapping since 2026-06-29 because
+// Plaid keeps returning accounts the owner has decided NOT to track. Marking them ignored must
+// RESOLVE the cursor gate (connection returns to healthy, cursor advances) while importing exactly
+// zero of their transactions. These drive runPlaidSync end-to-end against the fake ledger — only the
+// Plaid network call + token decryption are stubbed.
+describe("plaid_ignored_accounts — runPlaidSync cursor gate end-to-end", () => {
+  const CONN = "conn-wf";
+  const HELD_CURSOR = "cursor-held-2026-06-29";
+  const NEXT_CURSOR = "cursor-next";
+
+  function plaidTxn(overrides: Partial<AggregatorTransaction>): AggregatorTransaction {
+    return {
+      externalId: "ext-x",
+      accountExternalId: "plaid-A",
+      transactionDate: "2026-06-15",
+      postedDate: "2026-06-15",
+      amount: 42,
+      description: "COFFEE SHOP",
+      vendor: null,
+      rawCategory: null,
+      pending: false,
+      ...overrides,
+    };
+  }
+
+  const trackedAccount = {
+    id: "acct-1",
+    slug: "wf-everyday-checking",
+    display_name: "WF Everyday Checking",
+    account_type: "checking",
+    default_entity_id: "ent-1",
+    date_rules: [],
+  };
+
+  function seed(opts: {
+    links?: Array<{ plaid_account_id: string; account_id: string; connection_id: string }>;
+    ignored?: Array<{ plaid_account_id: string; connection_id: string }>;
+  }) {
+    return makeFakeSupabase({
+      bank_connections: [
+        {
+          id: CONN,
+          institution: "Wells Fargo",
+          access_token_cipher: "cipher-1",
+          sync_cursor: HELD_CURSOR,
+          status: "needs_mapping",
+          sync_from_date: "2026-01-01",
+          last_synced_at: "2026-06-29T00:00:00.000Z",
+        },
+      ],
+      plaid_account_links: opts.links ?? [],
+      plaid_ignored_accounts: opts.ignored ?? [],
+      entities: [{ id: "ent-1", slug: "personal" }],
+      accounts: [trackedAccount],
+      transactions: [],
+      classifications: [],
+    });
+  }
+
+  function plaidReturns(added: AggregatorTransaction[]) {
+    seams.syncTransactions.mockResolvedValue({
+      ok: true,
+      data: { added, modified: [], removedExternalIds: [], cursor: NEXT_CURSOR },
+    });
+  }
+
+  const conn = (sb: any) => sb.db.bank_connections.find((c: any) => c.id === CONN);
+
+  beforeEach(() => {
+    seams.syncTransactions.mockReset();
+    seams.decryptSecret.mockClear();
+  });
+
+  test("every incoming account ignored → cursor ADVANCES, connection healthy, nothing imported", async () => {
+    const sb: any = seed({
+      links: [],
+      ignored: [
+        { plaid_account_id: "plaid-SAVINGS-1893", connection_id: CONN },
+        { plaid_account_id: "plaid-CHECKING-5435", connection_id: CONN },
+        { plaid_account_id: "plaid-CHECKING-5443", connection_id: CONN },
+      ],
+    });
+    plaidReturns([
+      plaidTxn({ externalId: "ign-1", accountExternalId: "plaid-SAVINGS-1893" }),
+      plaidTxn({ externalId: "ign-2", accountExternalId: "plaid-CHECKING-5435" }),
+      plaidTxn({ externalId: "ign-3", accountExternalId: "plaid-CHECKING-5443" }),
+    ]);
+
+    const summary = await runPlaidSync(sb);
+
+    expect(summary.connections[0].status).toBe("healthy");
+    expect(conn(sb).status).toBe("healthy");
+    expect(conn(sb).sync_cursor).toBe(NEXT_CURSOR); // no longer replaying the same window
+    expect(conn(sb).last_synced_at).not.toBe("2026-06-29T00:00:00.000Z");
+    // The whole point: not one ignored transaction reached the ledger.
+    expect(sb.db.transactions).toHaveLength(0);
+    expect(summary.inserted).toBe(0);
+  });
+
+  test("mapped + ignored → resolved: only the mapped account's rows import, cursor advances", async () => {
+    const sb: any = seed({
+      links: [{ plaid_account_id: "plaid-A", account_id: "acct-1", connection_id: CONN }],
+      ignored: [{ plaid_account_id: "plaid-IGN", connection_id: CONN }],
+    });
+    plaidReturns([
+      plaidTxn({ externalId: "keep-1", accountExternalId: "plaid-A", description: "COFFEE SHOP" }),
+      plaidTxn({ externalId: "drop-1", accountExternalId: "plaid-IGN", description: "GROCERIES" }),
+    ]);
+
+    const summary = await runPlaidSync(sb);
+
+    expect(summary.connections[0].status).toBe("healthy");
+    expect(conn(sb).sync_cursor).toBe(NEXT_CURSOR);
+    expect(sb.db.transactions.map((t: any) => t.external_id)).toEqual(["keep-1"]);
+    expect(sb.db.transactions.some((t: any) => t.external_id === "drop-1")).toBe(false);
+    expect(summary.inserted).toBe(1);
+  });
+
+  test("one account still undecided among mapped + ignored → needs_mapping, cursor HELD", async () => {
+    const sb: any = seed({
+      links: [{ plaid_account_id: "plaid-A", account_id: "acct-1", connection_id: CONN }],
+      ignored: [{ plaid_account_id: "plaid-IGN", connection_id: CONN }],
+    });
+    plaidReturns([
+      plaidTxn({ externalId: "keep-1", accountExternalId: "plaid-A" }),
+      plaidTxn({ externalId: "drop-1", accountExternalId: "plaid-IGN" }),
+      plaidTxn({ externalId: "new-1", accountExternalId: "plaid-BRAND-NEW" }),
+    ]);
+
+    const summary = await runPlaidSync(sb);
+
+    expect(summary.connections[0].status).toBe("needs_mapping");
+    expect(conn(sb).status).toBe("needs_mapping");
+    expect(conn(sb).sync_cursor).toBe(HELD_CURSOR); // C2: forward-only cursor must not advance
+    expect(conn(sb).last_synced_at).toBe("2026-06-29T00:00:00.000Z");
+    // Only the undecided account is named — the ignored one is resolved, not a blocker.
+    expect(summary.connections[0].error).toContain("plaid-BRAND-NEW");
+    expect(summary.connections[0].error).not.toContain("plaid-IGN");
+    // Neither the ignored nor the unknown account contributed a row.
+    expect(sb.db.transactions.map((t: any) => t.external_id)).toEqual(["keep-1"]);
+  });
+
+  test("zero links and NO ignores still defers — the initial full-sync page is not burned", async () => {
+    const sb: any = seed({ links: [], ignored: [] });
+    plaidReturns([plaidTxn({ externalId: "new-1", accountExternalId: "plaid-BRAND-NEW" })]);
+
+    const summary = await runPlaidSync(sb);
+
+    expect(summary.connections[0].status).toBe("needs_mapping");
+    expect(conn(sb).sync_cursor).toBe(HELD_CURSOR);
+    expect(sb.db.transactions).toHaveLength(0);
+  });
+
+  test("ignoring never touches sync_from_date (the cutover window is unchanged)", async () => {
+    const sb: any = seed({
+      links: [{ plaid_account_id: "plaid-A", account_id: "acct-1", connection_id: CONN }],
+      ignored: [{ plaid_account_id: "plaid-IGN", connection_id: CONN }],
+    });
+    plaidReturns([plaidTxn({ externalId: "drop-1", accountExternalId: "plaid-IGN" })]);
+
+    await runPlaidSync(sb);
+
+    expect(conn(sb).sync_from_date).toBe("2026-01-01");
   });
 });
