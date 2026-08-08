@@ -9,7 +9,6 @@ import {
   Brain,
   CalendarCheck,
   Camera,
-  CheckCircle2,
   ClipboardCheck,
   CreditCard,
   FileSpreadsheet,
@@ -28,6 +27,7 @@ import {
 } from "lucide-react";
 import { BottomNav } from "@/components/layout/bottom-nav";
 import { SidebarEntitiesNav } from "@/components/layout/sidebar-entities-nav";
+import { SidebarMonthCloseNav } from "@/components/layout/sidebar-month-close-nav";
 import { signOut } from "@/lib/actions/reclassify";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { cn } from "@/lib/utils";
@@ -53,6 +53,8 @@ type AppShellProps = {
   aiAwaitingCount: number;
   userLabel: string;
   userInitials: string;
+  /** YYYY-MM resolved on the server so the Month close stepper hydrates without a mismatch. */
+  currentMonth: string;
 };
 
 const SIDEBAR_COLLAPSED_KEY = "hundie:sidebar-collapsed";
@@ -111,13 +113,9 @@ const FUNCTIONS_ITEMS: NavItem[] = [
   },
 ];
 
+// "Month close" is not in this list: it renders as its own month-stepper section (see
+// SidebarMonthCloseNav) above these links.
 const REPORT_ITEMS: NavItem[] = [
-  {
-    href: "/month-close",
-    label: "Month close",
-    icon: CheckCircle2,
-    match: (path) => path.startsWith("/month-close"),
-  },
   {
     href: "/tax-close",
     label: "Tax close",
@@ -177,6 +175,7 @@ export function AppShell({
   aiAwaitingCount,
   userLabel,
   userInitials,
+  currentMonth,
 }: AppShellProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
@@ -352,7 +351,8 @@ export function AppShell({
             <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Tax readiness
             </p>
-            <ul className="space-y-0.5">{REPORT_ITEMS.map(renderNavItem)}</ul>
+            <SidebarMonthCloseNav entities={entities} currentMonth={currentMonth} />
+            <ul className="mt-0.5 space-y-0.5">{REPORT_ITEMS.map(renderNavItem)}</ul>
           </div>
 
           <div>

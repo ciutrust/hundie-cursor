@@ -6,6 +6,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -232,7 +233,7 @@ export function SplitTransactionDialog({
 
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-        <div className="flex items-center justify-between gap-2 pt-2">
+        <DialogFooter className="items-center justify-between">
           <div>
             {alreadySplit ? (
               <Button variant="outline" size="sm" onClick={onUnsplit} disabled={pending}>
@@ -248,7 +249,7 @@ export function SplitTransactionDialog({
               {pending ? "Saving…" : alreadySplit ? "Save split" : "Split"}
             </Button>
           </div>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

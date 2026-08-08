@@ -4,6 +4,16 @@ All notable changes to the Hundie project. Format based on [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### 2026-08-08 phone categorize fix + Month close nav
+
+**Fixed**
+
+- **Categorize dialog was unusable on a phone with a long suggestion list.** `DialogContent` had no height cap, so a tall body grew past the viewport, could not be scrolled, and the Save / Assign category buttons were unreachable. The shell is now capped at `100dvh - 2rem` with an inner scroll pane, and the new `DialogFooter` keeps the action buttons stuck to the bottom (clearing the iOS home indicator). Applied to Reclassify, Bulk assign, Split, and the bill form; every other dialog inherits the cap from the base component.
+
+**Added**
+
+- **Month close section in the sidebar** ([sidebar-month-close-nav.tsx](../components/layout/sidebar-month-close-nav.tsx)) — a `‹ July ›` month stepper with each entity's remaining-to-categorize count for *that month* underneath, mirroring the Entities section (which counts YTD). Header badge shows the month total; entities at zero show a green check. Counts come from a new lazy server action reusing `getSidebarEntityNav`, so the shell does not pay a second count fan-out on every page render.
+
 ### 2026-07-02 performance review — remediation shipped 2026-07-04 (PR #12, merge `082fdf4`)
 
 Closes the open findings from [PERF-REVIEW-2026-07-02.md](PERF-REVIEW-2026-07-02.md) in six batches. Perf verified by tests (415 green) + Vercel build + a `400`/`406` smoke check — not by live latency.

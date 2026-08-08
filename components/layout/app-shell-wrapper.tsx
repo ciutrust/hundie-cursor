@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { AppShell } from "@/components/layout/app-shell";
 import { getAiPreclassifiedCount } from "@/lib/queries/ai-suggestions";
 import { getSidebarEntityNav, type SidebarEntityNavItem } from "@/lib/queries/entity-home";
-import { ytdPeriod } from "@/lib/period";
+import { activeMonthPeriod, ytdPeriod } from "@/lib/period";
 import { createClient } from "@/lib/supabase/server";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -103,6 +103,7 @@ export async function AppShellWrapper({
         aiAwaitingCount={aiAwaitingCount}
         userLabel={userLabel}
         userInitials={userInitials}
+        currentMonth={activeMonthPeriod().at}
       >
         {children}
       </AppShell>

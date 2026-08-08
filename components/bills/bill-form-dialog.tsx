@@ -6,6 +6,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -109,7 +110,7 @@ export function BillFormDialog({ entities, categoriesByEntity, bill, trigger }: 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{bill ? "Edit bill" : "Add bill"}</DialogTitle>
           <DialogDescription>
@@ -259,14 +260,14 @@ export function BillFormDialog({ entities, categoriesByEntity, bill, trigger }: 
 
           {error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)} disabled={isPending}>
               Cancel
             </Button>
             <Button onClick={submit} disabled={isPending}>
               {isPending ? "Saving…" : bill ? "Save changes" : "Add bill"}
             </Button>
-          </div>
+          </DialogFooter>
         </div>
       </DialogContent>
     </Dialog>

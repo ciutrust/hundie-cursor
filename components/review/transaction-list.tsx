@@ -8,6 +8,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -1052,14 +1053,14 @@ function ReclassifyDialog({
 
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-          <div className="flex justify-end gap-2">
+          <DialogFooter>
             <Button variant="outline" onClick={onClose} disabled={isPending}>
               Cancel
             </Button>
             <Button onClick={handleSave} disabled={isPending}>
               {isPending ? "Saving…" : "Save classification"}
             </Button>
-          </div>
+          </DialogFooter>
         </div>
       </DialogContent>
     </Dialog>
@@ -1249,14 +1250,14 @@ function BulkAssignDialog({
 
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-          <div className="flex justify-end gap-2">
+          <DialogFooter>
             <Button variant="outline" onClick={onClose} disabled={isPending}>
               Cancel
             </Button>
             <Button onClick={handleSave} disabled={isPending}>
               {isPending ? "Saving…" : `Apply to ${transactions.length}`}
             </Button>
-          </div>
+          </DialogFooter>
         </div>
       </DialogContent>
     </Dialog>
