@@ -217,6 +217,140 @@ export async function unlinkIntercompanyPair(input: {
   return { success: true };
 }
 
+const MAX_LINK_NOTE_CHARS = 2000;
+
+/**
+ * The accounting trail on a PAIR (stored on the link row, not either leg): why the money moved,
+ * anything Hannah or a QuickBooks export needs later. Empty clears it.
+ */
+export async function setIntercompanyLinkNote(input: {
+  linkId: string;
+  note: string;
+}): Promise<{ success: true } | { error: string }> {
+  const { error: authError } = await requireUser();
+  if (authError) return { error: authError };
+
+  if (!isUuid(input.linkId)) return { error: "Invalid link id" };
+  const note = (input.note ?? "").trim();
+  if (note.length > MAX_LINK_NOTE_CHARS) {
+    return { error: `Note can't exceed ${MAX_LINK_NOTE_CHARS} characters` };
+  }
+
+  const admin = createServiceRoleClient();
+  const { error } = await admin
+    .from("intercompany_links")
+    .update({ note: note || null })
+    .eq("id", input.linkId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/reports/intercompany");
+  return { success: true };
+}
+
+/**
+ * Recategorize one leg of a linked pair without leaving the pairing page. Same write the review
+ * flow makes (classified_by = the user, so the unlink revert guard correctly treats it as
+ * hand-set from here on), with the category validated against the leg's booked entity - a GBSL
+ * row can never receive a Personal category.
+ */
+export async function setPairLegCategory(input: {
+  transactionId: string;
+  categoryId: string | null;
+}): Promise<{ success: true } | { error: string }> {
+  const { error: authError, user } = await requireUser();
+  if (authError) return { error: authError };
+
+  if (!isUuid(input.transactionId)) return { error: "Invalid transaction id" };
+  if (input.categoryId !== null && !isUuid(input.categoryId)) {
+    return { error: "Invalid category id" };
+  }
+
+  const admin = createServiceRoleClient();
+
+  const { data: cls, error: clsError } = await admin
+    .from("classifications")
+    .select("id, entity_id, entity:entities!inner(slug)")
+    .eq("transaction_id", input.transactionId)
+    .maybeSingle();
+  if (clsError || !cls) return { error: "Could not load that transaction" };
+
+  if (input.categoryId !== null) {
+    const { data: category, error: catError } = await admin
+      .from("categories")
+      .select("id")
+      .eq("id", input.categoryId)
+      .eq("entity_id", cls.entity_id as string)
+      .maybeSingle();
+    if (catError || !category) return { error: "That category doesn't belong to this entity" };
+  }
+
+  const { error } = await admin
+    .from("classifications")
+    .update({
+      category_id: input.categoryId,
+      classified_at: input.categoryId === null ? null : new Date().toISOString(),
+      classified_by: input.categoryId === null ? null : (user?.email ?? user?.id ?? "unknown"),
+    })
+    .eq("transaction_id", input.transactionId);
+  if (error) return { error: error.message };
+
+  const slug = (cls as unknown as { entity: { slug: string } }).entity.slug;
+  revalidatePairingSurfaces([slug]);
+  return { success: true };
+}
+
+/**
+ * "The counterpart isn't tracked in Hundie" - resolves a one-sided leg for good (the Way2Save
+ * savings, Three Cities Trust class of rows). The optional note is the accounting trail.
+ */
+export async function acknowledgeOneSidedLeg(input: {
+  transactionId: string;
+  note?: string;
+}): Promise<{ success: true } | { error: string }> {
+  const { error: authError, user } = await requireUser();
+  if (authError) return { error: authError };
+
+  if (!isUuid(input.transactionId)) return { error: "Invalid transaction id" };
+  const note = (input.note ?? "").trim();
+  if (note.length > MAX_LINK_NOTE_CHARS) {
+    return { error: `Note can't exceed ${MAX_LINK_NOTE_CHARS} characters` };
+  }
+
+  const admin = createServiceRoleClient();
+  const { error } = await admin.from("intercompany_one_sided_acks").upsert(
+    {
+      transaction_id: input.transactionId,
+      note: note || null,
+      acked_by: user?.email ?? user?.id ?? "unknown",
+    },
+    { onConflict: "transaction_id" },
+  );
+  if (error) return { error: error.message };
+
+  revalidatePath("/reports/intercompany");
+  return { success: true };
+}
+
+/** Undo an acknowledgment - the leg returns to the One-sided list. */
+export async function unacknowledgeOneSidedLeg(input: {
+  transactionId: string;
+}): Promise<{ success: true } | { error: string }> {
+  const { error: authError } = await requireUser();
+  if (authError) return { error: authError };
+
+  if (!isUuid(input.transactionId)) return { error: "Invalid transaction id" };
+
+  const admin = createServiceRoleClient();
+  const { error } = await admin
+    .from("intercompany_one_sided_acks")
+    .delete()
+    .eq("transaction_id", input.transactionId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/reports/intercompany");
+  return { success: true };
+}
+
 /** "These two are not a pair" - suppresses the suggestion for good. Idempotent by design. */
 export async function dismissIntercompanyPair(input: {
   outId: string;

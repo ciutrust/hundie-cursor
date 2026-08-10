@@ -1,9 +1,10 @@
 import { LinkedPairs } from "@/components/intercompany/linked-pairs";
+import { OneSidedLegs } from "@/components/intercompany/one-sided-legs";
 import { PairPrompts } from "@/components/intercompany/pair-prompts";
 import { ReportFilters } from "@/components/reports/report-filters";
 import { periodRangeFor } from "@/lib/period";
 import { getIntercompanyPairingReview, type LinkKind } from "@/lib/queries/intercompany";
-import { getClassifiableEntities } from "@/lib/queries/review";
+import { getCategoriesByEntity, getClassifiableEntities } from "@/lib/queries/review";
 import { parseReportPeriod } from "@/lib/reports/report-params";
 import { formatCurrency } from "@/lib/utils";
 
@@ -25,10 +26,15 @@ export default async function IntercompanyReportPage({ searchParams }: Props) {
     params,
     periodRangeFor("year", String(new Date().getFullYear())),
   );
-  const [entities, review] = await Promise.all([
+  const [entities, review, categoriesByEntity] = await Promise.all([
     getClassifiableEntities(),
     getIntercompanyPairingReview(period),
+    getCategoriesByEntity(),
   ]);
+
+  const entityNames: Record<string, string> = Object.fromEntries(
+    entities.map((entity) => [entity.slug, entity.name]),
+  );
 
   const totalsLine = review.totalsByKind
     .map(
@@ -62,7 +68,7 @@ export default async function IntercompanyReportPage({ searchParams }: Props) {
       </div>
 
       {review.suggestions.length > 0 ? (
-        <PairPrompts suggestions={review.suggestions} />
+        <PairPrompts suggestions={review.suggestions} entityNames={entityNames} />
       ) : review.linkedPairs.length > 0 ? (
         <p className="text-sm text-muted-foreground">
           All caught up - no suggested pairs in {period.label}.
@@ -71,48 +77,40 @@ export default async function IntercompanyReportPage({ searchParams }: Props) {
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold tracking-tight">Linked pairs</h2>
-        <LinkedPairs pairs={review.linkedPairs} />
+        <LinkedPairs
+          pairs={review.linkedPairs}
+          categoriesByEntity={categoriesByEntity}
+          entityNames={entityNames}
+        />
       </section>
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold tracking-tight">One-sided legs</h2>
         <p className="text-sm text-muted-foreground">
-          Transfer-looking money with no matching counterpart in the ledger - the other account
-          may not be in Hundie, or something is genuinely off.
+          Transfer-looking money with no matching counterpart in the ledger. Fix the category if
+          the row is mislabeled, or mark it &quot;Not tracked here&quot; when the other side lives
+          outside Hundie.
         </p>
         {review.oneSided.length === 0 ? (
           <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
-            No one-sided legs in {period.label} - every transfer leg has a counterpart or a
-            pending suggestion.
+            No open one-sided legs in {period.label}
+            {review.acknowledgedCount > 0
+              ? ` - ${review.acknowledgedCount} resolved as not tracked here`
+              : " - every transfer leg has a counterpart or a pending suggestion"}
+            .
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-            <ul className="divide-y divide-border">
-              {review.oneSided.map((leg) => (
-                <li
-                  key={leg.transactionId}
-                  className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm"
-                  title={`Account ${leg.accountId}`}
-                >
-                  <span className="tabular-nums text-muted-foreground">
-                    {leg.transactionDate}
-                  </span>
-                  <span className="font-medium">{leg.entitySlug}</span>
-                  <span
-                    className="min-w-0 flex-1 truncate text-muted-foreground"
-                    title={leg.description}
-                  >
-                    {leg.description}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {leg.categoryPath ?? "uncategorized"}
-                  </span>
-                  <span className="tabular-nums">{formatCurrency(leg.amount)}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
+          <OneSidedLegs
+            legs={review.oneSided}
+            categoriesByEntity={categoriesByEntity}
+            entityNames={entityNames}
+          />
         )}
+        {review.oneSided.length > 0 && review.acknowledgedCount > 0 ? (
+          <p className="text-xs text-muted-foreground">
+            {review.acknowledgedCount} more previously resolved as not tracked here.
+          </p>
+        ) : null}
       </section>
 
       {totalsLine ? <p className="text-sm text-muted-foreground">{totalsLine}</p> : null}

@@ -113,6 +113,8 @@ function CategoryPreview({ out, counterpart }: { out: PairLeg; counterpart: Pair
 
 export type PairPromptsProps = {
   suggestions: PairSuggestion[];
+  /** Display names keyed by entity slug - group headers read "Personal", not "personal". */
+  entityNames?: Record<string, string>;
 };
 
 /**
@@ -122,7 +124,7 @@ export type PairPromptsProps = {
  * when the matcher can't separate candidates, AC picks. A silently wrong link crosses money
  * between entities and he would never catch it.
  */
-export function PairPrompts({ suggestions }: PairPromptsProps) {
+export function PairPrompts({ suggestions, entityNames = {} }: PairPromptsProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   // Dismissals are PAIR-scoped (`${outId}:${inId}`), mirroring the DB table. Keying by out-leg
@@ -163,6 +165,17 @@ export function PairPrompts({ suggestions }: PairPromptsProps) {
   if (visible.length === 0 && !notice) return null;
 
   const confidentVisible = visible.filter((s) => s.confidentInId !== null);
+
+  // Grouped by the OUT leg's entity, preserving order - the page reads as "(Personal) ...
+  // (Keller Services LLC) ..." instead of one interleaved list.
+  const groupedVisible = [
+    ...visible.reduce((groups, s) => {
+      const list = groups.get(s.out.entitySlug) ?? [];
+      list.push(s);
+      groups.set(s.out.entitySlug, list);
+      return groups;
+    }, new Map<string, typeof visible>()),
+  ];
 
   const setCardError = (outId: string, message: string | null) =>
     setErrors((prev) => {
@@ -262,8 +275,13 @@ export function PairPrompts({ suggestions }: PairPromptsProps) {
 
       {notice ? <p className="mb-2 text-xs text-muted-foreground">{notice}</p> : null}
 
-      <ul className="space-y-2">
-        {visible.map((s) => {
+      {groupedVisible.map(([groupSlug, groupItems]) => (
+        <div key={groupSlug} className="mt-3 space-y-2 first:mt-0">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {entityNames[groupSlug] ?? groupSlug}
+          </h3>
+          <ul className="space-y-2">
+        {groupItems.map((s) => {
           const confident = s.confidentInId
             ? s.candidates.find((c) => c.transactionId === s.confidentInId)
             : undefined;
@@ -375,7 +393,9 @@ export function PairPrompts({ suggestions }: PairPromptsProps) {
             </li>
           );
         })}
-      </ul>
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }

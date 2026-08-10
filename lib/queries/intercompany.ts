@@ -83,6 +83,7 @@ type LinkRow = {
   in_transaction_id: string;
   link_kind: string;
   ref_token: string | null;
+  note: string | null;
   created_at: string;
 };
 
@@ -97,6 +98,8 @@ export type LinkedPair = {
   linkId: string;
   kind: LinkKind;
   refToken: string | null;
+  /** Free text on the LINK (not either leg) - the accounting trail for a pair, export-ready. */
+  note: string | null;
   createdAt: string;
   out: LinkedPairLeg;
   in: LinkedPairLeg;
@@ -109,6 +112,8 @@ export type PairingReview = {
   linkedPairs: LinkedPair[];
   /** Pairing-relevant in-period rows with no link and no suggestion (no candidates found). */
   oneSided: PairLeg[];
+  /** In-period one-sided legs hidden because AC acknowledged the counterpart isn't tracked. */
+  acknowledgedCount: number;
   /** Linked pairs only; total = sum of out amounts (summed in cents, returned as dollars). */
   totalsByKind: Array<{ kind: LinkKind; count: number; total: number }>;
 };
@@ -179,7 +184,7 @@ export async function getIntercompanyPairingReview(period: PeriodRange): Promise
   const widenedEnd = shiftIsoDate(period.end, PAIR_WINDOW_DAYS);
   const inPeriod = (isoDate: string) => isoDate >= period.start && isoDate < period.end;
 
-  const [txRows, linkRows, dismissalRows] = await Promise.all([
+  const [txRows, linkRows, dismissalRows, ackRows] = await Promise.all([
     // One widened fetch of candidate legs. Removed/split rows are excluded here - a reversed or
     // split charge is not a live transfer leg and must not generate suggestions.
     paginateAll<PairingTxRow>(
@@ -205,7 +210,7 @@ export async function getIntercompanyPairingReview(period: PeriodRange): Promise
       async (from, pageSize) => {
         const { data, error } = await db(supabase)
           .from("intercompany_links")
-          .select("id, out_transaction_id, in_transaction_id, link_kind, ref_token, created_at")
+          .select("id, out_transaction_id, in_transaction_id, link_kind, ref_token, note, created_at")
           .order("id", { ascending: true })
           .range(from, from + pageSize - 1);
         return { data: data as LinkRow[] | null, error };
@@ -225,6 +230,18 @@ export async function getIntercompanyPairingReview(period: PeriodRange): Promise
       },
       undefined,
       (row) => `${row.out_transaction_id}:${row.in_transaction_id}`,
+    ),
+    paginateAll<{ transaction_id: string }>(
+      async (from, pageSize) => {
+        const { data, error } = await db(supabase)
+          .from("intercompany_one_sided_acks")
+          .select("transaction_id")
+          .order("transaction_id", { ascending: true })
+          .range(from, from + pageSize - 1);
+        return { data: data as { transaction_id: string }[] | null, error };
+      },
+      undefined,
+      (row) => row.transaction_id,
     ),
   ]);
 
@@ -303,6 +320,7 @@ export async function getIntercompanyPairingReview(period: PeriodRange): Promise
       linkId: link.id,
       kind: link.link_kind as LinkKind,
       refToken: link.ref_token,
+      note: link.note,
       createdAt: link.created_at,
       out,
       in: inLeg,
@@ -325,12 +343,17 @@ export async function getIntercompanyPairingReview(period: PeriodRange): Promise
     suggestedIds.add(s.out.transactionId);
     for (const c of s.candidates) suggestedIds.add(c.transactionId);
   }
-  const oneSided = legs.filter(
+  // Acknowledged legs ("counterpart isn't tracked in Hundie") leave the list but stay countable,
+  // so the page can say how many were consciously resolved rather than pretending they vanished.
+  const ackedIds = new Set(ackRows.map((row) => row.transaction_id));
+  const oneSidedAll = legs.filter(
     (leg) =>
       inPeriod(leg.transactionDate) &&
       !linkedIds.has(leg.transactionId) &&
       !suggestedIds.has(leg.transactionId),
   );
+  const oneSided = oneSidedAll.filter((leg) => !ackedIds.has(leg.transactionId));
+  const acknowledgedCount = oneSidedAll.length - oneSided.length;
 
   // Sum in integer cents (never floats), convert back once. Only kinds actually present, in a
   // fixed canonical order so the UI renders stably.
@@ -347,5 +370,5 @@ export async function getIntercompanyPairingReview(period: PeriodRange): Promise
     total: totals.get(kind)!.totalCents / 100,
   }));
 
-  return { suggestions, linkedPairs, oneSided, totalsByKind };
+  return { suggestions, linkedPairs, oneSided, acknowledgedCount, totalsByKind };
 }
