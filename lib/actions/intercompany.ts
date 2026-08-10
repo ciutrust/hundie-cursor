@@ -300,6 +300,61 @@ export async function setPairLegCategory(input: {
 }
 
 /**
+ * Bulk pre-classification of PERSONAL outflow legs that sit in pair suggestions: AC works the
+ * pairing page top-down and wants every personal-origin transfer pre-filed as "Owner transfer to
+ * business" BEFORE he approves the links one by one. Guards: only rows whose booked entity is
+ * personal, only blank categories (`.is(category_id, null)` - hand-set work is never touched),
+ * all in one conditional UPDATE. Linking later leaves the pre-filed side alone (same conditional)
+ * and still fills the business side from the template.
+ */
+export async function preclassifyPersonalFundingOutflows(input: {
+  transactionIds: string[];
+}): Promise<{ classified: number } | { error: string }> {
+  const { error: authError, user } = await requireUser();
+  if (authError) return { error: authError };
+
+  if (!Array.isArray(input?.transactionIds)) return { error: "Invalid input" };
+  const ids = input.transactionIds.filter(isUuid);
+  if (ids.length === 0) return { classified: 0 };
+  if (ids.length > 200) return { error: "Too many rows in one batch (max 200)" };
+
+  const admin = createServiceRoleClient();
+
+  const { data: personalEntity, error: entityError } = await admin
+    .from("entities")
+    .select("id")
+    .eq("slug", "personal")
+    .maybeSingle();
+  if (entityError || !personalEntity) return { error: "Could not resolve the personal entity" };
+
+  const { data: category, error: categoryError } = await admin
+    .from("categories")
+    .select("id")
+    .eq("entity_id", personalEntity.id as string)
+    .eq("full_path", "Owner transfer to business")
+    .maybeSingle();
+  if (categoryError || !category) {
+    return { error: "The Owner transfer to business category is missing" };
+  }
+
+  const { data: updated, error } = await admin
+    .from("classifications")
+    .update({
+      category_id: category.id as string,
+      classified_at: new Date().toISOString(),
+      classified_by: user?.email ?? user?.id ?? "unknown",
+    })
+    .in("transaction_id", ids)
+    .eq("entity_id", personalEntity.id as string)
+    .is("category_id", null)
+    .select("transaction_id");
+  if (error) return { error: error.message };
+
+  revalidatePairingSurfaces(["personal"]);
+  return { classified: updated?.length ?? 0 };
+}
+
+/**
  * "The counterpart isn't tracked in Hundie" - resolves a one-sided leg for good (the Way2Save
  * savings, Three Cities Trust class of rows). The optional note is the accounting trail.
  */

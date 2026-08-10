@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, Undo2 } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { acknowledgeOneSidedLeg, setPairLegCategory, unacknowledgeOneSidedLeg } from "@/lib/actions/intercompany";
 import { formatCurrency } from "@/lib/utils";
@@ -30,7 +30,16 @@ export function OneSidedLegs({ legs, categoriesByEntity, entityNames }: OneSided
   const [acked, setAcked] = useState<Set<string>>(new Set());
   const [lastAckedId, setLastAckedId] = useState<string | null>(null);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+
+  const toggleGroup = (slug: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
 
   const visible = legs.filter((leg) => !acked.has(leg.transactionId));
 
@@ -91,11 +100,24 @@ export function OneSidedLegs({ legs, categoriesByEntity, entityNames }: OneSided
 
   return (
     <div className="space-y-3">
-      {grouped.map(([slug, groupLegs]) => (
+      {grouped.map(([slug, groupLegs]) => {
+        const isCollapsed = collapsed.has(slug);
+        return (
         <div key={slug} className="space-y-1.5">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <button
+            type="button"
+            onClick={() => toggleGroup(slug)}
+            className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+            aria-expanded={!isCollapsed}
+          >
+            {isCollapsed ? (
+              <ChevronRight className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5" />
+            )}
             {entityNames[slug] ?? slug} · {groupLegs.length}
-          </h3>
+          </button>
+          {isCollapsed ? null : (
           <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
             <ul className="divide-y divide-border">
               {groupLegs.map((leg) => (
@@ -159,8 +181,10 @@ export function OneSidedLegs({ legs, categoriesByEntity, entityNames }: OneSided
               ))}
             </ul>
           </div>
+          )}
         </div>
-      ))}
+        );
+      })}
 
       {lastAckedId ? (
         <p className="flex items-center gap-2 text-xs text-muted-foreground">

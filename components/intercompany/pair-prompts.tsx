@@ -2,13 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Link2, Sparkles, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Link2, Sparkles, X } from "lucide-react";
 import { formatBillDate } from "@/components/bills/format";
 import { Button } from "@/components/ui/button";
 import {
   dismissIntercompanyPair,
   linkIntercompanyPair,
   linkIntercompanyPairs,
+  preclassifyPersonalFundingOutflows,
 } from "@/lib/actions/intercompany";
 import { categoryPairTemplate, suggestLinkKind } from "@/lib/intercompany-pairing";
 import { formatCurrency } from "@/lib/utils";
@@ -137,8 +138,30 @@ export function PairPrompts({ suggestions, entityNames = {} }: PairPromptsProps)
   const [claimed, setClaimed] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const pairKey = (outId: string, inId: string) => `${outId}:${inId}`;
+
+  const toggleGroup = (slug: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
+
+  const prefile = (transactionIds: string[]) =>
+    startTransition(async () => {
+      const result = await preclassifyPersonalFundingOutflows({ transactionIds });
+      if ("error" in result) {
+        setNotice(result.error);
+        return;
+      }
+      setNotice(
+        `Pre-filed ${result.classified} Personal side${result.classified === 1 ? "" : "s"} as Owner transfer to business - linking is still yours.`,
+      );
+      router.refresh();
+    });
 
   const visible = suggestions
     .filter((s) => !resolved.has(s.out.transactionId))
@@ -275,11 +298,45 @@ export function PairPrompts({ suggestions, entityNames = {} }: PairPromptsProps)
 
       {notice ? <p className="mb-2 text-xs text-muted-foreground">{notice}</p> : null}
 
-      {groupedVisible.map(([groupSlug, groupItems]) => (
+      {groupedVisible.map(([groupSlug, groupItems]) => {
+        const isCollapsed = collapsed.has(groupSlug);
+        // AC pre-files every personal-origin transfer as Owner transfer to business up front,
+        // then approves the links one by one - so the button targets blank OUT legs only.
+        const prefileIds =
+          groupSlug === "personal"
+            ? groupItems
+                .filter((s) => s.out.categoryId === null)
+                .map((s) => s.out.transactionId)
+            : [];
+        return (
         <div key={groupSlug} className="mt-3 space-y-2 first:mt-0">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {entityNames[groupSlug] ?? groupSlug}
-          </h3>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <button
+              type="button"
+              onClick={() => toggleGroup(groupSlug)}
+              className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+              aria-expanded={!isCollapsed}
+            >
+              {isCollapsed ? (
+                <ChevronRight className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5" />
+              )}
+              {entityNames[groupSlug] ?? groupSlug} · {groupItems.length}
+            </button>
+            {!isCollapsed && prefileIds.length > 0 ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isPending}
+                title="Categorize the Personal side of these pairs as Owner transfer to business now - linking stays your call"
+                onClick={() => prefile(prefileIds)}
+              >
+                Pre-file {prefileIds.length} as Owner transfer to business
+              </Button>
+            ) : null}
+          </div>
+          {isCollapsed ? null : (
           <ul className="space-y-2">
         {groupItems.map((s) => {
           const confident = s.confidentInId
@@ -394,8 +451,10 @@ export function PairPrompts({ suggestions, entityNames = {} }: PairPromptsProps)
           );
         })}
           </ul>
+          )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
