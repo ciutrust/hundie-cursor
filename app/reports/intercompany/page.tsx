@@ -1,8 +1,17 @@
+import { LinkedPairs } from "@/components/intercompany/linked-pairs";
+import { PairPrompts } from "@/components/intercompany/pair-prompts";
 import { ReportFilters } from "@/components/reports/report-filters";
-import { parseReportPeriod } from "@/lib/reports/report-params";
+import { periodRangeFor } from "@/lib/period";
+import { getIntercompanyPairingReview, type LinkKind } from "@/lib/queries/intercompany";
 import { getClassifiableEntities } from "@/lib/queries/review";
-import { getIntercompanyReview } from "@/lib/queries/intercompany";
-import { activeMonthPeriod } from "@/lib/period";
+import { parseReportPeriod } from "@/lib/reports/report-params";
+import { formatCurrency } from "@/lib/utils";
+
+const KIND_LABELS: Record<LinkKind, string> = {
+  owner_funding: "Owner funding",
+  intercompany_service: "Intercompany",
+  internal_transfer: "Internal transfer",
+};
 
 type Props = {
   searchParams: Promise<{ month?: string; period?: string; at?: string; entity?: string }>;
@@ -10,80 +19,111 @@ type Props = {
 
 export default async function IntercompanyReportPage({ searchParams }: Props) {
   const params = await searchParams;
-  const period = parseReportPeriod(params, activeMonthPeriod());
-  const [entities, legs] = await Promise.all([
+  // Pairing is a whole-books exercise, not a monthly one - default to the full current year
+  // (transfers pair across month boundaries). Explicit period params still win.
+  const period = parseReportPeriod(
+    params,
+    periodRangeFor("year", String(new Date().getFullYear())),
+  );
+  const [entities, review] = await Promise.all([
     getClassifiableEntities(),
-    getIntercompanyReview(period),
+    getIntercompanyPairingReview(period),
   ]);
-  const flaggedCount = legs.filter((leg) => leg.potentialMirror).length;
+
+  const totalsLine = review.totalsByKind
+    .map(
+      (t) =>
+        `${KIND_LABELS[t.kind]}: ${t.count} pair${t.count === 1 ? "" : "s"} - ${formatCurrency(t.total)}`,
+    )
+    .join(" · ");
+
+  // Anita parity: GBSL pays the 136 Anita lease, Austin ACAA receives it. Sum of linked
+  // intercompany_service legs on each side should agree - a drift here is a missed or broken leg.
+  const servicePairs = review.linkedPairs.filter((p) => p.kind === "intercompany_service");
+  const serviceOutCents = Math.round(
+    servicePairs.reduce((sum, p) => sum + Math.abs(p.out.amount), 0) * 100,
+  );
+  const serviceInCents = Math.round(
+    servicePairs.reduce((sum, p) => sum + Math.abs(p.in.amount), 0) * 100,
+  );
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="space-y-1">
           <p className="text-sm font-medium text-primary">Reports</p>
-          <h1 className="text-3xl font-semibold tracking-tight">Intercompany review</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">Intercompany pairing</h1>
           <p className="text-sm text-muted-foreground">
-            {period.label} · GBSL ↔ Austin ACAA (136 Anita) lease legs
+            {period.label} · Both legs of money moving between your accounts. Link them so the
+            books can never go one-sided.
           </p>
         </div>
         <ReportFilters period={period} entities={entities} showEntityFilter={false} />
       </div>
 
-      <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm">
-        <strong>Not auto-eliminated — verify manually.</strong> Intercompany legs are not netted in
-        code. Rows sharing the same date and amount across two entities are flagged below as a
-        possible double-count; confirm each lease is counted once (as a GBSL expense) and its mirror
-        is not also counted.
-      </div>
-
-      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/40 text-left text-muted-foreground">
-              <th className="px-4 py-3 font-medium">Date</th>
-              <th className="px-4 py-3 font-medium">Entity</th>
-              <th className="px-4 py-3 font-medium">Category</th>
-              <th className="px-4 py-3 font-medium">Description</th>
-              <th className="px-4 py-3 text-right font-medium">Amount</th>
-              <th className="px-4 py-3 font-medium">Flag</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {legs.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                  No intercompany-tagged legs in {period.label}.
-                </td>
-              </tr>
-            ) : (
-              legs.map((leg, index) => (
-                <tr
-                  key={`${leg.transactionDate}-${leg.entitySlug}-${index}`}
-                  className={leg.potentialMirror ? "bg-amber-500/5" : "hover:bg-muted/20"}
-                >
-                  <td className="px-4 py-3 tabular-nums">{leg.transactionDate}</td>
-                  <td className="px-4 py-3 font-medium">{leg.entitySlug}</td>
-                  <td className="px-4 py-3">{leg.categoryPath}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{leg.description}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{leg.amount.toFixed(2)}</td>
-                  <td className="px-4 py-3">
-                    {leg.potentialMirror ? (
-                      <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
-                        possible mirror
-                      </span>
-                    ) : null}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {flaggedCount > 0 ? (
+      {review.suggestions.length > 0 ? (
+        <PairPrompts suggestions={review.suggestions} />
+      ) : review.linkedPairs.length > 0 ? (
         <p className="text-sm text-muted-foreground">
-          {flaggedCount} row(s) flagged as a possible cross-entity mirror — verify manually.
+          All caught up - no suggested pairs in {period.label}.
+        </p>
+      ) : null}
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold tracking-tight">Linked pairs</h2>
+        <LinkedPairs pairs={review.linkedPairs} />
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold tracking-tight">One-sided legs</h2>
+        <p className="text-sm text-muted-foreground">
+          Transfer-looking money with no matching counterpart in the ledger - the other account
+          may not be in Hundie, or something is genuinely off.
+        </p>
+        {review.oneSided.length === 0 ? (
+          <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
+            No one-sided legs in {period.label} - every transfer leg has a counterpart or a
+            pending suggestion.
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+            <ul className="divide-y divide-border">
+              {review.oneSided.map((leg) => (
+                <li
+                  key={leg.transactionId}
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm"
+                  title={`Account ${leg.accountId}`}
+                >
+                  <span className="tabular-nums text-muted-foreground">
+                    {leg.transactionDate}
+                  </span>
+                  <span className="font-medium">{leg.entitySlug}</span>
+                  <span
+                    className="min-w-0 flex-1 truncate text-muted-foreground"
+                    title={leg.description}
+                  >
+                    {leg.description}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {leg.categoryPath ?? "uncategorized"}
+                  </span>
+                  <span className="tabular-nums">{formatCurrency(leg.amount)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
+
+      {totalsLine ? <p className="text-sm text-muted-foreground">{totalsLine}</p> : null}
+
+      {servicePairs.length > 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Anita lease parity: {formatCurrency(serviceOutCents / 100)} out vs{" "}
+          {formatCurrency(serviceInCents / 100)} in
+          {serviceOutCents === serviceInCents
+            ? " - balanced"
+            : ` - off by ${formatCurrency(Math.abs(serviceOutCents - serviceInCents) / 100)}`}
         </p>
       ) : null}
     </div>

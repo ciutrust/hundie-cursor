@@ -36,6 +36,7 @@ const TRANSFER_PATHS = new Set<string>([
   "Sales Tax Payable",
   "Credit card rewards / cash back",
   "Job W2 Expenses", // reimbursed W2 employer travel (Egencia/Navan) — a wash, not personal spend
+  "Internal transfer", // both legs of an own-account-to-own-account move (lib/intercompany-pairing.ts)
 ]);
 
 /** Equity / capital financing between Alex's own entities — kept off the P&L. */
