@@ -65,6 +65,7 @@ type PairingTxRow = {
   amount: number;
   description: string;
   split_at: string | null;
+  account: { account_type: string };
   classification: {
     entity_id: string;
     category_id: string | null;
@@ -119,6 +120,7 @@ const TX_LEG_SELECT = `
   amount,
   description,
   split_at,
+  account:accounts!inner(account_type),
   classification:classifications!inner(
     entity_id,
     category_id,
@@ -249,9 +251,20 @@ export async function getIntercompanyPairingReview(period: PeriodRange): Promise
   }
 
   const legs = txRows
-    .filter((row) =>
-      isPairingRelevant(row.description, row.classification.category?.full_path ?? null),
-    )
+    .filter((row) => {
+      // Card accounts hold charges and refunds only - the imports deliberately carry no payment
+      // credits - so a card row can never be one leg of a transfer pair. This also keeps a card
+      // charge booked to a funding category (a $2.84 owner draw on a swipe) out of One-sided:
+      // a draw booked on spend is one-legged by nature. Revisit if payment credits ever import.
+      if (row.account.account_type === "credit_card") return false;
+      const categoryPath = row.classification.category?.full_path ?? null;
+      // A checking OUTFLOW already filed as Credit card payment is settled money movement whose
+      // twin is by-design absent from the ledger - noise, not an open question. An INFLOW filed
+      // that way stays visible: money arriving INTO a checking labeled "card payment" is exactly
+      // the kind of miscategorization the One-sided list exists to surface.
+      if (categoryPath === "Credit card payment" && Number(row.amount) > 0) return false;
+      return isPairingRelevant(row.description, categoryPath);
+    })
     .map(toPairLeg);
 
   const allSuggestions = pairCandidates(legs, { linkedIds, dismissedPairs });
