@@ -37,6 +37,7 @@ describe("category-expense", () => {
       "Sales Tax Payable",
       "Credit card rewards / cash back",
       "Job W2 Expenses",
+      "Internal transfer",
       // funding
       "Intercompany — pending",
       "Owner Contribution",
