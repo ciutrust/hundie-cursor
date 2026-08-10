@@ -21,7 +21,10 @@ export type CategoryKind =
 /** Money movement that is neither spend nor income — card payments, transfers, refunds, redirects. */
 const TRANSFER_PATHS = new Set<string>([
   "Credit card payment",
-  "Transfer / Zelle (personal)",
+  // The live category's exact name. The set briefly held "Transfer / Zelle (personal)", which matches
+  // nothing in the DB - 82 rows / $221K of Zelles were silently rolling up as personal EXPENSE while
+  // the category's own name says "not P&L". Found 2026-08-10.
+  "Transfer / Zelle (personal, not P&L)",
   "Refund / credit",
   "Security deposit movement",
   "→ GBSL business expense",
@@ -39,6 +42,7 @@ const TRANSFER_PATHS = new Set<string>([
 const FUNDING_PATHS = new Set<string>([
   "Intercompany — pending",
   "Owner Contribution",
+  "Owner transfer to business", // personal side of funding an LLC (pairs with Owner Contribution)
   "Owner Distribution",
   "Owners Equity",
   "Owners Equity:Owner Distribution",

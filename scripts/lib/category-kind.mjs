@@ -14,7 +14,8 @@
 /** Money movement that is neither spend nor income — card payments, transfers, refunds, redirects. */
 const TRANSFER_PATHS = new Set([
   "Credit card payment",
-  "Transfer / Zelle (personal)",
+  // The live category's exact name - the short "Transfer / Zelle (personal)" matched nothing in the DB.
+  "Transfer / Zelle (personal, not P&L)",
   "Refund / credit",
   "Security deposit movement",
   "→ GBSL business expense",
@@ -32,6 +33,7 @@ const TRANSFER_PATHS = new Set([
 const FUNDING_PATHS = new Set([
   "Intercompany — pending",
   "Owner Contribution",
+  "Owner transfer to business", // personal side of funding an LLC (pairs with Owner Contribution)
   "Owner Distribution",
   "Owners Equity",
   "Owners Equity:Owner Distribution",

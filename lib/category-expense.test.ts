@@ -25,7 +25,7 @@ describe("category-expense", () => {
     const seeded = [
       // transfer
       "Credit card payment",
-      "Transfer / Zelle (personal)",
+      "Transfer / Zelle (personal, not P&L)",
       "Refund / credit",
       "Security deposit movement",
       "→ GBSL business expense",
@@ -40,6 +40,7 @@ describe("category-expense", () => {
       // funding
       "Intercompany — pending",
       "Owner Contribution",
+      "Owner transfer to business",
       "Owner Distribution",
       "Owners Equity",
       "Owners Equity:Owner Distribution",
