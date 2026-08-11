@@ -28,7 +28,10 @@ import { bulkReclassifyTransactions, reclassifyTransaction } from "@/lib/actions
 import { groupUndoRestores, type UndoRestore } from "@/lib/review/undo";
 import { keyToAction, nextCursor } from "@/lib/review/keyboard";
 import type { SuggestionOutcome } from "@/lib/actions/suggestion-events";
-import { getAiCategorySuggestion } from "@/lib/actions/ai-category-suggestion";
+import {
+  getAiCategorySuggestion,
+  getAiCategorySuggestionsForSelection,
+} from "@/lib/actions/ai-category-suggestion";
 import {
   getBulkCategorySuggestions,
   getCategorySuggestions,
@@ -1093,6 +1096,12 @@ function BulkAssignDialog({
   const [suggestions, setSuggestions] = useState<CategorySuggestion[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  // The rows' violet badges come from STORED per-row AI suggestions - a different engine than the
+  // deterministic one above. Without this, a Find-similar batch of AI-suggested rows opened a
+  // dialog whose chips only asked the deterministic engine, and the AI's answer vanished exactly
+  // at the apply-in-bulk moment.
+  const [aiSuggestions, setAiSuggestions] = useState<CategorySuggestion[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
 
   const selectedEntity = entities.find((entity) => entity.id === entityId);
   const showCategories = (categoriesByEntity[selectedEntity?.slug ?? ""]?.length ?? 0) > 0;
@@ -1153,6 +1162,42 @@ function BulkAssignDialog({
     };
   }, [showSuggestions, suggestionEntitySlug, suggestionKey, transactions]);
 
+  const selectionIdsKey = useMemo(
+    () =>
+      transactions
+        .map((tx) => tx.id)
+        .sort()
+        .join(","),
+    [transactions],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setAiLoading(true);
+    getAiCategorySuggestionsForSelection(selectionIdsKey.split(",").filter(Boolean))
+      .then((result) => {
+        if (cancelled) return;
+        setAiSuggestions(result);
+        setAiLoading(false);
+      })
+      .catch(() => {
+        // AI chips are additive - a fetch failure just means none render.
+        if (cancelled) return;
+        setAiSuggestions([]);
+        setAiLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectionIdsKey]);
+
+  // Deterministic chips first (they carry prior-count evidence), then AI chips for categories the
+  // deterministic engine did not already offer.
+  const mergedSuggestions = useMemo(() => {
+    const seen = new Set(suggestions.map((item) => item.categoryId));
+    return [...suggestions, ...aiSuggestions.filter((item) => !seen.has(item.categoryId))];
+  }, [suggestions, aiSuggestions]);
+
   function handleEntityChange(nextEntityId: string) {
     setEntityId(nextEntityId);
     const nextEntity = entities.find((entity) => entity.id === nextEntityId);
@@ -1163,7 +1208,7 @@ function BulkAssignDialog({
   }
 
   function buildBulkSuggestionOutcome(chosenCategoryId: string | null): SuggestionOutcome | null {
-    if (!showSuggestions || suggestions.length === 0 || transactions.length === 0) return null;
+    if (mergedSuggestions.length === 0 || transactions.length === 0) return null;
     const sample = transactions[0];
     return {
       transactionId: sample.id,
@@ -1172,7 +1217,7 @@ function BulkAssignDialog({
       description: sample.description,
       vendor: sample.vendor,
       chosenCategoryId,
-      suggestionsShown: suggestions.map((item) => ({
+      suggestionsShown: mergedSuggestions.map((item) => ({
         categoryId: item.categoryId,
         source: item.source,
       })),
@@ -1226,11 +1271,11 @@ function BulkAssignDialog({
             </p>
           </div>
 
-          {showSuggestions ? (
+          {showSuggestions || mergedSuggestions.length > 0 ? (
             <CategorySuggestionChips
-              suggestions={suggestions}
+              suggestions={mergedSuggestions}
               selectedCategoryId={categoryId}
-              isLoading={suggestionsLoading}
+              isLoading={suggestionsLoading || aiLoading}
               error={suggestionsError}
               entitySlug={suggestionEntitySlug}
               onSelect={setCategoryId}

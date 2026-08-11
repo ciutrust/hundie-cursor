@@ -1,6 +1,7 @@
 import { AI_BACKLOG_END, AI_BACKLOG_START, AI_ENTITY_SLUG } from "@/lib/ai/config";
 import type { BacklogTransaction } from "@/lib/ai/vendor-groups";
 import { createClient } from "@/lib/supabase/server";
+import { chunk } from "@/lib/supabase/chunk";
 import { paginateAll } from "@/lib/supabase/paginate";
 import { acceptanceBySource, type AcceptanceBySource } from "@/lib/suggestions/acceptance";
 
@@ -261,6 +262,33 @@ export async function getAiSuggestionForTransaction(transactionId: string) {
 
   if (error) throw error;
   return data;
+}
+
+/**
+ * Current AI suggestions for a SET of transactions (the bulk-assign dialog). The per-row violet
+ * badges come from these stored rows; without this, a Find-similar batch of AI-suggested rows
+ * opened a dialog that only asked the deterministic engine - and the AI's answer vanished exactly
+ * when the user tried to apply it in bulk.
+ */
+export async function getAiSuggestionsForTransactions(transactionIds: string[]) {
+  if (transactionIds.length === 0) return [];
+  const supabase = await createClient();
+  const rows: Array<{
+    suggested_category_id: string | null;
+    suggested_category_path: string | null;
+    confidence: string;
+    entity_slug: string | null;
+  }> = [];
+  for (const idChunk of chunk(transactionIds, 200)) {
+    const { data, error } = await supabase
+      .from("ai_suggestions")
+      .select("suggested_category_id, suggested_category_path, confidence, entity_slug")
+      .in("transaction_id", idChunk)
+      .eq("is_current", true);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+  }
+  return rows;
 }
 
 export type AiAcceptanceRow = {
