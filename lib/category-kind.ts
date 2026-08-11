@@ -25,6 +25,7 @@ const TRANSFER_PATHS = new Set<string>([
   // nothing in the DB - 82 rows / $221K of Zelles were silently rolling up as personal EXPENSE while
   // the category's own name says "not P&L". Found 2026-08-10.
   "Transfer / Zelle (personal, not P&L)",
+  "Investment account funding (personal, not P&L)", // cash moved INTO a personal brokerage/investing account (e.g. Alinea) — an asset swap, not spend. Distinct from "Investment fees & tax prep" (actual advisory/platform fees).
   "Refund / credit",
   "Security deposit movement",
   "→ GBSL business expense",
@@ -55,6 +56,7 @@ const CAPITAL_PATHS = new Set<string>([
   "Leasehold Improvements", // GBSL QB chart variant (capital I) — ACCT-13
   "Tenant improvement allowance",
   "Property purchase",
+  "Capital improvements (rental)", // landlord-side capitalized upgrade to a rental property (acaa-austin/pflugerville)
 ]);
 
 /**

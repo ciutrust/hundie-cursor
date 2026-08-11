@@ -26,6 +26,7 @@ describe("category-expense", () => {
       // transfer
       "Credit card payment",
       "Transfer / Zelle (personal, not P&L)",
+      "Investment account funding (personal, not P&L)",
       "Refund / credit",
       "Security deposit movement",
       "→ GBSL business expense",
@@ -50,6 +51,7 @@ describe("category-expense", () => {
       "Leasehold Improvements",
       "Tenant improvement allowance",
       "Property purchase",
+      "Capital improvements (rental)",
       // liability
       "Mortgage principal payment",
       "Mortgage principal — primary home",

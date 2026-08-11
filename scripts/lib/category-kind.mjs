@@ -16,6 +16,7 @@ const TRANSFER_PATHS = new Set([
   "Credit card payment",
   // The live category's exact name - the short "Transfer / Zelle (personal)" matched nothing in the DB.
   "Transfer / Zelle (personal, not P&L)",
+  "Investment account funding (personal, not P&L)", // cash moved INTO a personal brokerage/investing account (e.g. Alinea) — an asset swap, not spend.
   "Refund / credit",
   "Security deposit movement",
   "→ GBSL business expense",
@@ -46,6 +47,7 @@ const CAPITAL_PATHS = new Set([
   "Leasehold Improvements", // GBSL QB chart variant (capital I) — ACCT-13
   "Tenant improvement allowance",
   "Property purchase",
+  "Capital improvements (rental)", // landlord-side capitalized upgrade to a rental property (acaa-austin/pflugerville)
 ]);
 
 /** Debt principal paydown — a balance-sheet liability reduction, NOT an expense. ACCT-08/11. */
