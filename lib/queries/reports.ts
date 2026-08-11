@@ -5,6 +5,12 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchLedgerExpenseLines } from "@/lib/queries/ledger-expense-lines";
 
 export type ReportTransactionRow = {
+  /** Parent transaction id (legs of one split share it). */
+  transaction_id: string;
+  /** transaction_splits.id when this line is a split leg; null for a whole transaction. */
+  leg_id: string | null;
+  /** The LINE's booked category id (a leg's own, not the hidden parent's); null = uncategorized. */
+  category_id: string | null;
   transaction_date: string;
   entity_name: string;
   entity_slug: string;
@@ -18,7 +24,14 @@ export type ReportTransactionRow = {
   expense_amount: number;
 };
 
-export async function getReportTransactions(
+/**
+ * Rows past this ship to the browser as props for the inline category editor - an all-entities
+ * year has to stop somewhere. The CSV export uses the UNCAPPED set, so nothing is lost to it.
+ */
+export const REPORT_TRANSACTIONS_CAP = 2000;
+
+/** Every line in the period, mapped to report rows - shared by the page (capped) and CSV (not). */
+export async function getReportTransactionsForExport(
   period: PeriodRange,
   entitySlug?: string,
 ): Promise<ReportTransactionRow[]> {
@@ -43,6 +56,9 @@ export async function getReportTransactions(
       // so a refund row exports -50, not 0, and the column sums to the netted entity total.
       const isBooked = isBookedOperatingExpense(categoryPath);
       return {
+        transaction_id: line.id,
+        leg_id: line.legId,
+        category_id: line.classification.category_id,
         transaction_date: line.transaction_date,
         entity_name: line.classification.entity?.name ?? "",
         entity_slug: line.classification.entity?.slug ?? "",
@@ -56,6 +72,19 @@ export async function getReportTransactions(
         expense_amount: isBooked ? line.amount : 0,
       };
     });
+}
+
+export async function getReportTransactions(
+  period: PeriodRange,
+  entitySlug?: string,
+): Promise<{ rows: ReportTransactionRow[]; capped: boolean; totalCount: number }> {
+  const all = await getReportTransactionsForExport(period, entitySlug);
+  const capped = all.length > REPORT_TRANSACTIONS_CAP;
+  return {
+    rows: capped ? all.slice(0, REPORT_TRANSACTIONS_CAP) : all,
+    capped,
+    totalCount: all.length,
+  };
 }
 
 export function reportTransactionsToCsv(rows: ReportTransactionRow[]) {

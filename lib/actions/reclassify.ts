@@ -76,6 +76,7 @@ export async function reclassifyTransaction(input: ReclassifyInput) {
   // from either surface has to refresh them too. The detail route needs its own dynamic-path
   // invalidation — revalidatePath("/expense-reports") does NOT match "/expense-reports/0001".
   revalidatePath("/transactions");
+  revalidatePath("/reports/transactions");
   revalidatePath("/expense-reports");
   revalidatePath("/expense-reports/[number]", "page");
 
@@ -140,6 +141,7 @@ export async function bulkReclassifyTransactions(input: BulkReclassifyInput) {
   // from either surface has to refresh them too. The detail route needs its own dynamic-path
   // invalidation — revalidatePath("/expense-reports") does NOT match "/expense-reports/0001".
   revalidatePath("/transactions");
+  revalidatePath("/reports/transactions");
   revalidatePath("/expense-reports");
   revalidatePath("/expense-reports/[number]", "page");
 

@@ -9,6 +9,8 @@ import { isUuid } from "@/lib/uuid";
 /** Categorizing a leg changes the entity's review queue too, so those pages get busted by slug. */
 function revalidatePairingSurfaces(entitySlugs: string[] = []) {
   revalidatePath("/reports/intercompany");
+  // setPairLegCategory is also the whole-row editor on the transactions report.
+  revalidatePath("/reports/transactions");
   revalidatePath("/review");
   for (const slug of new Set(entitySlugs)) revalidatePath(`/review/${slug}`);
   revalidatePath("/transactions");

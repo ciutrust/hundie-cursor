@@ -3,7 +3,7 @@
 import { requireUser } from "@/lib/auth/require-user";
 import { parsePeriodParams } from "@/lib/period";
 import {
-  getReportTransactions,
+  getReportTransactionsForExport,
   getTaxLineRollup,
   reportTransactionsToCsv,
   taxLineRollupToCsv,
@@ -13,12 +13,15 @@ export async function exportReportCsv(params: {
   period?: string;
   at?: string;
   month?: string;
+  entity?: string;
 }) {
   const auth = await requireUser();
   if (auth.error) throw new Error(auth.error);
 
   const period = parsePeriodParams(params);
-  const rows = await getReportTransactions(period);
+  // Uncapped on purpose: the page view caps at REPORT_TRANSACTIONS_CAP for serialization, but a
+  // CSV has no such ceiling and "use the export for full data" must actually be true.
+  const rows = await getReportTransactionsForExport(period, params.entity?.trim() || undefined);
   return reportTransactionsToCsv(rows);
 }
 

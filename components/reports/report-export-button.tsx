@@ -8,9 +8,16 @@ type ReportExportButtonProps = {
   period: { type: string; at: string; month?: string };
   rowCount: number;
   periodLabel: string;
+  /** Scope the export to one entity, matching the page's filter. */
+  entitySlug?: string;
 };
 
-export function ReportExportButton({ period, rowCount, periodLabel }: ReportExportButtonProps) {
+export function ReportExportButton({
+  period,
+  rowCount,
+  periodLabel,
+  entitySlug,
+}: ReportExportButtonProps) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -22,6 +29,7 @@ export function ReportExportButton({ period, rowCount, periodLabel }: ReportExpo
           period: period.type,
           at: period.at,
           month: period.month,
+          entity: entitySlug,
         });
         const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
         const url = URL.createObjectURL(blob);

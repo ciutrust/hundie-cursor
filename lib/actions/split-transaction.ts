@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 import { centsToNumber } from "@/lib/money";
+import { isUuid } from "@/lib/uuid";
 import { validateSplit, type SplitLegDraft } from "@/lib/split-validation";
 
 export type SplitLegInput = { entityId: string; categoryId: string | null; amount: string };
@@ -74,5 +75,60 @@ export async function unsplitTransaction(input: {
   if (error) return { error: error.message };
 
   revalidateReview(input.entitySlug);
+  return { success: true };
+}
+
+/**
+ * Recategorize ONE split leg in place (the /reports/transactions inline editor). A leg row cannot
+ * go through reclassifyTransaction: that writes the PARENT's classification, which is exactly the
+ * record every report hides once a transaction is split - the edit would change an invisible row
+ * and leave the visible leg untouched. Amounts are never touched here, so the legs-sum-to-parent
+ * invariant (owned by the apply_transaction_split RPC) is not in play; the category is validated
+ * against the LEG's own entity, mirroring the RPC's category-in-entity guard.
+ */
+export async function setSplitLegCategory(input: {
+  legId: string;
+  categoryId: string | null;
+}): Promise<{ success: true } | { error: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  if (!isUuid(input.legId)) return { error: "Invalid leg id" };
+  if (input.categoryId !== null && !isUuid(input.categoryId)) {
+    return { error: "Invalid category id" };
+  }
+
+  const admin = createServiceRoleClient();
+
+  const { data: leg, error: legError } = await admin
+    .from("transaction_splits")
+    .select("id, entity_id, entity:entities!inner(slug)")
+    .eq("id", input.legId)
+    .maybeSingle();
+  if (legError || !leg) return { error: "Could not load that split leg" };
+
+  if (input.categoryId !== null) {
+    const { data: category, error: categoryError } = await admin
+      .from("categories")
+      .select("id")
+      .eq("id", input.categoryId)
+      .eq("entity_id", leg.entity_id as string)
+      .maybeSingle();
+    if (categoryError || !category) return { error: "That category doesn't belong to this entity" };
+  }
+
+  const { error } = await admin
+    .from("transaction_splits")
+    .update({ category_id: input.categoryId })
+    .eq("id", input.legId);
+  if (error) return { error: error.message };
+
+  const slug = (leg as unknown as { entity: { slug: string } }).entity.slug;
+  revalidateReview(slug);
+  revalidatePath("/reports/transactions");
+  revalidatePath("/transactions");
   return { success: true };
 }
