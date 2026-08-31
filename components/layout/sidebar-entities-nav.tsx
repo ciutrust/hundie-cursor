@@ -23,7 +23,9 @@ export function SidebarEntitiesNav({ entities }: SidebarEntitiesNavProps) {
     (pathname.startsWith("/review/") &&
       pathname !== "/review" &&
       pathname !== "/review/ai" &&
-      !pathname.startsWith("/review/ai/"));
+      !pathname.startsWith("/review/ai/") &&
+      pathname !== "/review/legacy" &&
+      !pathname.startsWith("/review/legacy/"));
   const [open, setOpen] = useState(entitiesActive);
 
   return (

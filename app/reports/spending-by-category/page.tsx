@@ -14,7 +14,9 @@ export default async function SpendingByCategoryReportPage({ searchParams }: Pro
   const params = await searchParams;
   const period = parseReportPeriod(params, activeMonthPeriod());
   const entitySlug = parseReportEntitySlug(params) ?? "personal";
-  const matrixYear = Number(period.start.slice(0, 4));
+  // "All time" has no single year — this is a year matrix, so show the current year for it.
+  const matrixYear =
+    period.type === "all" ? new Date().getFullYear() : Number(period.start.slice(0, 4));
   const now = new Date();
 
   const [entities, rows] = await Promise.all([

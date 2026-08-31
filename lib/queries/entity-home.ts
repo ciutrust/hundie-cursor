@@ -1,5 +1,6 @@
 import type { PeriodRange } from "@/lib/period";
 import { isBookedOperatingExpense } from "@/lib/category-expense";
+import { categoryKind } from "@/lib/category-kind";
 import { getCpaReviewCategoryIdSet, needsReviewCategory } from "@/lib/category-review";
 import { createClient } from "@/lib/supabase/server";
 import { pgError } from "@/lib/supabase/errors";
@@ -19,6 +20,12 @@ export type EntityHomeStats = {
   unclassifiedIncomeCount: number;
   unclassifiedIncomeTotal: number;
   topCategory: { name: string; total: number } | null;
+  /** Operating income (kind = income), summed by magnitude — matches getIncomeSummary. */
+  incomeTotal: number;
+  /** incomeTotal − expenseTotal (per-entity P&L for the period). */
+  netTotal: number;
+  /** Top booked-expense categories (signed sums, positive only), largest first, at most 3. */
+  topCategories: Array<{ name: string; total: number }>;
 };
 
 type EntityHomeTxn = {
@@ -51,7 +58,8 @@ async function fetchEntityPeriodTransactions(
   }));
 }
 
-function buildStatsFromTransactions(
+/** Exported for unit tests — the pure per-entity reducer behind every entity-home/dashboard card. */
+export function buildStatsFromTransactions(
   slug: string,
   name: string,
   transactions: Array<{
@@ -64,6 +72,7 @@ function buildStatsFromTransactions(
   cpaReviewIds: Set<string>,
 ): EntityHomeStats {
   let expenseTotal = 0;
+  let incomeTotal = 0;
   let unclassifiedCount = 0;
   let unclassifiedTotal = 0;
   let unclassifiedExpenseCount = 0;
@@ -98,6 +107,10 @@ function buildStatsFromTransactions(
       if (categoryPath) {
         categoryTotals.set(categoryPath, (categoryTotals.get(categoryPath) ?? 0) + Number(tx.amount));
       }
+    } else if (categoryKind(categoryPath) === "income") {
+      // Income by category KIND, not amount sign, summed by magnitude so legacy positive rows and
+      // new negative inflows both count — mirrors getIncomeSummary (lib/queries/income.ts).
+      incomeTotal += Math.abs(Number(tx.amount));
     }
   }
 
@@ -107,6 +120,14 @@ function buildStatsFromTransactions(
       topCategory = { name, total };
     }
   }
+
+  // Positive-only (a category that netted ≤ 0 via refunds is not a "top expense"); stable sort keeps
+  // insertion order on ties, matching topCategory's strict-greater tie-break above.
+  const topCategories = [...categoryTotals.entries()]
+    .map(([categoryName, total]) => ({ name: categoryName, total }))
+    .filter((c) => c.total > 0)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 3);
 
   return {
     slug,
@@ -120,6 +141,9 @@ function buildStatsFromTransactions(
     unclassifiedIncomeCount,
     unclassifiedIncomeTotal,
     topCategory,
+    incomeTotal,
+    netTotal: incomeTotal - expenseTotal,
+    topCategories,
   };
 }
 

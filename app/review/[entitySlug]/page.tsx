@@ -20,7 +20,7 @@ export default async function EntityHomePage({ params, searchParams }: EntityHom
     redirect("/review/entities");
   }
 
-  if (entitySlug === "entities" || entitySlug === "ai") {
+  if (entitySlug === "entities" || entitySlug === "ai" || entitySlug === "legacy") {
     notFound();
   }
 
