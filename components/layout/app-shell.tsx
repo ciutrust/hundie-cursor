@@ -12,6 +12,7 @@ import {
   ClipboardCheck,
   CreditCard,
   FileSpreadsheet,
+  History,
   Landmark,
   LayoutGrid,
   Menu,
@@ -65,6 +66,12 @@ const CLASSIFY_ITEMS: NavItem[] = [
     label: "Dashboard",
     icon: LayoutGrid,
     match: (path) => path === "/review",
+  },
+  {
+    href: "/review/legacy",
+    label: "Legacy dashboard",
+    icon: History,
+    match: (path) => path === "/review/legacy" || path.startsWith("/review/legacy/"),
   },
   {
     href: "/review/ai",

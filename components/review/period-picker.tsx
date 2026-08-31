@@ -11,6 +11,7 @@ const PERIOD_TYPES: { value: PeriodType; label: string }[] = [
   { value: "month", label: "Month" },
   { value: "quarter", label: "Quarter" },
   { value: "year", label: "Year" },
+  { value: "all", label: "All" },
 ];
 
 type PeriodPickerProps = {
@@ -33,16 +34,25 @@ export function PeriodPicker({ period }: PeriodPickerProps) {
   }
 
   function changeType(type: PeriodType) {
+    // Leaving "all": its start (1970) is not a usable anchor, so re-anchor on today (local time).
+    const now = new Date();
+    const pad2 = (n: number) => String(n).padStart(2, "0");
+    const anchor =
+      period.type === "all"
+        ? `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
+        : period.start;
     const current = parsePeriodParams({
       period: type,
       at:
-        type === "year"
-          ? period.start.slice(0, 4)
-          : type === "quarter"
-            ? `${period.start.slice(0, 4)}-Q${Math.floor((Number(period.start.slice(5, 7)) - 1) / 3) + 1}`
-            : type === "week"
-              ? period.start
-              : period.start.slice(0, 7),
+        type === "all"
+          ? "all"
+          : type === "year"
+            ? anchor.slice(0, 4)
+            : type === "quarter"
+              ? `${anchor.slice(0, 4)}-Q${Math.floor((Number(anchor.slice(5, 7)) - 1) / 3) + 1}`
+              : type === "week"
+                ? anchor
+                : anchor.slice(0, 7),
     });
     pushRange(current);
   }
@@ -68,13 +78,17 @@ export function PeriodPicker({ period }: PeriodPickerProps) {
       </div>
 
       <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-1 py-1 sm:justify-start">
-        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => pushRange(shiftPeriod(period, -1))} aria-label="Previous period">
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
+        {period.type !== "all" ? (
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => pushRange(shiftPeriod(period, -1))} aria-label="Previous period">
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+        ) : null}
         <span className="min-w-36 text-center text-sm font-medium">{period.label}</span>
-        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => pushRange(shiftPeriod(period, 1))} aria-label="Next period">
-          <ChevronRight className="h-4 w-4" />
-        </Button>
+        {period.type !== "all" ? (
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => pushRange(shiftPeriod(period, 1))} aria-label="Next period">
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        ) : null}
       </div>
     </div>
   );

@@ -4,6 +4,15 @@ All notable changes to the Hundie project. Format based on [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### 2026-08-31 dashboard redesign — period-scoped "current state" view + legacy dash
+
+**Added**
+
+- **New `/review` dashboard** ([app/review/page.tsx](../app/review/page.tsx)) answering "where do things stand?" in ONE time frame: every number and link follows the period filter (the old page mixed monthly KPIs with an all-time progress bar). Defaults to the new **All time** period; sections top-to-bottom: sync health + a red **failed-to-book (orphan)** alert (deep link to tax close), a 5-tile totals strip (Net P&L / Income / Expenses / To classify with expense·income split / AI pre-classified queue), the **total transactions bar** (period-scoped categorized/total), per-entity cards (net P&L, income, expenses, top-3 expense categories, and expenses/income/total still to classify — each deep-linked to that entity's classify worklist with the period carried), and a **Months not ready** section listing every open (entity, month) cell in the period with `N left →` links (month-close link contract; orphan badges deliberately non-links).
+- **"All" period type** ([lib/period.ts](../lib/period.ts), [period-picker.tsx](../components/review/period-picker.tsx)) — `allTimePeriod()` spans 1970→tomorrow with a deliberately ZERO-WIDTH compare window so every trend badge self-hides; `shiftPeriod` is a no-op and the picker hides its ‹ › arrows. Ships in every report's picker too (they share the component); the two year-matrix reports clamp "all" to the current year.
+- **Legacy dashboard preserved at `/review/legacy`** (verbatim, monthly default), linked from the new dash footer and as a "Legacy dashboard" item in the Classify nav. Reserved-slug guards added so `/review/legacy/*` can't fall through to the `[entitySlug]` routes.
+- **Data layer**: `EntityHomeStats` gains `incomeTotal`/`netTotal`/`topCategories` (same single-fetch pass); new [lib/queries/dashboard.ts](../lib/queries/dashboard.ts) with period-scoped categorization HEAD counts, multi-year readiness (ledger-bounded `getMonthCloseMatrix` fan-out + pure `buildReadinessSummary`), and `buildDashboardTotals`. 32 new/extended unit tests incl. a top-categories replica in the expense rollup-parity suite.
+
 ### 2026-08-08 phone categorize fix + Month close nav
 
 **Fixed**

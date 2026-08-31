@@ -31,7 +31,12 @@ export default async function EntityUncategorizedPage({ params, searchParams }: 
   const isIncome = query.flow === "income";
   const flow = isIncome ? "inflow" : "outflow";
 
-  if (entitySlug === "unclassified" || entitySlug === "entities" || entitySlug === "ai") {
+  if (
+    entitySlug === "unclassified" ||
+    entitySlug === "entities" ||
+    entitySlug === "ai" ||
+    entitySlug === "legacy"
+  ) {
     notFound();
   }
 

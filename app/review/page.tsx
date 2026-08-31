@@ -1,13 +1,24 @@
 import { Suspense } from "react";
 import Link from "next/link";
+import { DashboardEntityCard } from "@/components/review/dashboard-entity-card";
+import { DashboardTotalsStrip } from "@/components/review/dashboard-totals-strip";
 import { DormantEntitiesCard } from "@/components/review/dormant-entities-card";
 import { PeriodPicker } from "@/components/review/period-picker";
-import { ReviewKpiStrip } from "@/components/review/review-kpi-strip";
+import { ReadinessSection } from "@/components/review/readiness-section";
 import { SyncHealthCard } from "@/components/review/sync-health-card";
-import { getCategorizationProgress, getDormantEntities, getReviewDashboardStats } from "@/lib/queries/review";
+import { getAiPreclassifiedCount } from "@/lib/queries/ai-suggestions";
+import {
+  buildDashboardTotals,
+  getPeriodCategorizationProgress,
+  getReadinessSummary,
+} from "@/lib/queries/dashboard";
+import { getAllEntityHomeStats } from "@/lib/queries/entity-home";
+import { getDormantEntities } from "@/lib/queries/review";
 import { getSyncHealth } from "@/lib/queries/sync-health";
-import { activeMonthPeriod, parsePeriodParams } from "@/lib/period";
-import { formatCurrency } from "@/lib/utils";
+import { allTimePeriod, parsePeriodParams, periodQueryString } from "@/lib/period";
+
+// The all-time default scans the full ledger plus one month-close matrix per active year.
+export const maxDuration = 300;
 
 type ReviewPageProps = {
   searchParams: Promise<{ month?: string; period?: string; at?: string }>;
@@ -15,19 +26,30 @@ type ReviewPageProps = {
 
 export default async function ReviewPage({ searchParams }: ReviewPageProps) {
   const params = await searchParams;
-  const period = parsePeriodParams(params, activeMonthPeriod());
+  // "Current state of things": default to ALL TIME; the picker narrows, and every number and link
+  // on this page follows the selected period.
+  const period = parsePeriodParams(params, allTimePeriod());
 
-  const [stats, dormantEntities, progress, syncHealth] = await Promise.all([
-    getReviewDashboardStats(period),
-    getDormantEntities(),
-    getCategorizationProgress(),
-    getSyncHealth(),
-  ]);
+  const [entityStats, progress, readiness, syncHealth, aiPreclassifiedCount, dormantEntities] =
+    await Promise.all([
+      getAllEntityHomeStats(period),
+      getPeriodCategorizationProgress(period),
+      getReadinessSummary(period),
+      getSyncHealth(),
+      getAiPreclassifiedCount(),
+      getDormantEntities(),
+    ]);
 
-  const summaries = stats.summaries;
-  const entities = summaries.filter((s) => s.slug !== "unclassified");
-  const progressPct = progress.total > 0 ? Math.round((100 * progress.categorized) / progress.total) : 0;
-  const aiRatePct = progress.aiAcceptRate != null ? Math.round(progress.aiAcceptRate * 100) : null;
+  const totals = buildDashboardTotals(entityStats);
+  const periodQuery = periodQueryString(period);
+  const progressPct =
+    progress.total > 0 ? Math.round((100 * progress.categorized) / progress.total) : 0;
+  const readyCount = entityStats.filter((s) => s.unclassifiedCount === 0).length;
+  // Latest orphan-bearing year, for the alert's tax-close deep link.
+  const orphanYear = readiness.openCells.reduce(
+    (max, cell) => (cell.orphanCount > 0 ? Math.max(max, cell.year) : max),
+    0,
+  );
 
   return (
     <div className="space-y-8">
@@ -38,13 +60,13 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
           </p>
           <h1 className="text-3xl font-semibold tracking-tight">{period.label}</h1>
           <p className="text-sm text-muted-foreground">
-            Active month overview · entity details in{" "}
-            <Link href="/review/entities" className="text-primary hover:underline">
+            Where things stand · entity details in{" "}
+            <Link href={`/review/entities?${periodQuery}`} className="text-primary hover:underline">
               Entities
             </Link>
             {" · "}
             analytics in{" "}
-            <Link href="/reports" className="text-primary hover:underline">
+            <Link href={`/reports?${periodQuery}`} className="text-primary hover:underline">
               Reports
             </Link>
           </p>
@@ -54,115 +76,100 @@ export default async function ReviewPage({ searchParams }: ReviewPageProps) {
         </Suspense>
       </div>
 
-      <ReviewKpiStrip stats={stats} />
-
       <SyncHealthCard health={syncHealth} />
+
+      {readiness.orphanTotal > 0 ? (
+        <div className="rounded-lg border border-red-500/40 bg-red-500/5 px-4 py-3 text-sm">
+          <span className="font-medium text-red-700 dark:text-red-400">
+            {readiness.orphanTotal} transaction{readiness.orphanTotal === 1 ? "" : "s"} failed to book
+          </span>{" "}
+          <span className="text-muted-foreground">
+            — no classification row (an import was interrupted). They keep months open until the
+            import heal is re-run.
+          </span>{" "}
+          <Link
+            href={`/tax-close${orphanYear > 0 ? `?year=${orphanYear}` : ""}`}
+            className="font-medium text-primary hover:underline"
+          >
+            View in tax close →
+          </Link>
+        </div>
+      ) : null}
+
+      <DashboardTotalsStrip totals={totals} aiPreclassifiedCount={aiPreclassifiedCount} period={period} />
 
       <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold">Categorization progress</h2>
-            <p className="text-sm text-muted-foreground">All transactions, all time</p>
+            <h2 className="text-lg font-semibold">Total transactions</h2>
+            <p className="text-sm text-muted-foreground">Categorization progress · {period.label}</p>
           </div>
-          <Link href="/reports/ai-suggestions" className="text-sm font-medium text-primary hover:underline">
-            AI suggestion report →
+          <Link
+            href={`/reports/classification-progress?${periodQuery}`}
+            className="text-sm font-medium text-primary hover:underline"
+          >
+            Progress by entity →
           </Link>
         </div>
 
         <div className="mt-4">
           <div className="flex items-end justify-between gap-3">
             <p className="text-2xl font-semibold tabular-nums">
-              {progress.categorized.toLocaleString()}{" "}
+              {progress.total.toLocaleString()}{" "}
               <span className="text-base font-normal text-muted-foreground">
-                / {progress.total.toLocaleString()} categorized
+                transactions · {progress.categorized.toLocaleString()} categorized
               </span>
             </p>
             <p className="text-2xl font-semibold tabular-nums">{progressPct}%</p>
           </div>
           <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-muted">
-            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progressPct}%` }} />
+            <div
+              className="h-full rounded-full bg-primary transition-all"
+              style={{ width: `${progressPct}%` }}
+            />
           </div>
-        </div>
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <Link
-            href="/reports/ai-suggestions"
-            className="rounded-lg border border-border bg-muted/30 p-3 transition-colors hover:bg-muted/50"
-          >
-            <p className="text-xs text-muted-foreground">Accepted from AI</p>
-            <p className="text-xl font-semibold tabular-nums text-violet-600 dark:text-violet-400">
-              {progress.aiAccepted.toLocaleString()}
+          {progress.total - progress.categorized > 0 ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {(progress.total - progress.categorized).toLocaleString()} with no category yet — CPA-review
+              (&ldquo;Ask My Accountant&rdquo;) rows count as categorized here but still appear in each
+              entity&rsquo;s backlog below
             </p>
-          </Link>
-          <div className="rounded-lg border border-border bg-muted/30 p-3">
-            <p className="text-xs text-muted-foreground">AI accept rate</p>
-            <p className="text-xl font-semibold tabular-nums">{aiRatePct != null ? `${aiRatePct}%` : "—"}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-muted/30 p-3">
-            <p className="text-xs text-muted-foreground">From the engine</p>
-            <p className="text-xl font-semibold tabular-nums">{progress.deterministicAccepted.toLocaleString()}</p>
-          </div>
+          ) : null}
         </div>
       </section>
 
       <section className="space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold">Entities this month</h2>
-          <p className="text-sm text-muted-foreground">
-            <Link href="/review/entities" className="text-primary hover:underline">
-              View all entities (YTD cards) →
-            </Link>
-          </p>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Entities</h2>
+            <p className="text-sm text-muted-foreground">
+              {readyCount} of {entityStats.length} fully classified · {period.label}
+            </p>
+          </div>
+          <Link
+            href={`/review/entities?${periodQuery}`}
+            className="text-sm font-medium text-primary hover:underline"
+          >
+            All entity cards →
+          </Link>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {entities.map((summary) => (
-            <div
-              key={summary.slug}
-              className="rounded-xl border border-border bg-card p-4 shadow-sm"
-            >
-              <Link href={`/review/${summary.slug}`} className="block transition-opacity hover:opacity-80">
-                <p className="font-medium">{summary.name}</p>
-                <p className="mt-2 text-2xl font-semibold tabular-nums">{formatCurrency(summary.total)}</p>
-                <p className="text-xs text-muted-foreground">expenses</p>
-              </Link>
-              <div className="mt-3 space-y-1 border-t border-border pt-2 text-xs text-muted-foreground">
-                <Link
-                  href={`/reports/category-breakdown?entity=${summary.slug}`}
-                  className="flex items-center justify-between hover:text-foreground hover:underline"
-                >
-                  <span>Gross spend</span>
-                  <span className="tabular-nums">{formatCurrency(summary.grossTotal)}</span>
-                </Link>
-                {summary.excludedTotal > 0 ? (
-                  <Link
-                    href={`/reports/category-breakdown?entity=${summary.slug}`}
-                    className="flex items-center justify-between hover:text-foreground hover:underline"
-                  >
-                    <span>Excluded</span>
-                    <span className="tabular-nums">{formatCurrency(summary.excludedTotal)}</span>
-                  </Link>
-                ) : null}
-                {summary.unclassifiedTotal > 0 ? (
-                  <Link
-                    href={`/review/${summary.slug}/uncategorized`}
-                    className="flex items-center justify-between font-medium text-amber-600 hover:underline dark:text-amber-400"
-                  >
-                    <span>To classify ({summary.unclassifiedCount})</span>
-                    <span className="tabular-nums">{formatCurrency(summary.unclassifiedTotal)}</span>
-                  </Link>
-                ) : (
-                  <div className="flex items-center justify-between text-primary">
-                    <span>All classified</span>
-                    <span>✓</span>
-                  </div>
-                )}
-              </div>
-            </div>
+          {entityStats.map((stats) => (
+            <DashboardEntityCard key={stats.slug} stats={stats} period={period} />
           ))}
         </div>
       </section>
 
+      <ReadinessSection readiness={readiness} periodLabel={period.label} />
+
       <DormantEntitiesCard entities={dormantEntities} />
+
+      <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4 text-sm text-muted-foreground">
+        <span>Looking for the old monthly view?</span>
+        <Link href="/review/legacy" className="font-medium text-primary hover:underline">
+          Legacy dashboard →
+        </Link>
+      </div>
     </div>
   );
 }

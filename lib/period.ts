@@ -1,4 +1,4 @@
-export type PeriodType = "week" | "month" | "quarter" | "year";
+export type PeriodType = "week" | "month" | "quarter" | "year" | "all";
 
 export type PeriodRange = {
   type: PeriodType;
@@ -36,6 +36,12 @@ function parseAtDate(at: string) {
 }
 
 export function periodRangeFor(type: PeriodType, at: string): PeriodRange {
+  // "all" ignores `at` entirely — there is only one all-time range. Must be handled before the
+  // format-validated branches so it can't fall through to the current-month default.
+  if (type === "all") {
+    return allTimePeriod();
+  }
+
   if (type === "month" && /^\d{4}-\d{2}$/.test(at)) {
     const [year, month] = at.split("-").map(Number);
     const start = `${year}-${pad2(month)}-01`;
@@ -124,9 +130,31 @@ function currentMonthAt() {
   return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
 }
 
-/** Calendar month containing today — default for dashboard & reports. */
+/** Calendar month containing today — default for the legacy dashboard & reports. */
 export function activeMonthPeriod(): PeriodRange {
   return periodRangeFor("month", currentMonthAt());
+}
+
+/** Sentinel start date for the all-time range — predates every transaction in the ledger. */
+export const ALL_TIME_START = "1970-01-01";
+
+/**
+ * Everything in the ledger through today — default for the dashboard's "current state" view.
+ * The compare window is deliberately ZERO-WIDTH (compareStart === compareEnd): a compare fetch
+ * returns no rows fast, and every trend badge already null-guards on a 0/null compare total,
+ * so period-over-period UI self-hides for "all" with no component changes.
+ */
+export function allTimePeriod(): PeriodRange {
+  const end = toIsoDate(addDays(new Date(), 1));
+  return {
+    type: "all",
+    start: ALL_TIME_START,
+    end,
+    label: "All time",
+    at: "all",
+    compareStart: ALL_TIME_START,
+    compareEnd: ALL_TIME_START,
+  };
 }
 
 /** Jan 1 through end of today — default for entity views. */
@@ -175,6 +203,12 @@ export function parsePeriodParams(
 }
 
 export function shiftPeriod(range: PeriodRange, delta: number): PeriodRange {
+  // "all" has no previous/next range. Must be handled before the week fallthrough at the bottom,
+  // which would try to parse "all" as a date.
+  if (range.type === "all") {
+    return range;
+  }
+
   if (range.type === "month") {
     const [year, month] = range.at.split("-").map(Number);
     const date = new Date(year, month - 1 + delta, 1);

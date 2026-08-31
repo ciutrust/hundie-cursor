@@ -67,6 +67,19 @@ const entityHomeExpenseTotal = (rows: Row[]) => {
   return expenseTotal;
 };
 
+// Dashboard top-categories partition (entity-home buildStatsFromTransactions.categoryTotals):
+// bucket booked lines by category with SIGNED sums — the buckets must sum back to the shared total.
+const dashboardTopCategoryBucketSum = (rows: Row[]) => {
+  const buckets = new Map<string, number>();
+  for (const tx of rows) {
+    if (needsCategoryReview(tx.categoryFullPath)) continue;
+    if (!isBookedOperatingExpense(tx.categoryFullPath)) continue;
+    if (!tx.categoryFullPath) continue;
+    buckets.set(tx.categoryFullPath, (buckets.get(tx.categoryFullPath) ?? 0) + Number(tx.amount));
+  }
+  return [...buckets.values()].reduce((sum, total) => sum + total, 0);
+};
+
 describe("/review vs /reports expense parity (BUG-04/QA-01)", () => {
   const expected = 1150; // 1000 + 250 - 100 (refund nets); AMA + uncategorized + funding + income excluded
 
@@ -81,6 +94,7 @@ describe("/review vs /reports expense parity (BUG-04/QA-01)", () => {
     expect(yoyEntityTotal(ROWS)).toBe(expected);
     expect(reportTransactionsExpenseColumnSum(ROWS)).toBe(expected);
     expect(entityHomeExpenseTotal(ROWS)).toBe(expected);
+    expect(dashboardTopCategoryBucketSum(ROWS)).toBe(expected);
   });
 
   it("preserves the positive buckets and locks in that refunds net (gross != net)", () => {
