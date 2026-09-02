@@ -49,7 +49,8 @@
     "import:classify-refunds:dry-run": "node scripts/classify-refund-imports.mjs --dry-run",
     "cleanup:ledger-dupes": "node scripts/cleanup-ledger-duplicates.mjs --dry-run",
     "cleanup:ledger-dupes:apply": "node scripts/cleanup-ledger-duplicates.mjs --apply",
-    "cleanup:ledger-dupes:dry-run": "node scripts/cleanup-ledger-duplicates.mjs --dry-run"
+    "cleanup:ledger-dupes:dry-run": "node scripts/cleanup-ledger-duplicates.mjs --dry-run",
+    "report:qb-drift": "node scripts/qb-drift-report.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.17",

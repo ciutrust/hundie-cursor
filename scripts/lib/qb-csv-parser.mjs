@@ -143,15 +143,15 @@ export function buildImportHash(expense) {
   return createHash("sha256").update(payload).digest("hex");
 }
 
-function isAccountHeaderRow(row) {
+export function isAccountHeaderRow(row) {
   return Boolean(row[0]?.trim()) && !row[1]?.trim();
 }
 
-function isTransactionRow(row) {
+export function isTransactionRow(row) {
   return Boolean(row[1]?.trim()) && Boolean(row[2]?.trim());
 }
 
-function isPaymentAccount(name) {
+export function isPaymentAccount(name) {
   if (!name || name.startsWith("Total for")) return false;
   if (PAYMENT_ACCOUNT_NAMES.has(name)) return true;
   if (PAYMENT_KEYWORDS.some((keyword) => name.includes(keyword))) return true;
@@ -168,7 +168,7 @@ function isPaymentTransfer(split, paymentAccounts) {
   return false;
 }
 
-function parseDate(value) {
+export function parseDate(value) {
   const trimmed = value?.trim();
   if (!trimmed) return null;
 
@@ -179,7 +179,7 @@ function parseDate(value) {
   return `${fullYear}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-function parseAmount(value) {
+export function parseAmount(value) {
   if (value == null) return null;
   const normalized = String(value).replace(/,/g, "").trim();
   if (!normalized) return null;
@@ -188,7 +188,7 @@ function parseAmount(value) {
   return Number.isFinite(amount) ? amount : null;
 }
 
-function parseCsv(text) {
+export function parseCsv(text) {
   const rows = [];
   let row = [];
   let field = "";

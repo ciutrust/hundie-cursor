@@ -17,6 +17,7 @@ import { createClient } from "@supabase/supabase-js";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { dateAmountKeys, pickBestMatch } from "./lib/qb-match.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -38,98 +39,6 @@ function loadEnv() {
 function argValue(flag) {
   const index = args.indexOf(flag);
   return index === -1 ? undefined : args[index + 1];
-}
-
-function normalizeText(text) {
-  return (text ?? "")
-    .toLowerCase()
-    .replace(/[^\w\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function significantWords(text) {
-  const stop = new Set(["payment", "purchase", "online", "card", "thank", "you", "the", "inc", "llc"]);
-  return normalizeText(text)
-    .split(" ")
-    .filter((word) => word.length >= 3 && !stop.has(word));
-}
-
-function dateAmountKey(row) {
-  return `${row.transaction_date}|${Math.abs(Number(row.amount)).toFixed(2)}`;
-}
-
-function stripQboCardSuffix(text) {
-  return (text ?? "").replace(/\s*-\s*\d{4}\s*$/, "").trim();
-}
-
-function addDaysIso(isoDate, days) {
-  const [year, month, day] = isoDate.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-  date.setDate(date.getDate() + days);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function dateAmountKeys(row, slackDays = 0) {
-  const amount = Math.abs(Number(row.amount)).toFixed(2);
-  const keys = [`${row.transaction_date}|${amount}`];
-  if (slackDays > 0) {
-    for (let delta = 1; delta <= slackDays; delta += 1) {
-      keys.push(`${addDaysIso(row.transaction_date, delta)}|${amount}`);
-      keys.push(`${addDaysIso(row.transaction_date, -delta)}|${amount}`);
-    }
-  }
-  return keys;
-}
-
-function matchScore(card, qb, maxDateSlack = 0) {
-  const cardAmount = Math.abs(Number(card.amount));
-  const qbAmount = Math.abs(Number(qb.amount));
-  if (cardAmount !== qbAmount) {
-    return 0;
-  }
-
-  const cardDate = card.transaction_date;
-  const qbDate = qb.transaction_date;
-  let score = 10;
-  if (cardDate !== qbDate) {
-    const cardTime = new Date(`${cardDate}T12:00:00`).getTime();
-    const qbTime = new Date(`${qbDate}T12:00:00`).getTime();
-    const dayDiff = Math.round(Math.abs(cardTime - qbTime) / (1000 * 60 * 60 * 24));
-    if (dayDiff > maxDateSlack) return 0;
-    score = 8;
-  }
-  const cardText = normalizeText(`${card.vendor ?? ""} ${card.description ?? ""}`);
-  const qbText = normalizeText(`${stripQboCardSuffix(qb.vendor_name ?? "")} ${stripQboCardSuffix(qb.description ?? "")}`);
-  const cardWords = new Set(significantWords(cardText));
-
-  for (const word of significantWords(qbText)) {
-    if (cardWords.has(word)) score += 4;
-  }
-
-  if (cardText && qbText && (cardText.includes(qbText.slice(0, 10)) || qbText.includes(cardText.slice(0, 10)))) {
-    score += 3;
-  }
-
-  return score;
-}
-
-function pickBestMatch(card, indexedCandidates, maxDateSlack = 0) {
-  const scored = indexedCandidates
-    .map(({ qb, index }) => ({ qb, index, score: matchScore(card, qb, maxDateSlack) }))
-    .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score || a.qb.transaction_date.localeCompare(b.qb.transaction_date));
-
-  if (scored.length === 0) return null;
-
-  const best = scored[0];
-  const tied = scored.filter((item) => item.score === best.score);
-  if (tied.length > 1) return null;
-
-  const hasExactDate = best.qb.transaction_date === card.transaction_date;
-  const minScore =
-    indexedCandidates.length === 1 ? (hasExactDate ? 10 : 12) : hasExactDate ? 13 : 15;
-  return best.score >= minScore ? best : null;
 }
 
 const args = process.argv.slice(2);
