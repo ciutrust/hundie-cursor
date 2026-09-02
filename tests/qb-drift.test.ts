@@ -4,7 +4,7 @@ import * as driftModule from "../scripts/lib/qb-drift.mjs";
 // Plain-node module: TypeScript infers narrow types from its default parameters (e.g. `never[]`),
 // which fight the fixtures. Treat the exports as untyped functions here.
 type AnyFn = (...args: any[]) => any;
-const { analyzeDrift, pairRows, parsePeriodText, parseQboDriftRows, qboCategoryKind } =
+const { analyzeDrift, pairRows, parsePeriodText, parseQboDriftRows, qboCategoryKind, resolveSplitLines } =
   driftModule as unknown as Record<string, AnyFn>;
 
 const HEADER = [
@@ -161,6 +161,46 @@ describe("parseQboDriftRows", () => {
     expect(parsed.rows).toHaveLength(11);
   });
 
+  it("types sections before the first income section as balance-sheet accounts, ahead of the Hundie chart", () => {
+    const text2 = csv([
+      `${CHECKING},,,,,,,,`,
+      ",06/25/2026,Expense,,Ford Motor Credit,FORD CREDIT PAYMENT,Ford Motor Credit - F150,-2393.68,...",
+      ",06/26/2026,Expense,,Ally,ALLY PAYMT,Ford Focus,-280.02,...",
+      `Total for ${CHECKING},,,,,,,,`,
+      "Visa 0577,,,,,,,,",
+      ",06/27/2026,Credit Card Payment,,Alex,PERSONAL FUNDS,Owners Equity:Owner Contributions,-1500.00,...",
+      "Total for Visa 0577,,,,,,,,",
+      "Ford Focus,,,,,,,,",
+      `,06/26/2026,Expense,,Ally,ALLY PAYMT,${CHECKING},-280.02,...`,
+      "Total for Ford Focus,,,,,,,,",
+      "Ford Motor Credit - F150,,,,,,,,",
+      `,06/25/2026,Expense,,Ford Motor Credit,FORD CREDIT PAYMENT,${CHECKING},-2393.68,...`,
+      "Total for Ford Motor Credit - F150,,,,,,,,",
+      "Membership Income,,,,,,,,",
+      "Total for Membership Income,,,,,,,,",
+      "Meals & Entertainment,,,,,,,,",
+      "Total for Meals & Entertainment,,,,,,,,",
+    ]);
+    const chartWithFord = [...CHART, { full_path: "Ford Motor Credit - F150", kind: "expense", is_active: true }, { full_path: "Ford Focus", kind: "expense", is_active: true }];
+    const p2 = parseQboDriftRows(text2, { hundieCategories: chartWithFord });
+    expect(p2.meta.balanceSheetSections).toEqual(["Ford Focus", "Ford Motor Credit - F150"]);
+    const byCat = Object.fromEntries(p2.rows.map((r: any) => [r.category, r]));
+    expect(byCat["Ford Motor Credit - F150"]).toMatchObject({ kind: "liability", amount: 2393.68 });
+    expect(byCat["Ford Focus"].kind).toBe("liability");
+    // A card payment funded from personal money is a funding row, not an own-account transfer.
+    expect(byCat["Owners Equity:Owner Contributions"]).toMatchObject({ kind: "funding", amount: -1500, type: "Credit Card Payment" });
+    expect(byCat["Owners Equity:Owner Contributions"].ownTransfer).toBeUndefined();
+  });
+
+  it("resolveSplitLines needs at least two lines and prefers memo matches", () => {
+    expect(resolveSplitLines([{ amount: 5, memoMatches: true }], 5)).toBeNull();
+    const picked = resolveSplitLines(
+      [{ amount: 3, memoMatches: false, tag: "a" }, { amount: 2, memoMatches: true, tag: "b" }, { amount: 3, memoMatches: true, tag: "c" }],
+      5,
+    );
+    expect(picked.map((x: any) => x.tag)).toEqual(["b", "c"]);
+  });
+
   it("kinds: income via Hundie chart, review, funding/income/cash back by name", () => {
     expect(qboCategoryKind("Membership Income")).toBe("income");
     expect(qboCategoryKind("Ask My Accountant")).toBe("review");
@@ -193,8 +233,10 @@ describe("pairRows", () => {
   });
 
   it("never pairs a refund with a charge (signed amounts)", () => {
-    const { pairs } = pairRows([h({ id: "h1", date: "2026-03-02", amount: 50 })], [qbo({ id: "q1", date: "2026-03-02", amount: -50 })]);
-    expect(pairs).toHaveLength(0);
+    const hs = [h({ id: "charge", date: "2026-03-02", amount: 50 }), h({ id: "refund", date: "2026-03-02", amount: -50 })];
+    const qs = [qbo({ id: "q-refund", date: "2026-03-02", amount: -50 }), qbo({ id: "q-charge", date: "2026-03-02", amount: 50 })];
+    const { pairs } = pairRows(hs, qs);
+    expect(pairs.map((p: any) => [p.h.id, p.q.id]).sort()).toEqual([["charge", "q-charge"], ["refund", "q-refund"]]);
   });
 
   it("respects date slack and prefers the closer date", () => {
@@ -260,7 +302,7 @@ describe("analyzeDrift", () => {
   const report = analyzeDrift({ qboRows, hundieRows, hundieCategories: CHART, accounts, options: { from: "2026-01-01", to: "2026-09-02", dateSlack: 5 } });
 
   it("buckets every row exactly once and the totals reconcile", () => {
-    expect(report.totals.buckets).toEqual({ agree: 4, differ: 1, kindDiffer: 1, qboAsks: 1, hundieReview: 1, onlyHundie: 2, onlyQbo: 1 });
+    expect(report.totals.buckets).toEqual({ agree: 4, differ: 1, kindDiffer: 1, qboAsks: 1, hundieReview: 1, notGbsl: 0, onlyHundie: 2, onlyQbo: 1 });
     expect(report.totals.hundie.inScope).toBe(10);
     expect(report.totals.qbo.inScope).toBe(9);
     expect(report.totals.paired).toBe(8);
@@ -334,20 +376,99 @@ describe("analyzeDrift", () => {
     expect(byPath["Contract Labor"].qboRows).toBe(2); // q-agree, q-aprilAgree
   });
 
-  it("expense patterns sort before non-expense ones regardless of dollars", () => {
+  it("expense patterns sort before non-expense ones regardless of dollars; sub-accounts sort last", () => {
     const r = analyzeDrift({
       qboRows: [
-        qbo({ id: "q1", date: "2026-03-01", amount: -90000, category: "Owners Equity:Owner Contributions", kind: "funding" }),
+        qbo({ id: "q1", date: "2026-03-01", amount: -90000, category: "Owners Equity", kind: "funding" }),
         qbo({ id: "q2", date: "2026-03-02", amount: 10, category: "Meals & Entertainment" }),
+        qbo({ id: "q3", date: "2026-03-03", amount: 500, category: "Rent Expense" }),
       ],
       hundieRows: [
-        h({ id: "h1", date: "2026-03-01", amount: -90000, category: "Owner Contribution", kind: "funding" }),
+        h({ id: "h1", date: "2026-03-01", amount: -90000, category: "Owners Equity:Owner Distribution", kind: "funding" }),
         h({ id: "h2", date: "2026-03-02", amount: 10, category: "Meals (50%)" }),
+        h({ id: "h3", date: "2026-03-03", amount: 500, category: "Rent Expense:US Property Trust" }),
       ],
       hundieCategories: CHART,
       accounts,
     });
-    expect(r.patterns.map((p: any) => p.kind)).toEqual(["expense", "funding"]);
+    expect(r.patterns.map((p: any) => [p.kind, p.refinement])).toEqual([["expense", false], ["expense", true], ["funding", true]]);
+  });
+
+  it("known aliases pair as agree and the chart marks the Hundie name as an alias", () => {
+    const r = analyzeDrift({
+      qboRows: [qbo({ id: "q1", date: "2026-03-01", amount: -90000, category: "Owners Equity:Owner Contributions", kind: "funding" })],
+      hundieRows: [h({ id: "h1", date: "2026-03-01", amount: -90000, category: "Owner Contribution", kind: "funding" })],
+      hundieCategories: [...CHART, { full_path: "Owner Contribution", kind: "funding", is_active: true }],
+      accounts,
+    });
+    expect(r.totals.buckets.agree).toBe(1);
+    expect(r.chart.find((c: any) => c.path === "Owner Contribution").flags).toEqual(["alias"]);
+  });
+
+  it("rows Hundie filed to another entity pair as notGbsl and never count as only-in-Hundie", () => {
+    const r = analyzeDrift({
+      qboRows: [
+        qbo({ id: "q1", date: "2026-07-03", amount: 20.79, section: "Capital One", accountSlug: "cap-one-quicksilver-claudia", name: "Amazon", description: "AMAZON MKTPL", category: "Cost of Goods Sold" }),
+        qbo({ id: "q2", date: "2026-07-04", amount: 9.99, section: "Capital One", accountSlug: "cap-one-quicksilver-claudia", name: "Spotify", category: "Dues & Subscriptions" }),
+      ],
+      hundieRows: [
+        h({ id: "personalAmazon", date: "2026-07-03", amount: 20.79, accountSlug: "cap-one-quicksilver-claudia", description: "AMAZON MKTPL", category: "Groceries & household", entitySlug: "personal" } as any),
+        h({ id: "unassigned", date: "2026-07-04", amount: 9.99, accountSlug: "cap-one-quicksilver-claudia", description: "SPOTIFY", category: null, entitySlug: null } as any),
+        h({ id: "personalUnpaired", date: "2026-07-05", amount: 3.33, accountSlug: "cap-one-quicksilver-claudia", description: "COFFEE", category: "Dining out", entitySlug: "personal" } as any),
+      ],
+      hundieCategories: CHART,
+      accounts: [...accounts.map((a) => ({ ...a, default_entity_name: a.default_entity_slug === "personal" ? "Personal" : a.display_name }))],
+    });
+    expect(r.totals.buckets).toMatchObject({ notGbsl: 1, hundieReview: 1, onlyHundie: 0, onlyQbo: 0 });
+    expect(r.totals.hundie.inScope).toBe(0);
+    expect(r.meta.contextRows).toBe(3);
+    expect(r.meta.contextUnpaired).toBe(1);
+    expect(r.notGbslPatterns[0]).toMatchObject({ hundieCategory: "Personal · Groceries & household", qboCategory: "Cost of Goods Sold", rows: 1, amount: 20.79 });
+    expect(r.rows.notGbsl[0].entitySlug).toBe("personal");
+  });
+
+  it("pairs a Hundie split against the QBO whole, one pair per leg, and reconciles", () => {
+    const legs = [
+      h({ id: "leg-personal", date: "2026-07-02", amount: 24.89, accountSlug: "cap-one-quicksilver-claudia", description: "AMAZON", category: "Hobbies", entitySlug: "personal", isSplitLeg: true, parentId: "p1", parentAmount: 162.23 } as any),
+      h({ id: "leg-janitorial", date: "2026-07-02", amount: 37.76, accountSlug: "cap-one-quicksilver-claudia", description: "AMAZON", category: "Janitorial Supplies", isSplitLeg: true, parentId: "p1", parentAmount: 162.23 } as any),
+      h({ id: "leg-office", date: "2026-07-02", amount: 99.58, accountSlug: "cap-one-quicksilver-claudia", description: "AMAZON", category: "Office Supplies", isSplitLeg: true, parentId: "p1", parentAmount: 162.23 } as any),
+    ];
+    const whole = qbo({ id: "q-whole", date: "2026-07-02", amount: 162.23, section: "Capital One", accountSlug: "cap-one-quicksilver-claudia", name: "Amazon", description: "AMAZON ***", category: "Cost of Goods Sold" });
+    const r = analyzeDrift({ qboRows: [whole], hundieRows: legs, hundieCategories: CHART, accounts });
+    expect(r.totals.paired).toBe(1);
+    expect(r.totals.pairedClaims).toBe(2);
+    expect(r.totals.compositePairs).toBe(3);
+    expect(r.totals.buckets).toMatchObject({ differ: 2, notGbsl: 1, onlyHundie: 0, onlyQbo: 0 });
+    expect(r.totals.matchedAmount).toBe(162.23);
+    expect(r.rows.differ.every((p: any) => p.whole?.side === "hundieSplit" && p.whole.amount === 162.23)).toBe(true);
+    expect(r.rows.differ.map((p: any) => p.amount).sort()).toEqual([37.76, 99.58]);
+  });
+
+  it("pairs QBO split lines against the Hundie whole and compares each line's category", () => {
+    const lines = [
+      qbo({ id: "q-int", date: "2026-01-12", amount: 1187.61, name: "ALEX", description: "CNB BANK", category: "Interest Expense", splitLine: true, splitParent: { key: "k1", amount: 5810.04 } }),
+      qbo({ id: "q-prin", date: "2026-01-12", amount: 4622.43, name: "ALEX", description: "CNB BANK", category: "BHG Loan", kind: "liability", splitLine: true, splitParent: { key: "k1", amount: 5810.04 } }),
+    ];
+    const wholeH = h({ id: "h-loan", date: "2026-01-12", amount: 5810.04, description: "CNB BANK TRANSFER LOAN PAYMENT", category: "Interest Expense" });
+    const r = analyzeDrift({ qboRows: lines, hundieRows: [wholeH], hundieCategories: CHART, accounts });
+    expect(r.totals.paired).toBe(2);
+    expect(r.totals.pairedClaims).toBe(1);
+    expect(r.totals.buckets).toMatchObject({ agree: 1, kindDiffer: 1, onlyHundie: 0, onlyQbo: 0 });
+    expect(r.totals.matchedAmount).toBe(5810.04);
+    expect(r.rows.kindDiffer[0]).toMatchObject({ amount: 4622.43, qboCategory: "BHG Loan", whole: { side: "qboSplit", amount: 5810.04 } });
+  });
+
+  it("flags a same-name category whose kind differs between the two charts", () => {
+    const r = analyzeDrift({
+      qboRows: [qbo({ id: "q1", date: "2026-06-25", amount: 2393.68, category: "Ford Motor Credit - F150", kind: "liability" })],
+      hundieRows: [h({ id: "h1", date: "2026-06-25", amount: 2393.68, category: "Ford Motor Credit - F150" })],
+      hundieCategories: [...CHART, { full_path: "Ford Motor Credit - F150", kind: "expense", is_active: true }],
+      accounts,
+    });
+    expect(r.totals.buckets.agree).toBe(1);
+    const row = r.chart.find((c: any) => c.path === "Ford Motor Credit - F150")!;
+    expect(row.flags).toEqual(["kindMismatch"]);
+    expect(row.qboKind).toBe("liability");
   });
 
   it("nameVariant is flagged when only case differs", () => {

@@ -17,7 +17,7 @@ import { createClient } from "@supabase/supabase-js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { analyzeDrift, hundieCategoryKind, parseQboDriftRows } from "./lib/qb-drift.mjs";
+import { QBO_ACCOUNT_MAP, analyzeDrift, hundieCategoryKind, parseQboDriftRows } from "./lib/qb-drift.mjs";
 import { renderDriftDocument, renderDriftFragment } from "./lib/qb-drift-html.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -72,17 +72,26 @@ if (entityError || !entity) {
 
 const [{ data: categories, error: catError }, { data: accountRows, error: accError }] = await Promise.all([
   supabase.from("categories").select("full_path, kind, is_active").eq("entity_id", entity.id).order("full_path"),
-  supabase.from("accounts").select("slug, display_name, default_entity:entities(slug)"),
+  supabase.from("accounts").select("id, slug, display_name, default_entity:entities(slug, name)"),
 ]);
 if (catError || accError) {
   console.error("Failed to load chart/accounts:", catError?.message ?? accError?.message);
   process.exit(1);
 }
 const accounts = (accountRows ?? []).map((a) => ({
+  id: a.id,
   slug: a.slug,
   display_name: a.display_name,
   default_entity_slug: a.default_entity?.slug ?? null,
+  default_entity_name: a.default_entity?.name ?? null,
 }));
+const mappedSlugs = new Set(Object.values(QBO_ACCOUNT_MAP));
+const mappedIds = accounts.filter((a) => mappedSlugs.has(a.slug)).map((a) => a.id);
+if (mappedIds.length !== mappedSlugs.size) {
+  const missing = [...mappedSlugs].filter((s) => !accounts.some((a) => a.slug === s));
+  console.error(`Account map names Hundie accounts that do not exist: ${missing.join(", ")}`);
+  process.exit(1);
+}
 
 const csvText = readFileSync(resolve(csvPath), "utf8");
 const qbo = parseQboDriftRows(csvText, { hundieCategories: categories ?? [] });
@@ -108,62 +117,93 @@ async function fetchAll(build) {
   return all;
 }
 
-const unsplit = await fetchAll(() =>
+const UNSPLIT_SELECT = `id, transaction_date, amount, description, vendor,
+  account:accounts(slug, display_name),
+  classification:classifications(entity:entities(slug), category:categories(full_path))`;
+
+// Hundie side = GBSL claims on any account + context rows (any entity, or none) on the accounts QBO
+// has. Context rows pair with QBO entries the accountant booked to GBSL but Hundie filed elsewhere;
+// they are never "only in Hundie". Plaid-reversed rows are hidden, as the app hides them.
+const onMapped = await fetchAll(() =>
   supabase
     .from("transactions")
-    .select(
-      `id, transaction_date, amount, description, vendor,
-       account:accounts(slug, display_name),
-       classification:classifications!inner(entity_id, category:categories(full_path))`,
-    )
-    .eq("classification.entity_id", entity.id)
+    .select(UNSPLIT_SELECT)
+    .in("account_id", mappedIds)
     .is("split_at", null)
+    .is("plaid_removed_at", null)
+    .gte("transaction_date", from)
+    .lte("transaction_date", to)
+    .order("transaction_date")
+    .order("id"),
+);
+const gbslElsewhere = await fetchAll(() =>
+  supabase
+    .from("transactions")
+    .select(UNSPLIT_SELECT.replace("classification:classifications(", "classification:classifications!inner("))
+    .eq("classification.entity_id", entity.id)
+    .not("account_id", "in", `(${mappedIds.join(",")})`)
+    .is("split_at", null)
+    .is("plaid_removed_at", null)
     .gte("transaction_date", from)
     .lte("transaction_date", to)
     .order("transaction_date")
     .order("id"),
 );
 
-const legs = await fetchAll(() =>
+const LEG_SELECT = `id, amount, entity:entities(slug), category:categories(full_path),
+  transaction:transactions!inner(id, transaction_date, amount, description, vendor, account_id, plaid_removed_at, account:accounts(slug, display_name))`;
+const gbslLegs = await fetchAll(() =>
   supabase
     .from("transaction_splits")
-    .select(
-      `id, amount, category:categories(full_path),
-       transaction:transactions!inner(id, transaction_date, description, vendor, account:accounts(slug, display_name))`,
-    )
+    .select(LEG_SELECT)
     .eq("entity_id", entity.id)
+    .is("transaction.plaid_removed_at", null)
     .gte("transaction.transaction_date", from)
     .lte("transaction.transaction_date", to)
     .order("id"),
 );
+const mappedLegs = await fetchAll(() =>
+  supabase
+    .from("transaction_splits")
+    .select(LEG_SELECT)
+    .in("transaction.account_id", mappedIds)
+    .is("transaction.plaid_removed_at", null)
+    .gte("transaction.transaction_date", from)
+    .lte("transaction.transaction_date", to)
+    .order("id"),
+);
+const legsById = new Map();
+for (const s of [...gbslLegs, ...mappedLegs]) legsById.set(s.id, s);
 
-const hundieRows = [
-  ...unsplit.map((t) => ({
-    id: t.id,
-    date: t.transaction_date,
-    amount: Number(t.amount),
-    description: t.description ?? "",
-    vendor: t.vendor ?? "",
-    accountSlug: t.account?.slug ?? "(unknown)",
-    accountName: t.account?.display_name ?? t.account?.slug ?? "(unknown)",
-    category: t.classification?.category?.full_path ?? null,
-    kind: hundieCategoryKind(t.classification?.category?.full_path ?? null),
-    isSplitLeg: false,
-  })),
-  ...legs.map((s) => ({
-    id: `split-${s.id}`,
-    date: s.transaction.transaction_date,
-    amount: Number(s.amount),
-    description: s.transaction.description ?? "",
-    vendor: s.transaction.vendor ?? "",
-    accountSlug: s.transaction.account?.slug ?? "(unknown)",
-    accountName: s.transaction.account?.display_name ?? "(unknown)",
-    category: s.category?.full_path ?? null,
-    kind: hundieCategoryKind(s.category?.full_path ?? null),
-    isSplitLeg: true,
-    parentId: s.transaction.id,
-  })),
-];
+const unsplitRows = [...onMapped, ...gbslElsewhere].map((t) => ({
+  id: t.id,
+  date: t.transaction_date,
+  amount: Number(t.amount),
+  description: t.description ?? "",
+  vendor: t.vendor ?? "",
+  accountSlug: t.account?.slug ?? "(unknown)",
+  accountName: t.account?.display_name ?? t.account?.slug ?? "(unknown)",
+  entitySlug: t.classification?.entity?.slug ?? null,
+  category: t.classification?.category?.full_path ?? null,
+  kind: hundieCategoryKind(t.classification?.category?.full_path ?? null),
+  isSplitLeg: false,
+}));
+const legRows = [...legsById.values()].map((s) => ({
+  id: `split-${s.id}`,
+  date: s.transaction.transaction_date,
+  amount: Number(s.amount),
+  description: s.transaction.description ?? "",
+  vendor: s.transaction.vendor ?? "",
+  accountSlug: s.transaction.account?.slug ?? "(unknown)",
+  accountName: s.transaction.account?.display_name ?? "(unknown)",
+  entitySlug: s.entity?.slug ?? null,
+  category: s.category?.full_path ?? null,
+  kind: hundieCategoryKind(s.category?.full_path ?? null),
+  isSplitLeg: true,
+  parentId: s.transaction.id,
+  parentAmount: Number(s.transaction.amount),
+}));
+const hundieRows = [...unsplitRows, ...legRows];
 
 const report = analyzeDrift({
   qboRows: qbo.rows,
@@ -180,8 +220,9 @@ report.meta = {
   basis: qbo.meta.basis,
   periodText: qbo.meta.periodText,
   unmappedQboSections: qbo.meta.unmappedPaymentSections,
+  balanceSheetSections: qbo.meta.balanceSheetSections,
   dropped: qbo.meta.dropped,
-  hundieSplitLegs: legs.length,
+  hundieSplitLegs: legRows.length,
 };
 
 const outPath = expandHome(argValue("--out")) ?? resolve(process.env.HOME ?? "", `Downloads/GBSL-QB-drift-${to}.html`);
@@ -202,9 +243,9 @@ if (fragmentPath) {
 
 const t = report.totals;
 console.log(`\nGBSL ↔ QBO drift ${from} → ${to} (slack ±${dateSlack}d, ${qbo.meta.basis ?? "?"} basis)`);
-console.log(`  Hundie in scope: ${t.hundie.inScope} rows  (${t.hundie.unreachableRows} on cards QBO does not have)`);
-console.log(`  QBO in scope:    ${t.qbo.inScope} rows  (transfer mirrors dropped: ${report.meta.dropped.ownTransferMirror.rows}, unresolved splits: ${report.meta.dropped.unresolvedSplits})`);
-console.log(`  Paired: ${t.paired}  agree ${t.buckets.agree} · differ ${t.buckets.differ} · kind ${t.buckets.kindDiffer} · QBO asks ${t.buckets.qboAsks} · Hundie review ${t.buckets.hundieReview}`);
+console.log(`  Hundie GBSL rows: ${t.hundie.inScope}  (${t.hundie.unreachableRows} on cards QBO does not have; ${report.meta.contextRows} context rows from other entities on QBO accounts)`);
+console.log(`  QBO rows:         ${t.qbo.inScope}  (transfer mirrors dropped: ${report.meta.dropped.ownTransferMirror.rows}, unresolved splits: ${report.meta.dropped.unresolvedSplits})`);
+console.log(`  Paired: ${t.paired} QBO rows  agree ${t.buckets.agree} · differ ${t.buckets.differ} · treatment ${t.buckets.kindDiffer} · not GBSL ${t.buckets.notGbsl} · QBO asks ${t.buckets.qboAsks} · Hundie review ${t.buckets.hundieReview} · split-vs-whole ${t.compositePairs}`);
 console.log(`  Only in Hundie: ${t.buckets.onlyHundie}   Only in QBO: ${t.buckets.onlyQbo}   cross-account pairs: ${t.accountMismatchPairs}`);
 if (report.meta.unmappedQboSections.length) {
   console.log(`  ⚠ Unmapped QBO payment sections (ignored): ${report.meta.unmappedQboSections.join(", ")}`);

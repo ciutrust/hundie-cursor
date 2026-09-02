@@ -62,6 +62,11 @@ another mapped account) are listed by QBO under both accounts. The copy on the a
 counted. Hundie keeps its `Credit card payment` / `Internal transfer` rows too, so the
 two sides pair and count as agree. Nothing is excluded from either ledger.
 
+**Balance-sheet accounts.** QBO orders sections by account type; every unmapped section
+before the first income section (loans, payables, vehicle financing) is typed `liability`
+when it appears as a Split, ahead of the Hundie chart's kind. A `Credit Card Payment`
+whose Split is not a mapped account (a card paid from personal money) is a normal row.
+
 **Multi-line entries.** QBO shows a blank Split for a split transaction under the bank
 section. Its lines are recovered from the category sections (same date, payee, memo,
 and account; amounts must sum to the parent) and emitted one row per line. Unresolvable
@@ -74,10 +79,14 @@ income, `Cash Back Credit` -> transfer, `Ask My Accountant` -> review).
 
 ## Hundie row model
 
-- Unsplit rows: `transactions` where `split_at IS NULL`, classification entity = gbsl.
-- Split legs: `transaction_splits` where leg entity = gbsl; amount = leg amount,
-  category = leg category, parent's date/description/account. Parent rows with
+- **Claims**: GBSL-classified rows on any account (`split_at IS NULL`) plus GBSL split
+  legs (leg amount, leg category, parent's date/description/account). Parents with
   `split_at` set are never counted whole.
+- **Context**: every other row Hundie holds on the five QBO-mapped accounts (other
+  entities, unassigned) and their legs. Context rows are offered for pairing so an entry
+  the accountant booked to GBSL but Alex filed elsewhere surfaces as `notGbsl`; unpaired
+  context rows are dropped and counted, never "only in Hundie".
+- Plaid-reversed rows (`plaid_removed_at` set) are excluded, as the app excludes them.
 - Period: `--from` (default `2026-01-01`) inclusive to `--to` (default = the QBO
   report's end date, parsed from row 3 of the file) inclusive.
 - Kind via `categoryKind(full_path)`; `Ask My Accountant` and null category = review.
@@ -92,9 +101,22 @@ exact amount, date within slack, +4 per shared significant vendor word, +3 for a
 Drift-report assignment is **global greedy, one-to-one**: build every candidate pair
 (same signed amount, |date diff| <= slack), score it, sort by score desc then day
 diff asc, then assign in order skipping any row already taken. Same mapped account
-scores +6; a cross-account pair is allowed but flagged `accountMismatch`. Default slack
-5 days (`--date-slack`). Pairs must clear the same confidence floor the backfill uses
-(single candidate: 10 exact-date / 12 slack; multiple: 13 / 15).
+scores +6 and is accepted on amount + date alone (bank memos always share words, and a
+same-day same-amount collision on one account lands in the same category anyway); a
+cross-account pair needs at least one shared vendor word and is flagged
+`accountMismatch`. Default slack 5 days (`--date-slack`). No further confidence floor.
+
+**Split vs whole.** A Hundie split (legs) against one QBO entry, or QBO split lines
+against one Hundie row, cannot pair part by part. When none of a parent's parts paired,
+the parent's whole amount is tried against the other side's unpaired rows; a hit expands
+into one pair per part (that part's category against the whole's category), all sharing
+the whole row and tagged `whole: { side, amount }`.
+
+**Naming equivalences.** `CATEGORY_ALIASES` (Owner Contribution ↔ Owners
+Equity:Owner Contributions, Owner Distribution ↔ Owners Equity:Owner Distribution) pair
+as agree; the chart audit flags the Hundie name `alias`. A path that is a sub-account of
+the other side's path (`Rent Expense:US Property Trust` vs `Rent Expense`) stays a
+`differ` but carries `refinement: true` and sorts after real disagreements.
 
 ## Buckets (every row lands in exactly one)
 
@@ -105,14 +127,21 @@ scores +6; a cross-account pair is allowed but flagged `accountMismatch`. Defaul
 | `kindDiffer` | matched, kinds differ (e.g. you: expense, QBO: funding) |
 | `qboAsks` | matched, QBO = Ask My Accountant, Hundie has a real category |
 | `hundieReview` | matched, Hundie = unclassified / Ask My Accountant |
+| `notGbsl` | matched, Hundie filed the row to another entity (or none → `hundieReview`) |
 | `onlyHundie` | no QBO match (flagged `reachable` when the account exists in QBO) |
 | `onlyQbo` | no Hundie match |
 
 Two transfer-kind rows count as `agree` whatever they name as counter-account.
 
-Invariants (asserted in code, tested): `agree + differ + kindDiffer + qboAsks +
-hundieReview + onlyHundie = Hundie in-scope rows`; same sum with `onlyQbo` = QBO
-in-scope rows; matched dollar totals equal on both sides.
+Invariants (asserted in code, tested): paired GBSL claims + `onlyHundie` = GBSL
+claims; distinct paired QBO rows + `onlyQbo` = QBO rows; matched dollars equal on both
+sides (Hundie parts summed against distinct QBO rows).
+
+Headline tiles are on an **expense-kind, GBSL-claim basis** (coverage = paired expense
+claims / expense claims on QBO accounts; agree = agreeing expense pairs / paired expense
+pairs). Signed sums across kinds are never shown as a headline. Month scoreboard rows
+bucket pairs by the Hundie date and QBO-only rows by the QBO date, so a cross-month pair
+can make `matched` exceed `qboRows` by one.
 
 ## Aggregations in the page
 

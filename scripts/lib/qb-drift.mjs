@@ -5,9 +5,11 @@
  *
  * Two inputs, one report:
  *   - QBO rows  — parseQboDriftRows(csvText) over a "Transaction Detail by Account" export.
- *   - Hundie rows — the GBSL ledger (unsplit rows + GBSL split legs), fetched by the CLI.
- * analyzeDrift() pairs them one-to-one, buckets every row exactly once, and rolls up the
- * month scoreboard, disagreement patterns, and chart audit. Invariants are asserted, not hoped.
+ *   - Hundie rows — GBSL claims (any account) plus context rows: everything else Hundie holds on the
+ *     accounts QBO has (other entities, unassigned). Context rows pair but are never "only in Hundie".
+ * analyzeDrift() pairs them one-to-one (with a split-vs-whole fallback), buckets every row exactly
+ * once, and rolls up the month scoreboard, disagreement patterns, and chart audit. Invariants are
+ * asserted, not hoped.
  */
 import {
   matchScore,
@@ -34,9 +36,19 @@ export const QBO_ACCOUNT_MAP = Object.freeze({
   "Line of Credit 4670": "wf-gbsl-business-line",
 });
 
+/**
+ * Known naming variants for the same account (normalized Hundie path → normalized QBO path).
+ * These pair as agree; the chart audit still lists both names so the variant can be retired.
+ */
+export const CATEGORY_ALIASES = Object.freeze({
+  "owner contribution": "owners equity:owner contributions",
+  "owner distribution": "owners equity:owner distribution",
+});
+
 const KEPT_TYPES = new Set(["Expense", "Credit Card Expense", "Check", "Credit Card Credit", "Deposit"]);
 const PAYMENT_TYPES = new Set(["Credit Card Payment", "Transfer"]);
 export const REVIEW_CATEGORY = "Ask My Accountant";
+export const GBSL = "gbsl";
 /** Kinds whose QBO category-section lines show money-in as positive (negate to reach Hundie's sign). */
 const NEGATE_LINE_KINDS = new Set(["income", "funding", "liability", "transfer"]);
 
@@ -98,8 +110,8 @@ function money(n) {
 }
 
 /**
- * Kind of a QBO category. Hundie's chart wins when the path exists there (case-insensitive);
- * otherwise the shared categoryKind dispatch, then QBO-only naming rules.
+ * Kind of a QBO category. Balance-sheet accounts seen in the file win first, then Hundie's chart
+ * (case-insensitive), then the shared categoryKind dispatch, then QBO-only naming rules.
  */
 export function qboCategoryKind(name, { hundiePathsByNorm, liabilitySplits } = {}) {
   if (!name) return "unclassified";
@@ -167,10 +179,11 @@ export function resolveSplitLines(candidates, target) {
  * its category account (Split = payment account). Rows are taken from the mapped payment-account
  * sections only, with two refinements:
  *   - a blank Split means a multi-line transaction; its lines are recovered from the category
- *     sections (same date / payee / memo / account, amounts summing to the parent);
+ *     sections (same date / payee / account, amounts summing to the parent);
  *   - a movement between two mapped accounts is listed under both; the asset-side copy is kept as a
  *     `transfer` row (the leg Hundie imports) and the liability-side mirror is dropped.
- * Every drop is counted.
+ * Sections listed before the first income account are balance-sheet accounts (loans, payables) and
+ * are typed `liability` when they appear as a Split. Every drop is counted.
  */
 export function parseQboDriftRows(csvText, { accountMap = QBO_ACCOUNT_MAP, hundieCategories = [] } = {}) {
   const rows = parseCsv(csvText);
@@ -228,7 +241,14 @@ export function parseQboDriftRows(csvText, { accountMap = QBO_ACCOUNT_MAP, hundi
   const sectionIndexByNorm = new Map(sectionNames.map((name, i) => [normalizeSection(name), i]));
   const paymentSections = sectionNames.filter((name) => isPaymentAccount(name) || mapByNorm.has(normalizeSection(name)));
   const unmappedPaymentSections = paymentSections.filter((name) => !mapByNorm.has(normalizeSection(name)));
-  const liabilitySplits = new Set(unmappedPaymentSections);
+  // QBO orders sections by account type: bank and cards, then liabilities, then income, COGS,
+  // expenses, other income, equity. Everything unmapped before the first income section is a
+  // balance-sheet account (loans, payables), never a P&L category.
+  const firstIncome = sectionNames.findIndex((name) => /\bincome\b/i.test(name));
+  const balanceSheetSections = (firstIncome === -1 ? [] : sectionNames.slice(0, firstIncome)).filter(
+    (name) => !mapByNorm.has(normalizeSection(name)) && !/^total$/i.test(name),
+  );
+  const liabilitySplits = new Set([...unmappedPaymentSections, ...balanceSheetSections]);
   const hundiePathsByNorm = new Map(
     hundieCategories.map((c) => {
       const path = c.full_path ?? c.fullPath;
@@ -278,24 +298,25 @@ export function parseQboDriftRows(csvText, { accountMap = QBO_ACCOUNT_MAP, hundi
       const amount = money(asset ? -l.rawAmount : l.rawAmount);
       const base = { section, accountSlug: slug, date: l.date, type: l.type, num: l.num, name: l.name, description: l.description, rawAmount: l.rawAmount };
       const splitNorm = normalizeSection(l.split);
-      const splitIsMapped = mappedSectionNorms.has(splitNorm);
 
-      if (PAYMENT_TYPES.has(l.type) || splitIsMapped) {
+      // Own-account movement: the Split names another account in the map (whether or not that
+      // account has its own section in this export).
+      if (mapByNorm.has(splitNorm)) {
         // Own-account movement between two mapped accounts. Keep one copy: the asset side, or for a
         // liability→liability move the copy under the section that appears first in the file.
         const splitIsAsset = isAssetSection(l.split);
         const keep = asset || (!splitIsAsset && (sectionIndexByNorm.get(normalizeSection(section)) ?? 0) < (sectionIndexByNorm.get(splitNorm) ?? Infinity));
-        if (!keep || !splitIsMapped) {
-          if (!keep) {
-            dropped.ownTransferMirror.rows += 1;
-            dropped.ownTransferMirror.amount = money(dropped.ownTransferMirror.amount + amount);
-            continue;
-          }
+        if (!keep) {
+          dropped.ownTransferMirror.rows += 1;
+          dropped.ownTransferMirror.amount = money(dropped.ownTransferMirror.amount + amount);
+          continue;
         }
-        push({ ...base, category: l.split || null, kind: "transfer", ownTransfer: true, amount });
+        push({ ...base, category: l.split, kind: "transfer", ownTransfer: true, amount });
         continue;
       }
-      if (!KEPT_TYPES.has(l.type)) {
+      // A card payment funded from somewhere other than a mapped account (owner's personal money,
+      // an unmapped loan) is a real row: its Split names the funding account.
+      if (!KEPT_TYPES.has(l.type) && !PAYMENT_TYPES.has(l.type)) {
         dropped.otherType[l.type] = (dropped.otherType[l.type] ?? 0) + 1;
         continue;
       }
@@ -308,8 +329,9 @@ export function parseQboDriftRows(csvText, { accountMap = QBO_ACCOUNT_MAP, hundi
         }));
         const lines = resolveSplitLines(candidates, amount);
         if (lines) {
+          const parentKey = `qsplit|${l.date}|${(l.name ?? "").trim()}|${section}|${amount.toFixed(2)}|${out.length}`;
           for (const x of lines) {
-            push({ ...base, category: x.category, kind: kindOf(x.category), amount: x.amount, splitLine: true });
+            push({ ...base, category: x.category, kind: kindOf(x.category), amount: x.amount, splitLine: true, splitParent: { key: parentKey, amount } });
           }
           continue;
         }
@@ -332,6 +354,7 @@ export function parseQboDriftRows(csvText, { accountMap = QBO_ACCOUNT_MAP, hundi
       sections: sectionNames,
       paymentSections,
       unmappedPaymentSections,
+      balanceSheetSections,
       dropped,
     },
   };
@@ -358,7 +381,9 @@ function toQb(row) {
 /**
  * One-to-one pairing, global greedy: every candidate pair (same signed amount, within slack) is
  * scored, sorted best-first, and assigned unless either side is already taken.
- * Same mapped account: accepted on amount+date alone. Cross-account: needs ≥1 shared vendor word.
+ * Same mapped account: accepted on amount+date alone (bank memos always share words; a same-day
+ * same-amount collision on one account is rare and lands in the same category anyway).
+ * Cross-account: needs ≥1 shared vendor word.
  */
 export function pairRows(hundieRows, qboRows, { dateSlack = 5 } = {}) {
   const qboByAmount = new Map();
@@ -407,18 +432,30 @@ export function pairRows(hundieRows, qboRows, { dateSlack = 5 } = {}) {
   return { pairs, usedH, usedQ };
 }
 
+function isParentOf(a, b) {
+  return Boolean(a) && Boolean(b) && b.startsWith(`${a}:`);
+}
+
+function categoriesAgree(h, q) {
+  const hp = normalizePath(h.category);
+  const qp = normalizePath(q.category);
+  if (hp === qp) return true;
+  if (CATEGORY_ALIASES[hp] === qp || CATEGORY_ALIASES[qp] === hp) return true;
+  return false;
+}
+
 function bucketFor(h, q) {
+  if (h.entitySlug !== GBSL) return h.entitySlug ? "notGbsl" : "hundieReview";
   if (h.kind === "review") return "hundieReview";
   if (q.kind === "review") return "qboAsks";
-  if (normalizePath(h.category) === normalizePath(q.category)) return "agree";
+  if (categoriesAgree(h, q)) return "agree";
   // Two own-account movements name their counter-account differently by design; nothing to settle.
   if (h.kind === "transfer" && q.kind === "transfer") return "agree";
   if (h.kind === q.kind) return "differ";
   return "kindDiffer";
 }
 
-/** Strip bank-memo noise (dates, REF numbers, trailing ON) so the same payee groups as one vendor. */
-export function cleanVendor(text) {
+function cleanVendor(text) {
   return (text ?? "")
     .replace(/\s+/g, " ")
     .replace(/\s+ON\s+\d{1,2}\/\d{1,2}(\/\d{2,4})?\b.*$/i, "")
@@ -429,6 +466,7 @@ export function cleanVendor(text) {
     .trim()
     .slice(0, 40);
 }
+export { cleanVendor };
 
 function vendorKey(h, q) {
   const raw = (q?.name && q.name.trim().slice(0, 40)) || cleanVendor(h?.vendor) || cleanVendor(h?.description ?? q?.description ?? "");
@@ -437,6 +475,8 @@ function vendorKey(h, q) {
 
 function pairView(c, bucket) {
   const { h, q } = c;
+  const hp = normalizePath(h.category);
+  const qp = normalizePath(q.category);
   return {
     bucket,
     month: monthOf(h.date),
@@ -451,14 +491,17 @@ function pairView(c, bucket) {
     accountName: h.accountName ?? h.accountSlug,
     qboSection: q.section,
     accountMismatch: !c.sameAccount,
+    entitySlug: h.entitySlug,
     hundieCategory: h.category,
     qboCategory: q.category,
     hundieKind: h.kind,
     qboKind: q.kind,
+    refinement: bucket === "differ" && (isParentOf(hp, qp) || isParentOf(qp, hp)),
     confidence: c.confidence,
     dayDiff: c.dayDiff,
     sharedWords: c.words,
     isSplitLeg: Boolean(h.isSplitLeg),
+    whole: c.whole ?? null,
     hundieId: h.id,
     qboId: q.id,
   };
@@ -473,6 +516,7 @@ function rowView(r, reachableSlugs) {
     description: r.description ?? "",
     accountSlug: r.accountSlug,
     accountName: r.accountName ?? r.section ?? r.accountSlug,
+    entitySlug: r.entitySlug ?? null,
     category: r.category,
     kind: r.kind,
     isSplitLeg: Boolean(r.isSplitLeg),
@@ -486,15 +530,32 @@ function sumAmt(rows) {
 }
 
 function sortPatterns(list) {
-  return list.sort((a, b) => Number(a.kind !== "expense") - Number(b.kind !== "expense") || Math.abs(b.amount) - Math.abs(a.amount) || b.rows - a.rows);
+  return list.sort(
+    (a, b) =>
+      Number(a.kind !== "expense") - Number(b.kind !== "expense") ||
+      Number(Boolean(a.refinement)) - Number(Boolean(b.refinement)) ||
+      Math.abs(b.amount) - Math.abs(a.amount) ||
+      b.rows - a.rows,
+  );
 }
 
-function groupPatterns(views) {
+function groupPatterns(views, { leftLabel = (v) => v.hundieCategory ?? "(unclassified)" } = {}) {
   const byPair = new Map();
   for (const v of views) {
-    const key = `${v.hundieCategory ?? "(none)"}→${v.qboCategory ?? "(none)"}`;
+    const left = leftLabel(v);
+    const key = `${left}→${v.qboCategory ?? "(none)"}`;
     if (!byPair.has(key)) {
-      byPair.set(key, { hundieCategory: v.hundieCategory, qboCategory: v.qboCategory, hundieKind: v.hundieKind, qboKind: v.qboKind, kind: v.hundieKind, rows: 0, amount: 0, vendors: new Map() });
+      byPair.set(key, {
+        hundieCategory: left,
+        qboCategory: v.qboCategory,
+        hundieKind: v.hundieKind,
+        qboKind: v.qboKind,
+        kind: v.hundieKind,
+        refinement: Boolean(v.refinement),
+        rows: 0,
+        amount: 0,
+        vendors: new Map(),
+      });
     }
     const p = byPair.get(key);
     p.rows += 1;
@@ -529,9 +590,88 @@ function groupOnly(views) {
 }
 
 /**
+ * Split-vs-whole fallback. A Hundie split (legs) against one QBO row, or QBO split lines against one
+ * Hundie row, never pair leg by leg because the amounts differ. When none of a parent's parts paired,
+ * the whole is tried against the other side's unpaired rows; a hit expands into one pair per part
+ * (each part's category against the whole's category), all sharing the whole row.
+ */
+function pairComposites({ hundie, qbo, usedH, usedQ, dateSlack }) {
+  const pairs = [];
+
+  // Hundie parents (legs of a split transaction) vs unpaired QBO rows.
+  const hundieParents = new Map();
+  for (const r of hundie) {
+    if (!r.parentId) continue;
+    if (!hundieParents.has(r.parentId)) hundieParents.set(r.parentId, []);
+    hundieParents.get(r.parentId).push(r);
+  }
+  const hundieComposites = [];
+  for (const [parentId, legs] of hundieParents) {
+    if (legs.some((l) => usedH.has(l.id))) continue;
+    const first = legs[0];
+    hundieComposites.push({
+      id: `hparent-${parentId}`,
+      date: first.date,
+      amount: money(first.parentAmount ?? legs.reduce((s, l) => s + l.amount, 0)),
+      description: first.description,
+      vendor: first.vendor,
+      accountSlug: first.accountSlug,
+      legs,
+    });
+  }
+  if (hundieComposites.length) {
+    const freeQ = qbo.filter((q) => !usedQ.has(q.id));
+    const { pairs: wholePairs } = pairRows(hundieComposites, freeQ, { dateSlack });
+    for (const c of wholePairs) {
+      usedQ.add(c.q.id);
+      for (const leg of c.h.legs) {
+        usedH.add(leg.id);
+        pairs.push({ h: leg, q: c.q, score: c.score, dayDiff: c.dayDiff, words: c.words, sameAccount: c.sameAccount, confidence: c.confidence, whole: { side: "hundieSplit", amount: c.h.amount } });
+      }
+    }
+  }
+
+  // QBO parents (split lines of one QBO entry) vs unpaired Hundie rows.
+  const qboParents = new Map();
+  for (const q of qbo) {
+    if (!q.splitParent) continue;
+    if (!qboParents.has(q.splitParent.key)) qboParents.set(q.splitParent.key, []);
+    qboParents.get(q.splitParent.key).push(q);
+  }
+  const qboComposites = [];
+  for (const [key, lines] of qboParents) {
+    if (lines.some((l) => usedQ.has(l.id))) continue;
+    const first = lines[0];
+    qboComposites.push({
+      id: `qparent-${key}`,
+      date: first.date,
+      amount: money(first.splitParent.amount),
+      name: first.name,
+      description: first.description,
+      section: first.section,
+      accountSlug: first.accountSlug,
+      lines,
+    });
+  }
+  if (qboComposites.length) {
+    const freeH = hundie.filter((h) => !usedH.has(h.id));
+    const { pairs: wholePairs } = pairRows(freeH, qboComposites, { dateSlack });
+    for (const c of wholePairs) {
+      usedH.add(c.h.id);
+      for (const line of c.q.lines) {
+        usedQ.add(line.id);
+        pairs.push({ h: { ...c.h, amount: line.amount }, q: line, score: c.score, dayDiff: c.dayDiff, words: c.words, sameAccount: c.sameAccount, confidence: c.confidence, whole: { side: "qboSplit", amount: c.q.amount } });
+      }
+    }
+  }
+  return pairs;
+}
+
+/**
  * @param {object} input
  * @param {Array} input.qboRows       from parseQboDriftRows().rows
- * @param {Array} input.hundieRows    { id, date, amount, description, vendor, accountSlug, accountName, category, kind, isSplitLeg }
+ * @param {Array} input.hundieRows    { id, date, amount, description, vendor, accountSlug, accountName, entitySlug, category, kind, isSplitLeg, parentId, parentAmount }
+ *                                    entitySlug "gbsl" = a GBSL claim; anything else = context (pairs, never "only in Hundie")
  * @param {Array} input.hundieCategories  GBSL chart: { full_path, kind, is_active }
  * @param {Array} [input.accounts]    { slug, display_name, default_entity_slug }
  * @param {object} [input.options]    { from, to, dateSlack }
@@ -547,46 +687,57 @@ export function analyzeDrift({ qboRows, hundieRows, hundieCategories = [], accou
     .map((r) => ({
       ...r,
       amount: money(Number(r.amount)),
+      entitySlug: r.entitySlug === undefined ? GBSL : r.entitySlug,
       kind: r.kind ?? hundieCategoryKind(r.category),
       accountName: r.accountName ?? accountBySlug.get(r.accountSlug)?.display_name ?? r.accountSlug,
     }));
+  const claims = hundie.filter((r) => r.entitySlug === GBSL);
+  const context = hundie.filter((r) => r.entitySlug !== GBSL);
   const qbo = qboRows.filter((r) => inPeriod(r.date)).map((r) => ({ ...r, amount: money(Number(r.amount)) }));
 
-  const { pairs, usedH, usedQ } = pairRows(hundie, qbo, { dateSlack });
+  const { pairs: atomic, usedH, usedQ } = pairRows(hundie, qbo, { dateSlack });
+  const composite = pairComposites({ hundie, qbo, usedH, usedQ, dateSlack });
+  const pairs = [...atomic, ...composite];
 
-  const buckets = { agree: [], differ: [], kindDiffer: [], qboAsks: [], hundieReview: [] };
+  const buckets = { agree: [], differ: [], kindDiffer: [], qboAsks: [], hundieReview: [], notGbsl: [] };
   for (const c of pairs) {
     const b = bucketFor(c.h, c.q);
     buckets[b].push(pairView(c, b));
   }
-  const onlyHundie = hundie.filter((r) => !usedH.has(r.id)).map((r) => rowView(r, reachableSlugs));
+  const onlyHundie = claims.filter((r) => !usedH.has(r.id)).map((r) => rowView(r, reachableSlugs));
   const onlyQbo = qbo.filter((r) => !usedQ.has(r.id)).map((r) => rowView(r, reachableSlugs));
+  const contextUnpaired = context.filter((r) => !usedH.has(r.id)).length;
 
-  const pairedCount = pairs.length;
-  if (pairedCount + onlyHundie.length !== hundie.length) {
-    throw new Error(`Invariant: Hundie rows ${hundie.length} != paired ${pairedCount} + onlyHundie ${onlyHundie.length}`);
+  // Invariants: every claim and every QBO row lands in exactly one place; matched dollars agree.
+  const pairedClaimIds = new Set(pairs.filter((c) => c.h.entitySlug === GBSL).map((c) => c.h.id));
+  const pairedQboIds = new Set(pairs.map((c) => c.q.id));
+  if (pairedClaimIds.size + onlyHundie.length !== claims.length) {
+    throw new Error(`Invariant: Hundie claims ${claims.length} != paired ${pairedClaimIds.size} + onlyHundie ${onlyHundie.length}`);
   }
-  if (pairedCount + onlyQbo.length !== qbo.length) {
-    throw new Error(`Invariant: QBO rows ${qbo.length} != paired ${pairedCount} + onlyQbo ${onlyQbo.length}`);
+  if (pairedQboIds.size + onlyQbo.length !== qbo.length) {
+    throw new Error(`Invariant: QBO rows ${qbo.length} != paired ${pairedQboIds.size} + onlyQbo ${onlyQbo.length}`);
   }
   const matchedH = money(pairs.reduce((s, c) => s + c.h.amount, 0));
-  const matchedQ = money(pairs.reduce((s, c) => s + c.q.amount, 0));
+  const matchedQ = money([...pairedQboIds].reduce((s, id) => s + qbo.find((q) => q.id === id).amount, 0));
   if (Math.abs(matchedH - matchedQ) > 0.005) {
     throw new Error(`Invariant: matched $ differ (Hundie ${matchedH} vs QBO ${matchedQ})`);
   }
 
-  // Month scoreboard — expense kind only. Coverage counts only Hundie rows on accounts QBO has;
-  // spend on other cards can never pair and is reported separately as "unreachable".
-  const monthSet = new Set([...hundie, ...qbo].map((r) => monthOf(r.date)));
-  const pairViews = [...buckets.agree, ...buckets.differ, ...buckets.kindDiffer, ...buckets.qboAsks, ...buckets.hundieReview];
+  // Month scoreboard — expense kind only, GBSL claims only. Coverage counts only Hundie rows on
+  // accounts QBO has; spend on other cards can never pair and is reported separately.
+  const monthSet = new Set([...claims, ...qbo].map((r) => monthOf(r.date)));
+  const claimPairViews = [...buckets.agree, ...buckets.differ, ...buckets.kindDiffer, ...buckets.qboAsks, ...buckets.hundieReview].filter(
+    (p) => p.entitySlug === GBSL,
+  );
   const months = [...monthSet].sort().map((month) => {
-    const hRows = hundie.filter((r) => monthOf(r.date) === month && r.kind === "expense");
+    const hRows = claims.filter((r) => monthOf(r.date) === month && r.kind === "expense");
     const reachable = hRows.filter((r) => reachableSlugs.has(r.accountSlug));
     const unreachable = hRows.filter((r) => !reachableSlugs.has(r.accountSlug));
     const qRows = qbo.filter((r) => monthOf(r.date) === month && r.kind === "expense");
-    const mPairs = pairViews.filter((p) => p.month === month && p.hundieKind === "expense");
+    const mPairs = claimPairViews.filter((p) => p.month === month && p.hundieKind === "expense");
     const agree = mPairs.filter((p) => p.bucket === "agree").length;
     const differ = mPairs.filter((p) => p.bucket === "differ").length;
+    const notGbsl = buckets.notGbsl.filter((p) => p.month === month).length;
     const oh = onlyHundie.filter((r) => r.month === month && r.kind === "expense" && r.reachable);
     const oq = onlyQbo.filter((r) => r.month === month && r.kind === "expense");
     const coverage = reachable.length ? mPairs.length / reachable.length : 0;
@@ -604,6 +755,7 @@ export function analyzeDrift({ qboRows, hundieRows, hundieCategories = [], accou
       agree,
       differ,
       otherDrift: mPairs.length - agree - differ,
+      notGbsl,
       onlyHundieRows: oh.length,
       onlyHundieAmount: sumAmt(oh),
       onlyQboRows: oq.length,
@@ -623,7 +775,7 @@ export function analyzeDrift({ qboRows, hundieRows, hundieCategories = [], accou
       byAccount.set(r.accountSlug, {
         accountSlug: r.accountSlug,
         accountName: r.accountName,
-        isGbslAccount: acc ? acc.default_entity_slug === "gbsl" : reachableSlugs.has(r.accountSlug),
+        isGbslAccount: acc ? acc.default_entity_slug === GBSL : reachableSlugs.has(r.accountSlug),
         inQbo: reachableSlugs.has(r.accountSlug),
         rows: 0,
         amount: 0,
@@ -635,7 +787,7 @@ export function analyzeDrift({ qboRows, hundieRows, hundieCategories = [], accou
   }
   const onlyHundieByAccount = [...byAccount.values()].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
 
-  // Chart audit.
+  // Chart audit — GBSL chart vs the categories QBO used (claims only on the Hundie side).
   const chartMap = new Map();
   const ensure = (path, seed) => {
     const key = normalizePath(path);
@@ -645,6 +797,7 @@ export function analyzeDrift({ qboRows, hundieRows, hundieCategories = [], accou
         hundiePath: null,
         qboPath: null,
         kind: null,
+        qboKind: null,
         isActive: null,
         inHundieChart: false,
         inQbo: false,
@@ -666,7 +819,7 @@ export function analyzeDrift({ qboRows, hundieRows, hundieCategories = [], accou
     e.kind = c.kind ?? categoryKind(path);
     e.isActive = c.is_active ?? c.isActive ?? true;
   }
-  for (const r of hundie) {
+  for (const r of claims) {
     if (!r.category) continue;
     const e = ensure(r.category, { hundiePath: r.category, inHundieChart: false, kind: r.kind });
     e.hundieRows += 1;
@@ -677,16 +830,22 @@ export function analyzeDrift({ qboRows, hundieRows, hundieCategories = [], accou
     const e = ensure(r.category, {});
     e.qboPath = e.qboPath ?? r.category;
     e.inQbo = true;
+    e.qboKind = e.qboKind ?? r.kind;
     if (!e.kind) e.kind = r.kind;
     e.qboRows += 1;
     e.qboAmount = money(e.qboAmount + r.amount);
   }
   const chart = [...chartMap.values()].map((e) => {
     const flags = [];
-    if (e.inHundieChart && !e.inQbo) flags.push(e.hundieRows > 0 ? "hundieOnly" : "unusedBoth");
+    const aliasOf = CATEGORY_ALIASES[normalizePath(e.path)];
+    const aliasTarget = aliasOf ? chartMap.get(aliasOf) : null;
+    if (e.inHundieChart && !e.inQbo) flags.push(aliasTarget?.inQbo ? "alias" : e.hundieRows > 0 ? "hundieOnly" : "unusedBoth");
     if (!e.inHundieChart && e.inQbo) flags.push("qboOnly");
     if (e.hundiePath && e.qboPath && e.hundiePath !== e.qboPath) flags.push("nameVariant");
     if (e.inHundieChart && e.hundieRows === 0 && e.qboRows === 0 && !flags.includes("unusedBoth")) flags.push("unusedBoth");
+    // Same name, different treatment: Hundie's chart calls it an expense while QBO keeps it on the
+    // balance sheet (or vice versa). Rows pair as agree by name; the chart is where it gets fixed.
+    if (e.inHundieChart && e.qboKind && e.kind !== e.qboKind && e.kind !== "review" && e.qboKind !== "review") flags.push("kindMismatch");
     return { ...e, flags };
   });
   chart.sort((a, b) => a.path.localeCompare(b.path));
@@ -701,17 +860,23 @@ export function analyzeDrift({ qboRows, hundieRows, hundieCategories = [], accou
     return m;
   };
 
-  const unreachableHundie = hundie.filter((r) => !reachableSlugs.has(r.accountSlug) && r.kind === "expense");
   const sumAbs = (rows) => money(rows.reduce((s, r) => s + Math.abs(Number(r.amount)), 0));
-  const hundieExpense = hundie.filter((r) => r.kind === "expense");
+  const unreachableClaims = claims.filter((r) => !reachableSlugs.has(r.accountSlug) && r.kind === "expense");
+  const claimsExpense = claims.filter((r) => r.kind === "expense");
+  const reachableClaimsExpense = claimsExpense.filter((r) => reachableSlugs.has(r.accountSlug));
   const qboExpense = qbo.filter((r) => r.kind === "expense");
-  const pairedExpense = pairViews.filter((p) => p.hundieKind === "expense");
+  const pairedExpense = claimPairViews.filter((p) => p.hundieKind === "expense");
+  const agreeExpense = pairedExpense.filter((p) => p.bucket === "agree");
+
+  const entityName = (slug) => accounts.find((a) => a.default_entity_slug === slug)?.default_entity_name ?? slug ?? "(no entity)";
 
   return {
     meta: {
       from,
       to,
       dateSlack,
+      contextRows: context.length,
+      contextUnpaired,
       accountMap: Object.entries(QBO_ACCOUNT_MAP).map(([section, slug]) => ({
         section,
         slug,
@@ -720,26 +885,32 @@ export function analyzeDrift({ qboRows, hundieRows, hundieCategories = [], accou
     },
     totals: {
       hundie: {
-        inScope: hundie.length,
-        inScopeAmount: sumAmt(hundie),
-        unreachableRows: unreachableHundie.length,
-        unreachableAmount: sumAmt(unreachableHundie),
-        byKind: byKind(hundie),
+        inScope: claims.length,
+        inScopeAmount: sumAmt(claims),
+        unreachableRows: unreachableClaims.length,
+        unreachableAmount: sumAmt(unreachableClaims),
+        byKind: byKind(claims),
       },
       qbo: { inScope: qbo.length, inScopeAmount: sumAmt(qbo), byKind: byKind(qbo) },
-      paired: pairedCount,
+      paired: pairedQboIds.size,
+      pairedClaims: pairedClaimIds.size,
       matchedAmount: matchedH,
-      // Expense-kind view for the headline tiles: signed sums across kinds net income against
-      // spend and mean nothing to a reader. Drift dollars are gross (absolute) so refunds count.
+      // Expense-kind, GBSL-claim view for the headline tiles: signed sums across kinds net income
+      // against spend and mean nothing to a reader. Drift dollars are gross (absolute) so refunds count.
       expense: {
-        hundieRows: hundieExpense.length,
-        hundieAmount: sumAmt(hundieExpense),
+        hundieRows: claimsExpense.length,
+        hundieAmount: sumAmt(claimsExpense),
+        reachableRows: reachableClaimsExpense.length,
         qboRows: qboExpense.length,
         qboAmount: sumAmt(qboExpense),
         pairedRows: pairedExpense.length,
         pairedAmount: sumAmt(pairedExpense),
+        agreeRows: agreeExpense.length,
+        coverage: reachableClaimsExpense.length ? pairedExpense.length / reachableClaimsExpense.length : 0,
+        agreeRate: pairedExpense.length ? agreeExpense.length / pairedExpense.length : 0,
         differAbs: sumAbs(buckets.differ.filter((p) => p.hundieKind === "expense")),
-        kindDifferAbs: sumAbs(buckets.kindDiffer),
+        kindDifferAbs: sumAbs(buckets.kindDiffer.filter((p) => p.hundieKind === "expense" || p.qboKind === "expense")),
+        notGbslAbs: sumAbs(buckets.notGbsl),
       },
       buckets: {
         agree: buckets.agree.length,
@@ -747,6 +918,7 @@ export function analyzeDrift({ qboRows, hundieRows, hundieCategories = [], accou
         kindDiffer: buckets.kindDiffer.length,
         qboAsks: buckets.qboAsks.length,
         hundieReview: buckets.hundieReview.length,
+        notGbsl: buckets.notGbsl.length,
         onlyHundie: onlyHundie.length,
         onlyQbo: onlyQbo.length,
       },
@@ -756,6 +928,7 @@ export function analyzeDrift({ qboRows, hundieRows, hundieCategories = [], accou
         kindDiffer: sumAmt(buckets.kindDiffer),
         qboAsks: sumAmt(buckets.qboAsks),
         hundieReview: sumAmt(buckets.hundieReview),
+        notGbsl: sumAmt(buckets.notGbsl),
         onlyHundie: sumAmt(onlyHundie),
         onlyHundieReachable: sumAmt(onlyHundie.filter((r) => r.reachable)),
         onlyQbo: sumAmt(onlyQbo),
@@ -768,11 +941,15 @@ export function analyzeDrift({ qboRows, hundieRows, hundieCategories = [], accou
         onlyQbo: onlyQbo.filter((r) => r.kind === "expense").length,
       },
       accountMismatchPairs: pairs.filter((c) => !c.sameAccount).length,
+      compositePairs: composite.length,
     },
     months,
     onlyHundieByAccount,
     patterns: groupPatterns(buckets.differ),
     kindPatterns: groupPatterns(buckets.kindDiffer),
+    notGbslPatterns: groupPatterns(buckets.notGbsl, {
+      leftLabel: (v) => `${entityName(v.entitySlug)} · ${v.hundieCategory ?? "(unclassified)"}`,
+    }),
     onlyHundiePatterns: groupOnly(onlyHundie.filter((r) => r.reachable)),
     onlyQboPatterns: groupOnly(onlyQbo),
     qboAsks: buckets.qboAsks,
@@ -782,6 +959,7 @@ export function analyzeDrift({ qboRows, hundieRows, hundieCategories = [], accou
       agree: buckets.agree,
       differ: buckets.differ,
       kindDiffer: buckets.kindDiffer,
+      notGbsl: buckets.notGbsl,
       onlyHundie,
       onlyQbo,
     },

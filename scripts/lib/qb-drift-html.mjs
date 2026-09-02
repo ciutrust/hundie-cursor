@@ -25,6 +25,8 @@ const FLAG_LABEL = {
   hundieOnly: "Hundie only",
   qboOnly: "QBO only",
   nameVariant: "Name variant",
+  alias: "Alias of a QBO name",
+  kindMismatch: "Treated differently",
 };
 
 export function escapeHtml(value) {
@@ -279,19 +281,16 @@ function renderTiles(r) {
   const t = r.totals;
   const b = t.buckets;
   const ba = t.bucketAmounts;
-  const drift = b.differ + b.kindDiffer;
-  const reachableRows = t.hundie.inScope - t.hundie.unreachableRows;
-  const coverage = reachableRows ? t.paired / reachableRows : 0;
-  const agreeRate = t.paired ? b.agree / t.paired : 0;
+  const drift = b.differ + b.kindDiffer + (b.notGbsl ?? 0);
   const re = t.bucketRowsExpense ?? { onlyHundieReachable: 0, onlyQbo: 0 };
-  const ex = t.expense ?? { hundieRows: 0, hundieAmount: 0, qboRows: 0, qboAmount: 0, pairedRows: 0, pairedAmount: 0, differAbs: 0, kindDifferAbs: 0 };
+  const ex = t.expense ?? { hundieRows: 0, hundieAmount: 0, reachableRows: 0, qboRows: 0, qboAmount: 0, pairedRows: 0, pairedAmount: 0, agreeRows: 0, coverage: 0, agreeRate: 0, differAbs: 0, kindDifferAbs: 0, notGbslAbs: 0 };
   return `
 <section aria-label="Verdict">
   <div class="tiles">
     <div class="tile"><div class="tile-label">Rows compared</div><div class="tile-value">${fmtInt(t.hundie.inScope)} <span class="faint">↔</span> ${fmtInt(t.qbo.inScope)}</div><div class="tile-sub">Expense rows: Hundie ${fmtInt(ex.hundieRows)} · ${escapeHtml(fmtMoney(ex.hundieAmount))}, QBO ${fmtInt(ex.qboRows)} · ${escapeHtml(fmtMoney(ex.qboAmount))}</div></div>
-    <div class="tile info"><div class="tile-label">Paired</div><div class="tile-value">${fmtInt(t.paired)}</div><div class="tile-sub">${fmtPct(coverage)} of the Hundie rows QBO can see · ${escapeHtml(fmtMoney(ex.pairedAmount))} of expense</div></div>
-    <div class="tile good"><div class="tile-label">Agree</div><div class="tile-value">${fmtPct(agreeRate)}</div><div class="tile-sub">${fmtInt(b.agree)} of ${fmtInt(t.paired)} paired rows</div></div>
-    <div class="tile warn"><div class="tile-label">Category drift</div><div class="tile-value">${fmtInt(drift)}</div><div class="tile-sub">${fmtInt(b.differ)} differ · ${fmtInt(b.kindDiffer)} treatment · ${escapeHtml(fmtMoney(ex.differAbs + ex.kindDifferAbs, { sign: false }))} in play</div></div>
+    <div class="tile info"><div class="tile-label">Paired</div><div class="tile-value">${fmtPct(ex.coverage)}</div><div class="tile-sub">${fmtInt(ex.pairedRows)} of ${fmtInt(ex.reachableRows)} expense rows QBO can see · ${escapeHtml(fmtMoney(ex.pairedAmount))}</div></div>
+    <div class="tile good"><div class="tile-label">Agree</div><div class="tile-value">${fmtPct(ex.agreeRate)}</div><div class="tile-sub">${fmtInt(ex.agreeRows)} of ${fmtInt(ex.pairedRows)} paired expense rows</div></div>
+    <div class="tile warn"><div class="tile-label">Drift</div><div class="tile-value">${fmtInt(drift)}</div><div class="tile-sub">${fmtInt(b.differ)} named differently · ${fmtInt(b.kindDiffer)} treated differently · ${fmtInt(b.notGbsl ?? 0)} not GBSL in Hundie · ${escapeHtml(fmtMoney(ex.differAbs + ex.kindDifferAbs + ex.notGbslAbs, { sign: false }))} in play</div></div>
     <div class="tile bad"><div class="tile-label">Invisible to QBO</div><div class="tile-value">${escapeHtml(fmtMoney(t.hundie.unreachableAmount, { sign: false }))}</div><div class="tile-sub">${fmtInt(t.hundie.unreachableRows)} GBSL rows on cards QBO does not have</div></div>
     <div class="tile bad"><div class="tile-label">Not booked yet</div><div class="tile-value">${escapeHtml(fmtMoney(ba.onlyHundieReachableExpense, { sign: false }))}</div><div class="tile-sub">${fmtInt(re.onlyHundieReachable)} expense rows on QBO accounts with no QBO entry</div></div>
     <div class="tile bad"><div class="tile-label">Only in QBO</div><div class="tile-value">${escapeHtml(fmtMoney(ba.onlyQboExpense, { sign: false }))}</div><div class="tile-sub">${fmtInt(re.onlyQbo)} expense rows Hundie is missing</div></div>
@@ -394,6 +393,15 @@ const spendLike = (p) => !["transfer", "funding", "income"].includes(p.kind);
 const sumPatterns = (list) => list.reduce((s, p) => s + p.amount, 0);
 const countPatterns = (list) => list.reduce((s, p) => s + p.rows, 0);
 
+function onlyLegend(list, tileAmount) {
+  const expense = list.filter((p) => p.kind === "expense");
+  const other = list.filter((p) => p.kind !== "expense");
+  const otherNote = other.length
+    ? `<span class="faint">plus ${rowsLabel(countPatterns(other))} of ${[...new Set(other.map((p) => p.kind))].join(" / ")} (${escapeHtml(fmtMoney(sumPatterns(other)))}) listed below</span>`
+    : "";
+  return `<div class="legend"><span>${rowsLabel(countPatterns(expense))} · ${escapeHtml(fmtMoney(tileAmount ?? sumPatterns(expense)))} of expense</span>${otherNote}</div>`;
+}
+
 function renderNotBookedYet(r) {
   const oh = r.onlyHundiePatterns.filter(spendLike);
   const skipped = r.onlyHundiePatterns.length - oh.length;
@@ -403,7 +411,7 @@ function renderNotBookedYet(r) {
     <h2>In Hundie, not booked in QuickBooks yet</h2>
     <p>Rows on accounts QuickBooks does have, with no QBO entry. Recent months are the accountant's backlog. Older months are worth a question: a recurring vendor here means the bank feed line was never added to the register.</p>
   </div>
-  <div class="legend"><span>${rowsLabel(countPatterns(oh))} · ${escapeHtml(fmtMoney(sumPatterns(oh)))}</span>${skipped ? `<span class="faint">${fmtInt(skipped)} transfer / funding / income lines left to Row by Row</span>` : ""}</div>
+  ${onlyLegend(oh, r.totals.bucketAmounts.onlyHundieReachableExpense)}${skipped ? `<div class="legend"><span class="faint">${fmtInt(skipped)} transfer / funding / income lines left to Row by Row</span></div>` : ""}
   ${renderOnlyTable(oh, { emptyText: "Everything Hundie has on QBO accounts is booked in QuickBooks.", accountHeader: "Hundie account" })}
 </section>`;
 }
@@ -415,9 +423,9 @@ function renderMissingFromHundie(r) {
 <section>
   <div class="section-head">
     <h2>In QuickBooks, missing from Hundie</h2>
-    <p>QBO entries with no Hundie row. A vendor that repeats every month here is an import gap in Hundie, not an accounting question: the accountant sees the bank line and Hundie never did. Card payments and transfers are left out on purpose; Hundie does not import the card side of those.</p>
+    <p>QBO entries with no Hundie row on any entity. A vendor that repeats every month here is an import gap in Hundie, not an accounting question: the accountant sees the bank line and Hundie never did. Rows Hundie filed to another entity are not here; they sit under ME != GCD. Card payments and transfers are left out on purpose; Hundie does not import the card side of those.</p>
   </div>
-  <div class="legend"><span>${rowsLabel(countPatterns(oq))} · ${escapeHtml(fmtMoney(sumPatterns(oq)))}</span>${skipped ? `<span class="faint">${fmtInt(skipped)} transfer / funding / income lines left to Row by Row</span>` : ""}</div>
+  ${onlyLegend(oq, r.totals.bucketAmounts.onlyQboExpense)}${skipped ? `<div class="legend"><span class="faint">${fmtInt(skipped)} transfer / funding / income lines left to Row by Row</span></div>` : ""}
   ${renderOnlyTable(oq, { emptyText: "Every QBO entry has a Hundie row.", accountHeader: "QBO account" })}
 </section>`;
 }
@@ -435,10 +443,10 @@ function renderTabBar(r) {
   const b = r.totals.buckets;
   const counts = {
     onlyQbo: countPatterns(r.onlyQboPatterns.filter(spendLike)),
-    disagree: b.differ + b.kindDiffer,
+    disagree: b.differ + b.kindDiffer + (b.notGbsl ?? 0),
     asks: b.qboAsks + b.hundieReview,
     chart: r.chart.filter((c) => c.flags.length).length,
-    rows: b.differ + b.kindDiffer + b.onlyHundie + b.onlyQbo,
+    rows: b.differ + b.kindDiffer + (b.notGbsl ?? 0) + b.onlyHundie + b.onlyQbo,
   };
   const buttons = TABS.map(
     ([key, label], i) =>
@@ -462,7 +470,7 @@ function renderPatternList(patterns, { emptyText }) {
         .join("");
       return `<details class="pattern">
   <summary>
-    <span class="pat-pair"><span class="pat-from">${escapeHtml(p.hundieCategory ?? "(unclassified)")}</span>${p.hundieKind !== p.qboKind ? kindChip(p.hundieKind) : ""}<span class="pat-arrow">→</span><span class="pat-to">${escapeHtml(p.qboCategory ?? "(none)")}</span>${p.hundieKind !== p.qboKind ? kindChip(p.qboKind) : ""}</span>
+    <span class="pat-pair"><span class="pat-from">${escapeHtml(p.hundieCategory ?? "(unclassified)")}</span>${p.hundieKind !== p.qboKind ? kindChip(p.hundieKind) : ""}<span class="pat-arrow">→</span><span class="pat-to">${escapeHtml(p.qboCategory ?? "(none)")}</span>${p.hundieKind !== p.qboKind ? kindChip(p.qboKind) : ""}${p.refinement ? chip("sub-account of the other", "neutral") : ""}</span>
     <span class="pat-meta">${rowsLabel(p.rows)}</span>
     <span class="pat-meta num"><b>${escapeHtml(fmtMoney(p.amount))}</b></span>
   </summary>
@@ -492,6 +500,14 @@ function renderPatterns(r) {
   </div>
   <div class="legend"><span>${rowsLabel(r.totals.buckets.kindDiffer)} · ${escapeHtml(fmtMoney(ex.kindDifferAbs, { sign: false }))} in play</span></div>
   <div>${renderPatternList(r.kindPatterns, { emptyText: "No treatment mismatches in this period." })}</div>
+</section>
+<section>
+  <div class="section-head">
+    <h2>Booked to GBSL in QuickBooks, filed elsewhere in Hundie</h2>
+    <p>Rows on the GBSL bank and cards that you filed to another entity (Personal, Keller, a rental) or have not assigned yet, which the accountant expensed to GBSL anyway. Each one is either a personal charge sitting in the business P&amp;L or a GBSL charge you filed wrong. Your side on the left, with the entity.</p>
+  </div>
+  <div class="legend"><span>${rowsLabel(r.totals.buckets.notGbsl ?? 0)} · ${escapeHtml(fmtMoney(ex.notGbslAbs, { sign: false }))} in play</span></div>
+  <div>${renderPatternList(r.notGbslPatterns ?? [], { emptyText: "Everything QBO booked to GBSL, Hundie also calls GBSL." })}</div>
 </section>`;
 }
 
@@ -537,7 +553,12 @@ function renderQuestions(r) {
 function renderChart(r) {
   const rows = r.chart
     .map((c) => {
-      const flags = c.flags.map((f) => chip(FLAG_LABEL[f] ?? f, f === "unusedBoth" ? "bad" : f === "qboOnly" ? "warn" : f === "hundieOnly" ? "info" : "neutral")).join(" ");
+      const flags = c.flags
+        .map((f) => {
+          if (f === "kindMismatch") return chip(`Hundie ${KIND_LABEL[c.kind] ?? c.kind} · QBO ${KIND_LABEL[c.qboKind] ?? c.qboKind}`, "warn");
+          return chip(FLAG_LABEL[f] ?? f, f === "unusedBoth" ? "bad" : f === "qboOnly" ? "warn" : f === "hundieOnly" ? "info" : "neutral");
+        })
+        .join(" ");
       const label = c.hundiePath && c.qboPath && c.hundiePath !== c.qboPath ? `${escapeHtml(c.hundiePath)} <span class="faint">/ QBO: ${escapeHtml(c.qboPath)}</span>` : escapeHtml(c.path);
       const inactive = c.isActive === false ? ` ${chip("inactive", "neutral")}` : "";
       return `<tr data-flags="${escapeHtml(c.flags.join(" "))}">
@@ -554,6 +575,7 @@ function renderChart(r) {
     hundieOnly: r.chart.filter((c) => c.flags.includes("hundieOnly")).length,
     qboOnly: r.chart.filter((c) => c.flags.includes("qboOnly")).length,
     nameVariant: r.chart.filter((c) => c.flags.includes("nameVariant")).length,
+    kindMismatch: r.chart.filter((c) => c.flags.includes("kindMismatch")).length,
   };
   return `
 <section>
@@ -567,6 +589,7 @@ function renderChart(r) {
     <button type="button" class="filter" data-chart-filter="hundieOnly" aria-pressed="false">Hundie only (${fmtInt(counts.hundieOnly)})</button>
     <button type="button" class="filter" data-chart-filter="qboOnly" aria-pressed="false">QBO only (${fmtInt(counts.qboOnly)})</button>
     <button type="button" class="filter" data-chart-filter="nameVariant" aria-pressed="false">Name variants (${fmtInt(counts.nameVariant)})</button>
+    <button type="button" class="filter" data-chart-filter="kindMismatch" aria-pressed="false">Treated differently (${fmtInt(counts.kindMismatch)})</button>
   </div>
   <div class="scroll tall"><table id="chart-table">
     <thead><tr><th>Category</th><th>Kind</th><th class="num">Hundie</th><th class="num">QBO</th><th>Flags</th></tr></thead>
@@ -582,6 +605,7 @@ function renderDrill(r) {
     ["onlyHundie", `Only in Hundie (${fmtInt(b.onlyHundie)})`],
     ["onlyQbo", `Only in QBO (${fmtInt(b.onlyQbo)})`],
     ["kindDiffer", `Kind differs (${fmtInt(b.kindDiffer)})`],
+    ["notGbsl", `Not GBSL (${fmtInt(b.notGbsl ?? 0)})`],
     ["agree", `Agree (${fmtInt(b.agree)})`],
   ]
     .map(([key, label], i) => `<button type="button" class="tab" role="tab" data-tab="${key}" aria-selected="${i === 0 ? "true" : "false"}">${escapeHtml(label)}</button>`)
@@ -614,7 +638,7 @@ function renderFoot(r) {
   const map = (r.meta.accountMap ?? []).map((a) => `${a.section} → ${a.name}`).join(" · ");
   return `
 <footer class="foot">
-  <div>Reconciliation: ${fmtInt(r.totals.paired)} paired + ${fmtInt(r.totals.buckets.onlyHundie)} only-Hundie = ${fmtInt(r.totals.hundie.inScope)} Hundie rows; ${fmtInt(r.totals.paired)} paired + ${fmtInt(r.totals.buckets.onlyQbo)} only-QBO = ${fmtInt(r.totals.qbo.inScope)} QBO rows. Matched dollars agree on both sides (${escapeHtml(fmtMoney(r.totals.matchedAmount))}). ${fmtInt(r.totals.accountMismatchPairs)} pairs crossed accounts.</div>
+  <div>Reconciliation: ${fmtInt(r.totals.pairedClaims ?? r.totals.paired)} paired + ${fmtInt(r.totals.buckets.onlyHundie)} only-Hundie = ${fmtInt(r.totals.hundie.inScope)} Hundie GBSL rows; ${fmtInt(r.totals.paired)} paired + ${fmtInt(r.totals.buckets.onlyQbo)} only-QBO = ${fmtInt(r.totals.qbo.inScope)} QBO rows. Matched dollars agree on both sides (${escapeHtml(fmtMoney(r.totals.matchedAmount))}). ${fmtInt(r.totals.accountMismatchPairs)} pairs crossed accounts; ${fmtInt(r.totals.compositePairs ?? 0)} pairs matched a split on one side to a whole on the other. ${fmtInt(r.meta.contextRows ?? 0)} Hundie rows filed to other entities on QBO accounts were offered for pairing (${fmtInt(r.meta.contextUnpaired ?? 0)} unpaired, not counted).</div>
   <div>How QBO rows were read: only the bank and card sections in the account map; a movement between two of those accounts is kept once, on the bank side, as a transfer (${fmtInt(d.ownTransferMirror?.rows ?? 0)} mirror copies dropped); a blank Split is a multi-line entry and its lines were recovered from the category sections (${fmtInt(d.unresolvedSplits ?? 0)} could not be)${other ? `; other QBO types skipped (${escapeHtml(other)})` : ""}. Transfers pair with Hundie's credit-card payments and count as agree. Income and funding rows are paired and counted but not scored as drift. ${fmtInt(r.meta.hundieSplitLegs ?? 0)} Hundie split legs included at leg amount.</div>
   <div>Account map: ${escapeHtml(map)}.</div>
   <div>Read-only: nothing here writes to Hundie or QuickBooks. Regenerate with <code>npm run report:qb-drift -- --file &lt;export.csv&gt;</code>.</div>
@@ -679,7 +703,7 @@ function clientScript() {
     if (text != null) e.textContent = text;
     return e;
   }
-  function isPair(tab) { return tab === "differ" || tab === "kindDiffer" || tab === "agree"; }
+  function isPair(tab) { return tab === "differ" || tab === "kindDiffer" || tab === "agree" || tab === "notGbsl"; }
   function kindOf(row, tab) { return isPair(tab) ? row.hundieKind : row.kind; }
 
   function current() {
@@ -705,9 +729,9 @@ function clientScript() {
         { h: "Vendor", f: function (r) { return r.vendor; } },
         { h: "Description", f: function (r) { return r.description; }, c: "desc" },
         { h: "Account", f: function (r) { return r.accountName + (r.accountMismatch ? " ⇄ " + r.qboSection : ""); }, c: "nowrap" },
-        { h: "Hundie", f: function (r) { return r.hundieCategory || "(unclassified)"; } },
+        { h: "Hundie", f: function (r) { return (r.entitySlug && r.entitySlug !== "gbsl" ? r.entitySlug + " · " : "") + (r.hundieCategory || "(unclassified)"); } },
         { h: "QBO", f: function (r) { return r.qboCategory || ""; } },
-        { h: "Confidence", f: function (r) { return r.confidence + (r.isSplitLeg ? " · split leg" : ""); }, c: "nowrap small" }
+        { h: "Confidence", f: function (r) { return r.confidence + (r.isSplitLeg ? " · split leg" : "") + (r.whole ? (r.whole.side === "hundieSplit" ? " · QBO booked the whole " + money(r.whole.amount) : " · QBO split the " + money(r.whole.amount)) : ""); }, c: "nowrap small" }
       ];
     }
     return [
@@ -898,10 +922,10 @@ export function renderDriftParts(report) {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Source+Sans+3:wght@400;600&display=swap">
 <style>${css()}</style>`;
-  // Escape "</" so a vendor string can never close the data script; escape the two Unicode
-  // line separators JSON allows but an inline <script> does not.
+  // Escape every "<" so no vendor string can open or close a tag inside the data script; escape the
+  // two Unicode line separators JSON allows but an inline <script> does not.
   const json = JSON.stringify(report)
-    .replace(/<\//g, "<\\/")
+    .replace(/</g, "\\u003c")
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
   const body = `<div class="page">
