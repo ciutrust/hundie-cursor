@@ -68,6 +68,7 @@ const LIABILITY_PATHS = new Set<string>([
   "Mortgage principal payment", // acaa-austin / pflugerville rentals
   "Mortgage principal — primary home", // personal primary residence (em-dash U+2014)
   "Ford Motor Credit - F150:Principal", // GBSL vehicle loan (QB subaccount of the combined loan)
+  "CNB Loan:Principal", // GBSL business loan (CNB) - principal paydown, interest stays expense
 ]);
 
 /**

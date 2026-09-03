@@ -55,6 +55,7 @@ const LIABILITY_PATHS = new Set([
   "Mortgage principal payment",
   "Mortgage principal — primary home",
   "Ford Motor Credit - F150:Principal",
+  "CNB Loan:Principal", // GBSL business loan (CNB) - principal paydown, interest stays expense
 ]);
 
 /** Real cash out that is NOT tax-deductible (IRC §162(f) fines & penalties). TAX-18. */

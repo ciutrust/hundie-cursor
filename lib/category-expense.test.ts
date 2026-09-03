@@ -56,6 +56,7 @@ describe("category-expense", () => {
       "Mortgage principal payment",
       "Mortgage principal — primary home",
       "Ford Motor Credit - F150:Principal",
+      "CNB Loan:Principal",
       // non_deductible
       "Tax Penalty",
     ];
