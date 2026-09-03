@@ -5,7 +5,7 @@ import type { AggregatorTransaction } from "@/lib/aggregator";
  * parser enforces so the two import paths cannot diverge. Dropped in both paths:
  *   - card payments (name `/payment|thank you|autopay|online pmt|mobile pmt/i`),
  *   - $0 auth-hold noise,
- *   - loan/card payments by Plaid category (LOAN_PAYMENTS).
+ *   - loan/card payments by Plaid category (LOAN_PAYMENTS) - on CARD accounts only.
  *
  * Income capture (Phase 3): checking/savings DEPOSITS (negative = money-in) are now KEPT so income can
  * be captured and classified (kind=income). They land uncategorized; the operator classifies them.
@@ -29,13 +29,21 @@ export function classifyPlaidDrop(
 ): PlaidDropReason | null {
   if (t.pending) return "pending"; // posted-only
   if (t.amount === 0) return "zero"; // $0 auth-hold noise
-  if (t.rawCategory && DROP_PFC.has(t.rawCategory.toUpperCase())) return "pfc"; // CC/loan payments
+
+  const isCard = accountType === "credit_card" || accountType === "credit";
+
+  // LOAN_PAYMENTS is Plaid's coarse bucket (we only get `primary`, never `detailed`), and it covers
+  // both a card's own payment credit AND a real loan draft out of checking. Drop it on CARD accounts
+  // only: the card-side payment credit is the twin the ledger deliberately never imports. On a
+  // depository account a LOAN_PAYMENTS row is money actually leaving - a mortgage, a business loan,
+  // or a card payment that then categorizes as a transfer - and dropping it silently erased the
+  // GBSL "CNB BANK TRANSFER ... LOAN PAYMENT" draft ($5,810.04/mo) from the books for months.
+  if (isCard && t.rawCategory && DROP_PFC.has(t.rawCategory.toUpperCase())) return "pfc";
 
   // Card payments (paying off a credit card) are transfers, not expenses — drop by name. On
   // depository (checking/savings) accounts the SAME name pattern is legitimate income/expense
   // activity (e.g. "ZELLE PAYMENT FROM <tenant>" rent income, "AUTO PAY" mortgage debit) that the
   // app WANTS to keep for income capture — so this drop must never fire outside card accounts.
-  const isCard = accountType === "credit_card" || accountType === "credit";
   if (isCard && PAYMENT_NAME_RE.test(t.description)) return "payment";
 
   // Guard: a credit-card transaction Plaid tags INCOME is almost always a mis-categorized, often

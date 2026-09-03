@@ -26,6 +26,26 @@ describe("shouldImportPlaidTxn — mirrors the CSV parsers' non-expense drop rul
     ).toBe(false);
   });
 
+  test("KEEPS a LOAN_PAYMENTS row on a checking account - a real loan draft leaving the bank", () => {
+    // The GBSL "CNB BANK TRANSFER ... LOAN PAYMENT" ($5,810.04/mo) was silently dropped for months
+    // because LOAN_PAYMENTS was treated as a card-payment marker on every account type.
+    expect(
+      shouldImportPlaidTxn(
+        { ...base, amount: 5810.04, rawCategory: "LOAN_PAYMENTS", description: "CNB BANK TRANSFER 081026 LOAN PAYMENT" },
+        "checking",
+      ),
+    ).toBe(true);
+  });
+
+  test("still drops a LOAN_PAYMENTS credit on a card account (the payment twin the ledger never imports)", () => {
+    expect(
+      shouldImportPlaidTxn(
+        { ...base, amount: -5810.04, rawCategory: "LOAN_PAYMENTS", description: "PAYMENT RECEIVED" },
+        "credit_card",
+      ),
+    ).toBe(false);
+  });
+
   test("drops a payment by name (autopay / thank you)", () => {
     expect(
       shouldImportPlaidTxn(
@@ -143,13 +163,13 @@ describe("summarizePlaidDrops — pure drop-count tally (C12 logging)", () => {
       { ...base, amount: -1500, rawCategory: null, description: "ZELLE PAYMENT FROM TENANT" }, // kept (checking)
       { ...base, amount: 2000, rawCategory: null, description: "AUTO PAY" }, // kept (checking)
       { ...base, amount: 0, rawCategory: null, description: "AUTH HOLD" }, // dropped: zero
-      { ...base, amount: -500, rawCategory: "LOAN_PAYMENTS", description: "ACH ELECTRONIC" }, // dropped: pfc
+      { ...base, amount: 5810.04, rawCategory: "LOAN_PAYMENTS", description: "CNB BANK TRANSFER LOAN PAYMENT" }, // kept (checking: real loan draft)
       { ...base, pending: true, amount: 10, rawCategory: null, description: "PENDING CHARGE" }, // dropped: pending
     ];
     const summary = summarizePlaidDrops(txns, "checking");
-    expect(summary.kept).toBe(2);
-    expect(summary.dropped).toBe(3);
-    expect(summary.reasons).toEqual({ pending: 1, zero: 1, pfc: 1, payment: 0, card_income: 0 });
+    expect(summary.kept).toBe(3);
+    expect(summary.dropped).toBe(2);
+    expect(summary.reasons).toEqual({ pending: 1, zero: 1, pfc: 0, payment: 0, card_income: 0 });
   });
 
   test("tallies a card-account payment drop and collects sample descriptions", () => {
