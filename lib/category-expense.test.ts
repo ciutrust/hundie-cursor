@@ -28,6 +28,7 @@ describe("category-expense", () => {
       "Transfer / Zelle (personal, not P&L)",
       "Investment account funding (personal, not P&L)",
       "Refund / credit",
+      "Chargeback",
       "Security deposit movement",
       "→ GBSL business expense",
       "→ Keller business expense",
@@ -69,6 +70,7 @@ describe("category-kind", () => {
     expect(categoryKind("Credit card payment")).toBe("transfer");
     expect(categoryKind("→ Keller business expense")).toBe("transfer");
     expect(categoryKind("Refund / credit")).toBe("transfer");
+    expect(categoryKind("Chargeback")).toBe("transfer");
   });
 
   it("labels intercompany as funding", () => {

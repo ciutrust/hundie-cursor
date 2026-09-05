@@ -18,6 +18,7 @@ const TRANSFER_PATHS = new Set([
   "Transfer / Zelle (personal, not P&L)",
   "Investment account funding (personal, not P&L)", // cash moved INTO a personal brokerage/investing account (e.g. Alinea) — an asset swap, not spend.
   "Refund / credit",
+  "Chargeback",
   "Security deposit movement",
   "→ GBSL business expense",
   "→ Keller business expense",

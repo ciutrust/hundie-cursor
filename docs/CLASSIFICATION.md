@@ -15,7 +15,8 @@ Human-in-the-loop always — suggestions help; Alex confirms every category.
 - **QB-aligned expenses:** Advertising & Marketing, Franchise Fees, Software, Contract Labor, Meals & Entertainment, etc. (see `docs/PROJECT_CONTEXT.md`).
 - **Hundie-only (non-expense):**
   - `Credit card payment` — checking → card/LOC payments; **not P&L**
-  - `Refund / credit` — customer refunds, reversals; **not P&L**
+  - `Refund / credit` — voluntary refunds / merchant credits; **not P&L**
+  - `Chargeback` — member/customer card disputes (issuer pullback); **not P&L**
 - **CPA review:** `Ask My Accountant` — imported from QB; still needs Alex's call (treated as review backlog, not final).
 
 ### Personal (`personal`)
@@ -73,6 +74,7 @@ Some categories move money or stage reclassification — they must **not** infla
 - `Credit card payment`
 - `Transfer / Zelle (personal)`
 - `Refund / credit`
+- `Chargeback`
 - `Intercompany — pending`
 - `Mortgage principal payment`
 - `Security deposit movement`
@@ -90,6 +92,7 @@ Some categories move money or stage reclassification — they must **not** infla
 Card **refunds/credits** now import as **negative-amount** rows. (Before this change all five issuer parsers dropped them at parse time, so `Refund / credit` was unreachable from card data.) Practically:
 
 - Classify a refund as **`Refund / credit`**. The negative amount keeps it out of the `amount > 0` expense totals automatically; it still shows in the category drill-down and the CSV export (`counts_as_expense = no`).
+- Classify a **member/customer card dispute** (issuer pullback) as **`Chargeback`** on GBSL — not `Refund / credit` (voluntary refunds / merchant credits).
 - Card **payments** (paying off the card) and **checking deposits / income** are still dropped at import — they are not spend.
 - Totals stay **gross**: a refund is a visible row, not auto-netted against the original charge. Net spend = charges − refunds; the netting and tax treatment happen in **QBO**, not here (Hundie is expense control, not the books).
 - **Backfill:** to pull in refunds from CSVs imported before this change, **re-import the card CSVs** — dedupe is safe, so existing charges are not duplicated (`npm run import:cards:apply`; bare `import:cards` is dry-run). See [RUN.md](../RUN.md) for `cleanup:ledger-dupes` if legacy double-imports exist.
@@ -118,6 +121,7 @@ Transactions need review when:
 | `ONLINE TRANSFER … TO SIGNIFY/VISA …` | GBSL | **Credit card payment** (not Labor) |
 | `ONLINE TRANSFER … TO BUSINESSLINE …` | GBSL | **Credit card payment** (LOC treated as card) |
 | `ZELLE … REFUND` | entity of original charge | **Refund / credit** |
+| Member/customer card dispute (issuer pullback) | GBSL | **Chargeback** (not Refund / credit) |
 | `IN *GRACIE BARRA …` ~$125 | GBSL | **Software** (CRM) |
 | `IN *GRACIE BARRA …` ~$850–900 | GBSL | **Franchise Fees** |
 | `PAST DUE FEE` on rental CC | acaa-austin / pflugerville | **Bank fees** |
@@ -163,6 +167,7 @@ Transactions need review when:
 | `20260626120000_seed_personal_categories.sql` | Personal chart (28 categories) |
 | `20260627120000_rental_categories_and_account_settings.sql` | Austin ACAA + Pflugerville Schedule E chart |
 | `20260629120000_add_transfer_and_rental_categories.sql` | GBSL transfer categories, Personal CC interest, rental Bank fees / CC interest / meals |
+| `20260905170000_gbsl_chargeback_category.sql` | GBSL `Chargeback` (transfer — member card disputes) |
 | `20260701120000_mortgage_heloc_payment_categories.sql` | `Mortgage payment` + `HELOC payment` (counted) on Pflugerville, Austin ACAA, Personal |
 
 ---
