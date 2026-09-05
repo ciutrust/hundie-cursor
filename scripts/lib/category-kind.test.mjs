@@ -9,7 +9,10 @@ describe("scripts/lib/category-kind.mjs", () => {
     expect(categoryKind("Credit card payment")).toBe("transfer");
     expect(categoryKind("→ Keller business expense")).toBe("transfer");
     expect(categoryKind("Refund / credit")).toBe("transfer");
-    expect(categoryKind("Chargeback")).toBe("transfer");
+  });
+
+  it("labels Chargeback as expense (member dispute loss)", () => {
+    expect(categoryKind("Chargeback")).toBe("expense");
   });
 
   it("labels intercompany as funding", () => {

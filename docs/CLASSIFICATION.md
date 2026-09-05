@@ -16,7 +16,8 @@ Human-in-the-loop always — suggestions help; Alex confirms every category.
 - **Hundie-only (non-expense):**
   - `Credit card payment` — checking → card/LOC payments; **not P&L**
   - `Refund / credit` — voluntary refunds / merchant credits; **not P&L**
-  - `Chargeback` — member/customer card disputes (issuer pullback); **not P&L**
+- **Hundie-only (expense):**
+  - `Chargeback` — member/customer card disputes (issuer pullback); **counts as expense**
 - **CPA review:** `Ask My Accountant` — imported from QB; still needs Alex's call (treated as review backlog, not final).
 
 ### Personal (`personal`)
@@ -74,7 +75,6 @@ Some categories move money or stage reclassification — they must **not** infla
 - `Credit card payment`
 - `Transfer / Zelle (personal)`
 - `Refund / credit`
-- `Chargeback`
 - `Intercompany — pending`
 - `Mortgage principal payment`
 - `Security deposit movement`
@@ -167,7 +167,8 @@ Transactions need review when:
 | `20260626120000_seed_personal_categories.sql` | Personal chart (28 categories) |
 | `20260627120000_rental_categories_and_account_settings.sql` | Austin ACAA + Pflugerville Schedule E chart |
 | `20260629120000_add_transfer_and_rental_categories.sql` | GBSL transfer categories, Personal CC interest, rental Bank fees / CC interest / meals |
-| `20260905170000_gbsl_chargeback_category.sql` | GBSL `Chargeback` (transfer — member card disputes) |
+| `20260905170000_gbsl_chargeback_category.sql` | GBSL `Chargeback` (expense — member card disputes) |
+| `20260905180000_gbsl_chargeback_kind_expense.sql` | Ensure GBSL `Chargeback` kind is expense (fix if seeded as transfer) |
 | `20260701120000_mortgage_heloc_payment_categories.sql` | `Mortgage payment` + `HELOC payment` (counted) on Pflugerville, Austin ACAA, Personal |
 
 ---
