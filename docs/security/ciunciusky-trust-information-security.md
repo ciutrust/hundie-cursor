@@ -15,6 +15,7 @@ We store:
 - Transaction records from Plaid: date, amount, description, and merchant.
 - Plaid access tokens, which let the application pull new transactions.
 - Account and category settings the owner configures.
+- Encrypted wallet secrets for cards and bank products shown on Settings → Accounts: card number (PAN), CVV, routing number, and bank account number, plus optional notes. Last four digits, expiry, and display name are stored in plaintext so the card fronts can render without decrypting. These values are encrypted with AES-256-GCM using a server-only key (`WALLET_VAULT_ENC_KEY`) distinct from the Plaid token key. They are decrypted only after Google sign-in, when the owner or bookkeeping partner flips a card and clicks to reveal. They are never included in the initial page payload.
 
 We do not store bank login credentials. Those stay with Plaid. The application only ever holds a Plaid access token, never a username or password for a financial institution.
 
@@ -26,7 +27,7 @@ Signing in is required to use the application, and only the owner and the bookke
 
 Administrative access to the systems that hold financial data (the Supabase project, the Vercel project, and the GitHub repository) is limited to the owner. Each of those accounts requires multi-factor authentication.
 
-Inside the database, every table that holds financial data is protected by row-level security and is readable only by an authenticated session. The Plaid tables that hold the connection tokens and account mappings have no read access for the public application key at all. They can be reached only by a server-side service key.
+Inside the database, every table that holds financial data is protected by row-level security and is readable only by an authenticated session. The Plaid tables that hold the connection tokens and account mappings, and the wallet vault tables that hold encrypted card and bank numbers, have no read access for the public application key at all. They can be reached only by a server-side service key.
 
 That service key bypasses row-level security, so it is treated as a high-value secret. It is stored only in the server environment, is never sent to the browser, and is used only inside server-side routes that first confirm the user is signed in.
 
@@ -34,11 +35,11 @@ That service key bypasses row-level security, so it is treated as a high-value s
 
 In transit: all traffic uses HTTPS with TLS 1.2 or higher. This is enforced by Vercel and Supabase and cannot be downgraded by the application.
 
-At rest: the Supabase database is encrypted with AES-256. On top of that, each Plaid access token is encrypted by the application with AES-256-GCM before it is written to the database, using a key held only in the server environment. A token read straight from the database is ciphertext and is useless without that key.
+At rest: the Supabase database is encrypted with AES-256. On top of that, each Plaid access token and each wallet vault payload (PAN, CVV, routing, account number) is encrypted by the application with AES-256-GCM before it is written to the database, using keys held only in the server environment. A token or card number read straight from the database is ciphertext and is useless without the matching key.
 
 ## 4. Secrets
 
-All keys and tokens (the database service key, the Plaid client secret, and the token-encryption key) live in environment variables on Vercel and Supabase. They are not written into source code, and environment files are kept out of version control. The token-encryption key is also recorded in a password manager so it cannot be lost. If it ever changed, stored tokens would stop decrypting and the affected banks would be re-linked.
+All keys and tokens (the database service key, the Plaid client secret, the token-encryption key, and the wallet-vault key) live in environment variables on Vercel and Supabase. They are not written into source code, and environment files are kept out of version control. The token-encryption key and the wallet-vault key are also recorded in a password manager so they cannot be lost. If the Plaid key ever changed, stored tokens would stop decrypting and the affected banks would be re-linked. If the wallet-vault key changed, stored card and bank numbers would stop decrypting and would need to be re-entered.
 
 ## 5. Vulnerability and patch management
 

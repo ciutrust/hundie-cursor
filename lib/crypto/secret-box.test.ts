@@ -51,4 +51,16 @@ describe("secret-box AES-256-GCM", () => {
     expect(() => encryptSecret("x")).toThrow();
     process.env.PLAID_TOKEN_ENC_KEY = saved;
   });
+
+  test("wallet vault key is independent of the Plaid key", () => {
+    const savedPlaid = process.env.PLAID_TOKEN_ENC_KEY;
+    const savedWallet = process.env.WALLET_VAULT_ENC_KEY;
+    process.env.PLAID_TOKEN_ENC_KEY = randomBytes(32).toString("base64");
+    process.env.WALLET_VAULT_ENC_KEY = randomBytes(32).toString("base64");
+    const cipher = encryptSecret("card-secret", "WALLET_VAULT_ENC_KEY");
+    expect(decryptSecret(cipher, "WALLET_VAULT_ENC_KEY")).toBe("card-secret");
+    expect(() => decryptSecret(cipher)).toThrow();
+    process.env.PLAID_TOKEN_ENC_KEY = savedPlaid;
+    process.env.WALLET_VAULT_ENC_KEY = savedWallet;
+  });
 });

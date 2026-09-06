@@ -11,6 +11,7 @@ export type AccountWithEntity = {
   display_name: string;
   slug: string;
   account_type: string;
+  issuer_parser: string;
   mixed_use: boolean;
   date_rules: AccountDateRule[];
   default_entity: { id: string; name: string; slug: string } | null;
@@ -26,6 +27,7 @@ export async function getAccountsWithEntities(): Promise<AccountWithEntity[]> {
       display_name,
       slug,
       account_type,
+      issuer_parser,
       mixed_use,
       date_rules,
       default_entity:entities!accounts_default_entity_id_fkey(id, name, slug)
@@ -41,6 +43,7 @@ export async function getAccountsWithEntities(): Promise<AccountWithEntity[]> {
     display_name: row.display_name,
     slug: row.slug,
     account_type: row.account_type,
+    issuer_parser: row.issuer_parser,
     mixed_use: row.mixed_use,
     date_rules: Array.isArray(row.date_rules) ? (row.date_rules as AccountDateRule[]) : [],
     default_entity: row.default_entity,

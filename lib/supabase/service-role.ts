@@ -2,8 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 
 /**
  * Service-role Supabase client for SERVER-ONLY privileged work:
- *   - reading/writing the Plaid tables (bank_connections, plaid_account_links), which have
- *     no anon/authenticated RLS policies, and
+ *   - reading/writing the Plaid tables (bank_connections, plaid_account_links) and wallet vault
+ *     tables (wallet_items, wallet_secrets), which have no anon/authenticated RLS policies, and
  *   - writing ledger rows from the Plaid sync route (there is no authenticated INSERT policy
  *     on transactions/classifications — creation has always been service-role only).
  *
