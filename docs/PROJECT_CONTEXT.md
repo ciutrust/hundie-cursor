@@ -1,6 +1,7 @@
 # Hundie — Project Context & Handoff
 
-> Dump of planning conversation (June 2026). Give this file to the agent when starting work in this repo.
+> Dump of planning conversation (June 2026). Useful for product/entity/QB history.  
+> **For agents starting a coding session, start with [AGENTS.md](../AGENTS.md)** (codebase map + doc index), then [CLASSIFICATION.md](./CLASSIFICATION.md) when touching categories.
 
 ---
 

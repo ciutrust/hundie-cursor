@@ -102,11 +102,12 @@ See [docs/CHANGELOG.md](docs/CHANGELOG.md) — Keller cleanup (130 rows, Jun 202
 
 | Doc | Purpose |
 |-----|---------|
+| [AGENTS.md](AGENTS.md) | **Start here** — codebase map, invariants, doc index |
 | [CLASSIFICATION.md](docs/CLASSIFICATION.md) | Categories, transfers, suggestion behavior, operator patterns |
 | [PHASE3_PLAN.md](docs/PHASE3_PLAN.md) | Phase 3 scope, amount-aware rules (shipped) |
 | [Backlog.md](docs/Backlog.md) | Prioritized work items |
 | [SUPABASE.md](docs/SUPABASE.md) | RLS security, migrations, verify curl |
-| [PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md) | Architecture, QB import rules |
+| [PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md) | Product/entity context, QB import history |
 
 ## What's next
 

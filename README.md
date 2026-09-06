@@ -35,6 +35,7 @@ See [RUN.md](RUN.md) for sign-in and test plan.
 
 ## Docs
 
+- [**AGENTS.md**](AGENTS.md) — codebase guide for AI agents (start here in new sessions)
 - [Run locally](RUN.md)
 - [Phase 2 plan](docs/PHASE2_PLAN.md)
 - [Project context & handoff](docs/PROJECT_CONTEXT.md)
@@ -43,6 +44,7 @@ See [RUN.md](RUN.md) for sign-in and test plan.
 - [Changelog](docs/CHANGELOG.md)
 - [Entity registry](docs/entities.md)
 - [Supabase setup](docs/SUPABASE.md)
+- [Classification guide](docs/CLASSIFICATION.md)
 
 ## MVP scope
 
