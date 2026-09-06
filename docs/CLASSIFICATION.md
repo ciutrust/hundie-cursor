@@ -133,7 +133,7 @@ Transactions need review when:
 | `INTEREST CHARGE:PURCHASES` on rental CC | acaa-austin / pflugerville | **Interest expense (credit card)** |
 | Personal CC interest | personal | **Credit card interest (non-deductible)** |
 
-**Notes field:** Use for context (tenant name, refund reason, CPA questions) — saved on classification, included in CSV export.
+**Notes field:** Use for context (tenant name, refund reason, CPA questions) — saved on classification, included in CSV export. For Amazon card charges, use the **Amazon desk** (`/amazon`): upload a Your Orders export, match shipment → charge, confirm (or split); notes get item summary + order URL automatically. See [AMAZON-DESK.md](./AMAZON-DESK.md).
 
 ---
 
@@ -175,12 +175,14 @@ Transactions need review when:
 | `20260905170000_gbsl_chargeback_category.sql` | GBSL `Chargeback` (expense — member card disputes) |
 | `20260905180000_gbsl_chargeback_kind_expense.sql` | Ensure GBSL `Chargeback` kind is expense (fix if seeded as transfer) |
 | `20260906000000_fraudulent_charge_category.sql` | `Fraudulent charge` (expense) on Personal, GBSL, Keller, rentals |
+| `20260907000000_amazon_desk.sql` | Amazon desk tables (import batches, shipments, charge links) |
 | `20260701120000_mortgage_heloc_payment_categories.sql` | `Mortgage payment` + `HELOC payment` (counted) on Pflugerville, Austin ACAA, Personal |
 
 ---
 
 ## Related docs
 
+- [AMAZON-DESK.md](./AMAZON-DESK.md) — Amazon Orders export → charge linking
 - [PHASE3_PLAN.md](./PHASE3_PLAN.md) — learning loop, amount-aware rules (shipped)
 - [PERSONAL_CATEGORIES_AND_REPORTS_PLAN.md](./PERSONAL_CATEGORIES_AND_REPORTS_PLAN.md) — Personal chart design
 - [PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md) — QB import rules, entity model
