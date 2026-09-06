@@ -6,6 +6,7 @@ import {
   confirmAmazonSplit,
   confirmAmazonWhole,
   rejectAmazonMatch,
+  updateAmazonDeskClassification,
 } from "@/lib/actions/amazon";
 import { AmazonLogo } from "@/components/amazon/amazon-logo";
 import { CategorySearchSelect } from "@/components/review/category-search-select";
@@ -440,6 +441,27 @@ function AmazonChargeDetail({
     });
   }
 
+  function saveCategoryOnly() {
+    if (!categoryId) {
+      setError("Pick a category");
+      return;
+    }
+    setError(null);
+    startTransition(async () => {
+      const res = await updateAmazonDeskClassification({
+        transactionId: charge.transactionId,
+        entityId,
+        categoryId,
+        entitySlug,
+      });
+      if ("error" in res) {
+        setError(res.error);
+        return;
+      }
+      setEditing(false);
+    });
+  }
+
   return (
     <div className="space-y-4 rounded-xl border border-border bg-card p-4">
       <div>
@@ -640,6 +662,7 @@ function AmazonChargeDetail({
         </div>
       )}
 
+      {isDone ? null : (
       <div className="space-y-2">
         <Label htmlFor="amazon-extra-notes">Extra notes (optional)</Label>
         <Input
@@ -652,28 +675,46 @@ function AmazonChargeDetail({
           On confirm, notes get the item summary and Amazon order link automatically.
         </p>
       </div>
+      )}
 
       {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
 
       <div className="space-y-2">
         <div className="flex flex-wrap gap-2">
+          {isDone ? (
+            <Button
+              type="button"
+              disabled={pending || !categoryId || mode !== "whole"}
+              onClick={saveCategoryOnly}
+            >
+              {pending ? "Saving…" : "Save category"}
+            </Button>
+          ) : null}
           <Button
             type="button"
+            variant={isDone ? "outline" : "default"}
             disabled={pending || Boolean(confirmBlocked)}
             onClick={mode === "whole" ? confirmWhole : confirmSplit}
           >
             {pending ? "Saving…" : "Confirm & link"}
           </Button>
-          <Button type="button" variant="outline" disabled={pending} onClick={onReject}>
-            Skip / no match
-          </Button>
-          {isDone ? (
+          {!isDone ? (
+            <Button type="button" variant="outline" disabled={pending} onClick={onReject}>
+              Skip / no match
+            </Button>
+          ) : (
             <Button type="button" variant="ghost" disabled={pending} onClick={() => setEditing(false)}>
               Cancel edit
             </Button>
-          ) : null}
+          )}
         </div>
-        {confirmBlocked ? (
+        {isDone ? (
+          <p className="text-xs text-muted-foreground">
+            {mode !== "whole"
+              ? "Switch to Whole charge to save a category without touching the Amazon match."
+              : "Save category updates Hundie only. Confirm & link rewrites the Amazon match and notes."}
+          </p>
+        ) : confirmBlocked ? (
           <p className="text-xs text-muted-foreground">{confirmBlocked}</p>
         ) : (
           <p className="text-xs text-muted-foreground">

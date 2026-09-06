@@ -428,6 +428,65 @@ export async function confirmAmazonWhole(
   return { success: true };
 }
 
+export type UpdateAmazonDeskClassificationInput = {
+  transactionId: string;
+  entityId: string;
+  categoryId: string;
+  entitySlug: string;
+};
+
+/** Change entity/category only. Leaves the Amazon match and order notes untouched. */
+export async function updateAmazonDeskClassification(
+  input: UpdateAmazonDeskClassificationInput,
+): Promise<{ success: true } | { error: string }> {
+  const auth = await requireUser();
+  if (auth.error || !auth.user) return { error: auth.error ?? "Not authenticated" };
+
+  const { data: txRaw, error: txErr } = await auth.supabase
+    .from("transactions")
+    .select("id, split_at, classifications!inner ( id )")
+    .eq("id", input.transactionId)
+    .maybeSingle();
+  if (txErr) return { error: txErr.message };
+  const tx = txRaw as {
+    id: string;
+    split_at: string | null;
+    classifications: { id: string } | { id: string }[];
+  } | null;
+  if (!tx) return { error: "Transaction not found" };
+  if (tx.split_at) {
+    return { error: "Charge is split — change legs in code or unsplit first" };
+  }
+
+  const cls = Array.isArray(tx.classifications) ? tx.classifications[0] : tx.classifications;
+  if (!cls) return { error: "Classification missing" };
+
+  const { data: category, error: catErr } = await auth.supabase
+    .from("categories")
+    .select("entity_id")
+    .eq("id", input.categoryId)
+    .maybeSingle();
+  if (catErr) return { error: catErr.message };
+  if (!category || category.entity_id !== input.entityId) {
+    return { error: "Category does not belong to the selected entity" };
+  }
+
+  const { error: updErr } = await auth.supabase
+    .from("classifications")
+    .update({
+      entity_id: input.entityId,
+      category_id: input.categoryId,
+      classified_by: auth.user.email ?? auth.user.id,
+      classified_at: new Date().toISOString(),
+    })
+    .eq("id", cls.id);
+  if (updErr) return { error: updErr.message };
+
+  revalidateAmazon();
+  revalidatePath(`/review/${input.entitySlug}`);
+  return { success: true };
+}
+
 export type ConfirmAmazonSplitLeg = {
   entityId: string;
   categoryId: string;

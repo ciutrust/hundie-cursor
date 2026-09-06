@@ -37,7 +37,7 @@ Card charges are per **shipment** (`Order ID` + `Ship Date`), not per order. Mat
 | B | Ambiguous — pick in the desk |
 | C | No candidate |
 
-Suggestions never write the books. **Confirm & link** (or split) does.
+Suggestions never write the books. **Confirm & link** (or split) does. On a Done row, **Edit → Save category** changes entity/category only and leaves the Amazon match and order notes alone.
 
 ## Splits
 
