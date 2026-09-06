@@ -272,6 +272,25 @@ export function formatPan(pan: string, network: CardNetwork): string {
   return compact.replace(/(.{4})/g, "$1 ").trim();
 }
 
+/** Digits only, optionally capped — for mobile numeric card fields. */
+export function digitsOnly(raw: string, maxLength?: number): string {
+  const digits = raw.replace(/\D/g, "");
+  return maxLength != null ? digits.slice(0, maxLength) : digits;
+}
+
+/** Format PAN for input: digits only, spaced by network, max 19 digits. */
+export function formatPanInput(raw: string): string {
+  const compact = digitsOnly(raw, 19);
+  return formatPan(compact, inferCardNetwork(compact));
+}
+
+/** Format expiry as MM/YY while typing digits only (e.g. 1228 → 12/28). */
+export function formatExpiryInput(raw: string): string {
+  const digits = digitsOnly(raw, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+}
+
 export function displayLast4(last4: string | null | undefined): string {
   const digits = (last4 ?? "").replace(/\D/g, "").slice(-4);
   return digits || "••••";

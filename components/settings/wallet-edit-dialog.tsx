@@ -5,6 +5,9 @@ import type { AccountDateRule } from "@/lib/queries/accounts";
 import {
   canPersistEntityId,
   chipLabel,
+  digitsOnly,
+  formatExpiryInput,
+  formatPanInput,
   inferCardNetwork,
   type EntityChip,
   type WalletItem,
@@ -107,23 +110,36 @@ export function WalletEditPanel({
               className="sm:col-span-2"
               label="Card number"
               value={draftSecrets.pan}
-              onChange={(pan) =>
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete="cc-number"
+              onChange={(pan) => {
+                const formatted = formatPanInput(pan);
                 setDraftSecrets({
                   ...draftSecrets,
-                  pan,
-                  network: inferCardNetwork(pan),
-                })
-              }
+                  pan: formatted,
+                  network: inferCardNetwork(formatted),
+                });
+              }}
             />
             <Field
               label="Expiration"
               value={draftSecrets.expiry}
-              onChange={(expiry) => setDraftSecrets({ ...draftSecrets, expiry })}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete="cc-exp"
+              maxLength={5}
+              placeholder="12/28"
+              onChange={(expiry) => setDraftSecrets({ ...draftSecrets, expiry: formatExpiryInput(expiry) })}
             />
             <Field
               label="CVV"
               value={draftSecrets.cvv}
-              onChange={(cvv) => setDraftSecrets({ ...draftSecrets, cvv })}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete="cc-csc"
+              maxLength={4}
+              onChange={(cvv) => setDraftSecrets({ ...draftSecrets, cvv: digitsOnly(cvv, 4) })}
             />
           </div>
         ) : (
@@ -185,16 +201,34 @@ function Field({
   value,
   onChange,
   className,
+  inputMode,
+  pattern,
+  autoComplete,
+  maxLength,
+  placeholder,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   className?: string;
+  inputMode?: "numeric";
+  pattern?: string;
+  autoComplete?: string;
+  maxLength?: number;
+  placeholder?: string;
 }) {
   return (
     <label className={className ? `${className} block space-y-1.5 text-sm font-medium` : "block space-y-1.5 text-sm font-medium"}>
       {label}
-      <Input value={value} onChange={(event) => onChange(event.target.value)} />
+      <Input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        inputMode={inputMode}
+        pattern={pattern}
+        autoComplete={autoComplete}
+        maxLength={maxLength}
+        placeholder={placeholder}
+      />
     </label>
   );
 }

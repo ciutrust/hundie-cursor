@@ -11,7 +11,10 @@ import {
   clickShouldToggleReveal,
   createAddedWalletItem,
   entityChipOptions,
+  digitsOnly,
+  formatExpiryInput,
   formatMaskedPan,
+  formatPanInput,
   HUNDIE_UNTRACKED_SLUG,
   lastFour,
   partitionWalletItems,
@@ -149,6 +152,30 @@ describe("wallet display helpers", () => {
   test("bank last four comes from the account number", () => {
     expect(lastFour(bankSecrets.accountNumber)).toBe("2333");
     expect(bankItem.last4).toBe("2333");
+  });
+});
+
+describe("numeric card input helpers", () => {
+  test("digitsOnly strips non-digits and respects maxLength", () => {
+    expect(digitsOnly("")).toBe("");
+    expect(digitsOnly("12a3-4")).toBe("1234");
+    expect(digitsOnly("12345", 4)).toBe("1234");
+  });
+
+  test("formatExpiryInput builds MM/YY from digits", () => {
+    expect(formatExpiryInput("")).toBe("");
+    expect(formatExpiryInput("1")).toBe("1");
+    expect(formatExpiryInput("12")).toBe("12");
+    expect(formatExpiryInput("122")).toBe("12/2");
+    expect(formatExpiryInput("1228")).toBe("12/28");
+    expect(formatExpiryInput("12/28")).toBe("12/28");
+    expect(formatExpiryInput("12ab28xx99")).toBe("12/28");
+  });
+
+  test("formatPanInput spaces by network and caps at 19 digits", () => {
+    expect(formatPanInput("4111111111114242")).toBe("4111 1111 1111 4242");
+    expect(formatPanInput("378282246310005")).toBe("3782 822463 10005");
+    expect(formatPanInput("4111-1111-1111-4242-extra")).toBe("4111 1111 1111 4242");
   });
 });
 

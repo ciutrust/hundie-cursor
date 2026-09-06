@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { createUntrackedWalletItem } from "@/lib/actions/wallet";
-import { inferCardNetwork, type WalletSecrets } from "@/lib/settings/wallet-mock";
+import { digitsOnly, formatExpiryInput, formatPanInput, inferCardNetwork, type WalletSecrets } from "@/lib/settings/wallet-mock";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -158,15 +158,38 @@ export function WalletAddDialog({ open, onOpenChange, onAdded }: WalletAddDialog
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block space-y-1.5 text-sm font-medium sm:col-span-2">
                   Card number
-                  <Input value={pan} onChange={(event) => setPan(event.target.value)} placeholder="•••• •••• •••• 4242" />
+                  <Input
+                    value={pan}
+                    onChange={(event) => setPan(formatPanInput(event.target.value))}
+                    placeholder="•••• •••• •••• 4242"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="cc-number"
+                  />
                 </label>
                 <label className="block space-y-1.5 text-sm font-medium">
                   Expiration
-                  <Input value={expiry} onChange={(event) => setExpiry(event.target.value)} placeholder="12/28" />
+                  <Input
+                    value={expiry}
+                    onChange={(event) => setExpiry(formatExpiryInput(event.target.value))}
+                    placeholder="12/28"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="cc-exp"
+                    maxLength={5}
+                  />
                 </label>
                 <label className="block space-y-1.5 text-sm font-medium">
                   CVV
-                  <Input value={cvv} onChange={(event) => setCvv(event.target.value)} placeholder="123" />
+                  <Input
+                    value={cvv}
+                    onChange={(event) => setCvv(digitsOnly(event.target.value, 4))}
+                    placeholder="123"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="cc-csc"
+                    maxLength={4}
+                  />
                 </label>
               </div>
             ) : (
