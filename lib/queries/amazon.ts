@@ -1,12 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { isAmazonDescriptor } from "@/lib/amazon/detect";
+import { amazonDeskBucket, isAmazonCardPaymentCategory, type AmazonDeskStatus } from "@/lib/amazon/desk";
 import type {
   AmazonLedgerCharge,
   ChargeLinkStatus,
   MatchTier,
 } from "@/lib/amazon/types";
 import { chunk } from "@/lib/supabase/chunk";
+import type { PeriodRange } from "@/lib/period";
 
 /** Untyped client — amazon_* tables aren't in generated DB types yet. */
 async function db(): Promise<SupabaseClient> {
@@ -91,11 +93,11 @@ export async function getLatestAmazonImportBatch(): Promise<AmazonImportBatchRow
   return (data as AmazonImportBatchRow | null) ?? null;
 }
 
-/** Amazon-like ledger charges (descriptor/vendor heuristic). */
-export async function fetchAmazonLedgerCharges(): Promise<AmazonLedgerCharge[]> {
+/** Amazon-like ledger charges (descriptor/vendor heuristic). Card-pay transfers are excluded. */
+export async function fetchAmazonLedgerCharges(period?: PeriodRange): Promise<AmazonLedgerCharge[]> {
   const supabase = await createClient();
 
-  const { data: txs, error } = await supabase
+  let query = supabase
     .from("transactions")
     .select(
       `
@@ -111,7 +113,8 @@ export async function fetchAmazonLedgerCharges(): Promise<AmazonLedgerCharge[]> 
         entity_id,
         category_id,
         notes,
-        entities!inner ( id, slug )
+        entities!inner ( id, slug ),
+        category:categories ( id, full_path )
       )
     `,
     )
@@ -121,6 +124,12 @@ export async function fetchAmazonLedgerCharges(): Promise<AmazonLedgerCharge[]> 
     )
     .order("transaction_date", { ascending: false })
     .limit(5000);
+
+  if (period) {
+    query = query.gte("transaction_date", period.start).lt("transaction_date", period.end);
+  }
+
+  const { data: txs, error } = await query;
 
   if (error) throw new Error(error.message);
 
@@ -139,6 +148,7 @@ export async function fetchAmazonLedgerCharges(): Promise<AmazonLedgerCharge[]> 
           category_id: string | null;
           notes: string | null;
           entities: { id: string; slug: string } | { id: string; slug: string }[];
+          category: { id: string; full_path: string } | { id: string; full_path: string }[] | null;
         }
       | {
           id: string;
@@ -146,6 +156,7 @@ export async function fetchAmazonLedgerCharges(): Promise<AmazonLedgerCharge[]> 
           category_id: string | null;
           notes: string | null;
           entities: { id: string; slug: string } | { id: string; slug: string }[];
+          category: { id: string; full_path: string } | { id: string; full_path: string }[] | null;
         }[];
   };
 
@@ -160,6 +171,9 @@ export async function fetchAmazonLedgerCharges(): Promise<AmazonLedgerCharge[]> 
     if (!account || !cls) continue;
     const entity = Array.isArray(cls.entities) ? cls.entities[0] : cls.entities;
     if (!entity) continue;
+    const category = Array.isArray(cls.category) ? cls.category[0] : cls.category;
+    const categoryFullPath = category?.full_path ?? null;
+    if (isAmazonCardPaymentCategory(categoryFullPath)) continue;
     out.push({
       transactionId: row.id,
       classificationId: cls.id,
@@ -172,6 +186,7 @@ export async function fetchAmazonLedgerCharges(): Promise<AmazonLedgerCharge[]> 
       entityId: entity.id,
       entitySlug: entity.slug,
       categoryId: cls.category_id,
+      categoryFullPath,
       notes: cls.notes,
       splitAt: row.split_at,
     });
@@ -285,14 +300,20 @@ export async function fetchChargeLinksByTransactionIds(
 }
 
 export async function getAmazonDeskQueue(filter: {
-  status?: "open" | "suggested" | "confirmed" | "all";
+  status?: AmazonDeskStatus;
+  period?: PeriodRange;
 }): Promise<{
   items: AmazonDeskQueueItem[];
-  counts: { open: number; suggested: number; confirmed: number; total: number };
+  counts: {
+    uncategorized: number;
+    unmatched: number;
+    done: number;
+    total: number;
+  };
   lastBatch: AmazonImportBatchRow | null;
 }> {
   const [charges, lastBatch] = await Promise.all([
-    fetchAmazonLedgerCharges(),
+    fetchAmazonLedgerCharges(filter.period),
     getLatestAmazonImportBatch(),
   ]);
   const links = await fetchChargeLinksByTransactionIds(charges.map((c) => c.transactionId));
@@ -337,26 +358,31 @@ export async function getAmazonDeskQueue(filter: {
   });
 
   const counts = {
-    open: 0,
-    suggested: 0,
-    confirmed: 0,
+    uncategorized: 0,
+    unmatched: 0,
+    done: 0,
     total: items.length,
   };
   for (const item of items) {
-    if (!item.link || item.link.status === "rejected") counts.open += 1;
-    else if (item.link.status === "suggested") counts.suggested += 1;
-    else if (item.link.status === "confirmed") counts.confirmed += 1;
+    const bucket = amazonDeskBucket({
+      linkStatus: item.link?.status,
+      categoryFullPath: item.charge.categoryFullPath,
+    });
+    counts[bucket] += 1;
   }
 
-  const status = filter.status ?? "open";
+  const status = filter.status ?? "uncategorized";
   const filtered =
     status === "all"
       ? items
-      : status === "open"
-        ? items.filter((i) => !i.link || i.link.status === "rejected" || i.link.status === "suggested")
-        : items.filter((i) => i.link?.status === status);
+      : items.filter(
+          (i) =>
+            amazonDeskBucket({
+              linkStatus: i.link?.status,
+              categoryFullPath: i.charge.categoryFullPath,
+            }) === status,
+        );
 
-  // Prefer unmatched / suggested first, then newest charge.
   filtered.sort((a, b) => {
     const rank = (i: AmazonDeskQueueItem) => {
       if (!i.link || i.link.status === "rejected") return 0;

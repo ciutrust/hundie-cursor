@@ -61,6 +61,7 @@ export type AmazonLedgerCharge = {
   entityId: string;
   entitySlug: string;
   categoryId: string | null;
+  categoryFullPath: string | null;
   notes: string | null;
   splitAt: string | null;
 };

@@ -14,6 +14,19 @@ The parser reads `Your Amazon Orders/Order History.csv` (also accepts older `Ret
 
 **Do not commit** Order History dumps or zip files to git (PII).
 
+## Queue
+
+Default period is the **calendar year** (picker at the top). Tabs:
+
+| Tab | Meaning |
+|-----|---------|
+| Uncategorized | Amazon purchase, not linked, still needs a category (or Ask My Accountant) |
+| Unmatched | Categorized, not yet linked to a shipment |
+| Done | Categorized **and** matched — archived. Edit unlocks the form; bulk fixes go through code. |
+| All | Everything in the period except card-pay transfers |
+
+Checking-side **Credit card payment** rows (paying the Amazon card, not buying from Amazon) are hidden.
+
 ## Matching
 
 Card charges are per **shipment** (`Order ID` + `Ship Date`), not per order. Matching uses amount (integer cents), a ±5 day window, and descriptor hints (`DIGI` vs marketplace). Store-card (PLCC) shipments are skipped — they never hit Hundie cards.

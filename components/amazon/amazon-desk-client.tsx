@@ -29,10 +29,11 @@ type CatOpt = { id: string; full_path: string };
 
 type AmazonDeskClientProps = {
   items: AmazonDeskQueueItem[];
-  counts: { open: number; suggested: number; confirmed: number; total: number };
+  counts: { uncategorized: number; unmatched: number; done: number; total: number };
   entities: EntityOpt[];
   categoriesByEntity: Record<string, CatOpt[]>;
   filter: string;
+  queryBase: string;
 };
 
 type LegDraft = SplitLegDraft & { key: string; label: string };
@@ -57,19 +58,44 @@ export function AmazonDeskClient({
   entities,
   categoriesByEntity,
   filter,
+  queryBase,
 }: AmazonDeskClientProps) {
   const [selectedId, setSelectedId] = useState(items[0]?.charge.transactionId ?? null);
   const selected = items.find((i) => i.charge.transactionId === selectedId) ?? items[0] ?? null;
+
+  useEffect(() => {
+    if (selectedId && items.some((i) => i.charge.transactionId === selectedId)) return;
+    setSelectedId(items[0]?.charge.transactionId ?? null);
+  }, [items, selectedId]);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
       <div className="space-y-2">
         <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-          <FilterPill href="/amazon?status=open" active={filter === "open"} label={`Open ${counts.open + counts.suggested}`} />
-          <FilterPill href="/amazon?status=suggested" active={filter === "suggested"} label={`Suggested ${counts.suggested}`} />
-          <FilterPill href="/amazon?status=confirmed" active={filter === "confirmed"} label={`Done ${counts.confirmed}`} />
-          <FilterPill href="/amazon?status=all" active={filter === "all"} label={`All ${counts.total}`} />
+          <FilterPill
+            href={`/amazon?${queryBase}&status=uncategorized`}
+            active={filter === "uncategorized"}
+            label={`Uncategorized ${counts.uncategorized}`}
+          />
+          <FilterPill
+            href={`/amazon?${queryBase}&status=unmatched`}
+            active={filter === "unmatched"}
+            label={`Unmatched ${counts.unmatched}`}
+          />
+          <FilterPill
+            href={`/amazon?${queryBase}&status=done`}
+            active={filter === "done"}
+            label={`Done ${counts.done}`}
+          />
+          <FilterPill
+            href={`/amazon?${queryBase}&status=all`}
+            active={filter === "all"}
+            label={`All ${counts.total}`}
+          />
         </div>
+        <p className="text-xs text-muted-foreground">
+          Uncategorized still need a category. Unmatched already have one. Done is archived.
+        </p>
         <ul className="max-h-[70vh] space-y-1 overflow-y-auto rounded-xl border border-border">
           {items.length === 0 ? (
             <li className="p-4 text-sm text-muted-foreground">
@@ -96,7 +122,9 @@ export function AmazonDeskClient({
                       <span>
                         {item.link?.status === "confirmed"
                           ? "Done"
-                          : tierLabel(item.link?.match_tier)}
+                          : item.charge.categoryFullPath
+                            ? "Unmatched"
+                            : "Uncategorized"}
                       </span>
                     </div>
                     {item.shipment ? (
@@ -158,6 +186,78 @@ function FilterPill({
   );
 }
 
+function AmazonChargeArchive({
+  item,
+  entityName,
+  categoryLabel,
+  sign,
+  onEdit,
+}: {
+  item: AmazonDeskQueueItem;
+  entityName: string;
+  categoryLabel: string;
+  sign: number;
+  onEdit: () => void;
+}) {
+  const ship = item.shipment;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Archived match
+        </p>
+        <Button type="button" variant="outline" size="sm" onClick={onEdit}>
+          Edit
+        </Button>
+      </div>
+      <div className="space-y-1 text-sm">
+        <p>
+          <span className="text-muted-foreground">Entity · </span>
+          {entityName}
+        </p>
+        <p>
+          <span className="text-muted-foreground">Category · </span>
+          {categoryLabel}
+        </p>
+      </div>
+      {ship ? (
+        <div className="space-y-2 rounded-lg border border-border bg-background p-3">
+          <a
+            href={ship.order_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-amber-700 underline dark:text-amber-400"
+          >
+            Open Amazon order →
+          </a>
+          <ul className="space-y-1 text-sm">
+            {(ship.items ?? []).map((it) => (
+              <li key={it.id} className="flex justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate">
+                  {it.quantity > 1 ? `${it.quantity}× ` : ""}
+                  {it.product_name}
+                </span>
+                <span className="tabular-nums text-muted-foreground">
+                  {it.line_total_cents != null
+                    ? formatCurrency((it.line_total_cents / 100) * (sign < 0 ? -1 : 1))
+                    : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Linked, but no shipment row yet. Upload a Your Orders export to attach items.
+        </p>
+      )}
+      {item.charge.notes ? (
+        <p className="whitespace-pre-wrap text-sm text-muted-foreground">{item.charge.notes}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function AmazonChargeDetail({
   item,
   entities,
@@ -194,6 +294,14 @@ function AmazonChargeDetail({
   const [extraNotes, setExtraNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const isDone = item.link?.status === "confirmed";
+  const [editing, setEditing] = useState(false);
+  const showForm = !isDone || editing;
+  const entityName = entities.find((e) => e.id === charge.entityId)?.name ?? charge.entitySlug;
+  const categoryLabel =
+    categories.find((c) => c.id === charge.categoryId)?.full_path ??
+    charge.categoryFullPath ??
+    "Uncategorized";
 
   const parentCents = Math.abs(amountToCents(Number(charge.amount)));
   const sign = Number(charge.amount) < 0 ? -1 : 1;
@@ -351,6 +459,18 @@ function AmazonChargeDetail({
         </Link>
       </div>
 
+      {isDone && !editing ? (
+        <AmazonChargeArchive
+          item={item}
+          entityName={entityName}
+          categoryLabel={categoryLabel}
+          sign={sign}
+          onEdit={() => setEditing(true)}
+        />
+      ) : null}
+
+      {showForm ? (
+      <>
       <div className="space-y-2">
         <Label>Matched shipment</Label>
         {shipmentOptions.length === 0 ? (
@@ -535,7 +655,7 @@ function AmazonChargeDetail({
       <div className="flex flex-wrap gap-2">
         <Button
           type="button"
-          disabled={pending || !shipmentId || item.link?.status === "confirmed"}
+          disabled={pending || !shipmentId}
           onClick={mode === "whole" ? confirmWhole : confirmSplit}
         >
           {pending ? "Saving…" : "Confirm & link"}
@@ -543,7 +663,14 @@ function AmazonChargeDetail({
         <Button type="button" variant="outline" disabled={pending} onClick={onReject}>
           Skip / no match
         </Button>
+        {isDone ? (
+          <Button type="button" variant="ghost" disabled={pending} onClick={() => setEditing(false)}>
+            Cancel edit
+          </Button>
+        ) : null}
       </div>
+      </>
+      ) : null}
     </div>
   );
 }

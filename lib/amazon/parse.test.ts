@@ -209,6 +209,7 @@ describe("matchChargesToShipments", () => {
     entityId: "ent-1",
     entitySlug: "personal",
     categoryId: null,
+    categoryFullPath: null,
     notes: null,
     splitAt: null,
     ...overrides,
