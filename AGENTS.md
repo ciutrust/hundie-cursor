@@ -60,7 +60,7 @@ Full operator cheat sheet: [docs/CLASSIFICATION.md](docs/CLASSIFICATION.md).
 
 | Path | Responsibility |
 |------|----------------|
-| [`app/`](app/) | Routes — `/review`, `/transactions`, `/reports/*`, `/month-close`, `/settings/connections` (Plaid), `/bills`, `/capture`, `/categories`, `/api/plaid/*` |
+| [`app/`](app/) | Routes — `/review`, `/transactions`, `/reports/*`, `/month-close`, `/settings/connections` (Plaid), `/bills`, `/amazon` (Orders export desk), `/capture`, `/categories`, `/api/plaid/*` |
 | [`components/review/`](components/review/) | Classify UI — list, bulk assign, suggestions, undo |
 | [`components/intercompany/`](components/intercompany/) | Pairing review — linked pairs, one-sided legs, “not tracked here” |
 | [`lib/actions/`](lib/actions/) | Server actions — reclassify, intercompany, proposals, bills |
@@ -110,6 +110,7 @@ Imports (dry-run by default unless `:apply`): `import:cards`, `import:qb-gbsl`, 
 | [RUN.md](RUN.md) | Local run / smoke |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | What shipped recently |
 | [docs/Backlog.md](docs/Backlog.md) | Open product work |
+| [docs/AMAZON-DESK.md](docs/AMAZON-DESK.md) | Amazon Orders export → charge linking |
 | [docs/AI-PRECLASSIFY.md](docs/AI-PRECLASSIFY.md) | AI suggestion pipeline |
 | Plan/review docs under `docs/` | Historical; check date before treating as current truth |
 
