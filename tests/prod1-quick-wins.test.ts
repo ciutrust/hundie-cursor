@@ -34,6 +34,23 @@ describe("groupUndoRestores", () => {
     expect(nullPersonal?.classificationIds).toEqual(["c4"]);
   });
 
+  test("prior notes split groups when bulk overwrote notes", () => {
+    const restores: UndoRestore[] = [
+      { classificationId: "c1", entityId: "gbsl", categoryId: null, notes: "a" },
+      { classificationId: "c2", entityId: "gbsl", categoryId: null, notes: "a" },
+      { classificationId: "c3", entityId: "gbsl", categoryId: null, notes: "b" },
+      { classificationId: "c4", entityId: "gbsl", categoryId: null },
+    ];
+    const groups = groupUndoRestores(restores);
+    expect(groups).toHaveLength(3);
+    const noteA = groups.find((g) => g.notes === "a");
+    expect(noteA?.classificationIds).toEqual(["c1", "c2"]);
+    const noteB = groups.find((g) => g.notes === "b");
+    expect(noteB?.classificationIds).toEqual(["c3"]);
+    const untouched = groups.find((g) => g.notes === undefined);
+    expect(untouched?.classificationIds).toEqual(["c4"]);
+  });
+
   test("a null categoryId and empty-string categoryId are NOT merged (distinct restore targets)", () => {
     const restores: UndoRestore[] = [
       { classificationId: "c1", entityId: "gbsl", categoryId: null },

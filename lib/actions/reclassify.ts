@@ -21,6 +21,8 @@ export type BulkReclassifyInput = {
   entityId: string;
   categoryId: string | null;
   entitySlug: string;
+  /** When set, stamps this note onto every selected row. Omit to leave existing notes unchanged. */
+  notes?: string | null;
   suggestionOutcome?: SuggestionOutcome | null;
 };
 
@@ -114,6 +116,8 @@ export async function bulkReclassifyTransactions(input: BulkReclassifyInput) {
   // A2: chunk the id list — select-all / find-similar can exceed ~420 ids, and `.in()` on a PATCH
   // rides the URL, so an unchunked bulk reclassify would 400 and save nothing.
   const classifiedAt = new Date().toISOString();
+  const notesProvided = input.notes !== undefined;
+  const notes = notesProvided ? input.notes?.trim() || null : undefined;
   for (const ids of chunk(input.classificationIds, 200)) {
     const { error } = await supabase
       .from("classifications")
@@ -122,6 +126,7 @@ export async function bulkReclassifyTransactions(input: BulkReclassifyInput) {
         category_id: input.categoryId,
         classified_by: user.email ?? user.id,
         classified_at: classifiedAt,
+        ...(notesProvided ? { notes } : {}),
       })
       .in("id", ids);
 

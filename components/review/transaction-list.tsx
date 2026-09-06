@@ -138,6 +138,7 @@ export function TransactionList({
           entityId: group.entityId,
           categoryId: group.categoryId,
           entitySlug,
+          ...(group.notes !== undefined ? { notes: group.notes } : {}),
         });
       }
       setUndo(null);
@@ -1092,6 +1093,7 @@ function BulkAssignDialog({
   const [isPending, startTransition] = useTransition();
   const [entityId, setEntityId] = useState(defaultEntityId);
   const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<CategorySuggestion[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
@@ -1226,11 +1228,15 @@ function BulkAssignDialog({
 
   function handleSave() {
     setError(null);
+    const trimmedNotes = notes.trim();
+    const applyNotes = trimmedNotes.length > 0;
     // #2: snapshot each row's prior entity+category BEFORE the write, so undo can restore each to its own.
+    // When we stamp a shared note, also snapshot prior notes so undo can put them back.
     const restores: UndoRestore[] = transactions.map((tx) => ({
       classificationId: tx.classification.id,
       entityId: tx.classification.entity_id,
       categoryId: tx.classification.category_id,
+      ...(applyNotes ? { notes: tx.classification.notes } : {}),
     }));
     startTransition(async () => {
       const result = await bulkReclassifyTransactions({
@@ -1238,6 +1244,7 @@ function BulkAssignDialog({
         entityId,
         categoryId: showCategories ? categoryId : null,
         entitySlug,
+        ...(applyNotes ? { notes: trimmedNotes } : {}),
         suggestionOutcome: buildBulkSuggestionOutcome(showCategories ? categoryId : null),
       });
 
@@ -1257,7 +1264,7 @@ function BulkAssignDialog({
         <DialogHeader>
           <DialogTitle>Assign to {transactions.length} transactions</DialogTitle>
           <DialogDescription>
-            Apply the same entity and category to all selected transactions.
+            Apply the same entity, category, and optional note to all selected transactions.
           </DialogDescription>
         </DialogHeader>
 
@@ -1292,6 +1299,19 @@ function BulkAssignDialog({
             entityFieldId="bulk-entity"
             categoryFieldId="bulk-category"
           />
+
+          <div className="space-y-2">
+            <Label htmlFor="bulk-classification-notes">Notes</Label>
+            <textarea
+              id="bulk-classification-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              disabled={isPending}
+              rows={3}
+              className="flex min-h-[72px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              placeholder="Optional — applied to every selected transaction. Leave blank to keep each row's existing notes."
+            />
+          </div>
 
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
 

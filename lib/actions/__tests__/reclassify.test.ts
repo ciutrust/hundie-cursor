@@ -32,3 +32,51 @@ describe('reclassifyTransaction', () => {
     expect(db.classifications[0].entity_id).toBe('ent-A');
   });
 });
+
+describe('bulkReclassifyTransactions', () => {
+  it('stamps notes onto every selected row when notes are provided', async () => {
+    const { client, db } = makeClient({
+      categories: [{ id: 'cat-1', entity_id: 'ent-A' }],
+      classifications: [
+        { id: 'c1', entity_id: 'ent-old', category_id: null, notes: 'keep-me-if-omitted' },
+        { id: 'c2', entity_id: 'ent-old', category_id: null, notes: null },
+      ],
+      suggestion_events: [],
+    });
+    vi.doMock('@/lib/supabase/server', () => ({ createClient: async () => client }));
+    vi.doMock('next/cache', () => ({ revalidatePath: () => {} }));
+    const { bulkReclassifyTransactions } = await import('@/lib/actions/reclassify');
+    const res = await bulkReclassifyTransactions({
+      classificationIds: ['c1', 'c2'],
+      entityId: 'ent-A',
+      categoryId: 'cat-1',
+      entitySlug: 'biz',
+      notes: '  shared note  ',
+    });
+    expect(res).toEqual({ success: true, count: 2 });
+    expect(db.classifications[0].notes).toBe('shared note');
+    expect(db.classifications[1].notes).toBe('shared note');
+    expect(db.classifications[0].category_id).toBe('cat-1');
+  });
+
+  it('leaves existing notes alone when notes are omitted', async () => {
+    const { client, db } = makeClient({
+      categories: [{ id: 'cat-1', entity_id: 'ent-A' }],
+      classifications: [
+        { id: 'c1', entity_id: 'ent-old', category_id: null, notes: 'prior' },
+      ],
+      suggestion_events: [],
+    });
+    vi.doMock('@/lib/supabase/server', () => ({ createClient: async () => client }));
+    vi.doMock('next/cache', () => ({ revalidatePath: () => {} }));
+    const { bulkReclassifyTransactions } = await import('@/lib/actions/reclassify');
+    const res = await bulkReclassifyTransactions({
+      classificationIds: ['c1'],
+      entityId: 'ent-A',
+      categoryId: 'cat-1',
+      entitySlug: 'biz',
+    });
+    expect(res).toEqual({ success: true, count: 1 });
+    expect(db.classifications[0].notes).toBe('prior');
+  });
+});
