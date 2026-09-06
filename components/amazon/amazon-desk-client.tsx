@@ -361,6 +361,17 @@ function AmazonChargeDetail({
   }, [shipmentId]);
 
   const remaining = remainingCents(legs, Number(charge.amount));
+  const confirmBlocked = pending
+    ? null
+    : !shipmentId
+      ? "Needs a matched shipment. Upload a Your Orders export, then rematch."
+      : mode === "whole" && !categoryId
+        ? "Pick a category."
+        : mode === "split" && legs.some((l) => !l.categoryId)
+          ? "Every split leg needs a category."
+          : mode === "split" && remaining !== 0
+            ? "Split legs must sum to the charge."
+            : null;
 
   function confirmWhole() {
     if (!shipmentId || !categoryId) {
@@ -431,32 +442,24 @@ function AmazonChargeDetail({
 
   return (
     <div className="space-y-4 rounded-xl border border-border bg-card p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <AmazonLogo className="h-5 w-5 text-[#232F3E]" />
-            <h2 className="text-lg font-semibold tabular-nums">
-              {formatCurrency(charge.amount)}
-            </h2>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {charge.date} · {charge.accountName}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">{charge.descriptor}</p>
-          {item.link ? (
-            <p className="mt-1 text-xs">
-              Match: {tierLabel(item.link.match_tier)}
-              {item.link.match_hypothesis ? ` (${item.link.match_hypothesis})` : ""}
-              {item.link.date_delta != null ? ` · Δ${item.link.date_delta}d` : ""}
-            </p>
-          ) : null}
+      <div>
+        <div className="flex items-center gap-2">
+          <AmazonLogo className="h-5 w-5 text-[#232F3E]" />
+          <h2 className="text-lg font-semibold tabular-nums">
+            {formatCurrency(charge.amount)}
+          </h2>
         </div>
-        <Link
-          href={`/review/${charge.entitySlug}`}
-          className="text-xs text-muted-foreground underline"
-        >
-          Open in review
-        </Link>
+        <p className="text-sm text-muted-foreground">
+          {charge.date} · {charge.accountName}
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">{charge.descriptor}</p>
+        {item.link ? (
+          <p className="mt-1 text-xs">
+            Match: {tierLabel(item.link.match_tier)}
+            {item.link.match_hypothesis ? ` (${item.link.match_hypothesis})` : ""}
+            {item.link.date_delta != null ? ` · Δ${item.link.date_delta}d` : ""}
+          </p>
+        ) : null}
       </div>
 
       {isDone && !editing ? (
@@ -652,22 +655,31 @@ function AmazonChargeDetail({
 
       {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
 
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          disabled={pending || !shipmentId}
-          onClick={mode === "whole" ? confirmWhole : confirmSplit}
-        >
-          {pending ? "Saving…" : "Confirm & link"}
-        </Button>
-        <Button type="button" variant="outline" disabled={pending} onClick={onReject}>
-          Skip / no match
-        </Button>
-        {isDone ? (
-          <Button type="button" variant="ghost" disabled={pending} onClick={() => setEditing(false)}>
-            Cancel edit
+      <div className="space-y-2">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            disabled={pending || Boolean(confirmBlocked)}
+            onClick={mode === "whole" ? confirmWhole : confirmSplit}
+          >
+            {pending ? "Saving…" : "Confirm & link"}
           </Button>
-        ) : null}
+          <Button type="button" variant="outline" disabled={pending} onClick={onReject}>
+            Skip / no match
+          </Button>
+          {isDone ? (
+            <Button type="button" variant="ghost" disabled={pending} onClick={() => setEditing(false)}>
+              Cancel edit
+            </Button>
+          ) : null}
+        </div>
+        {confirmBlocked ? (
+          <p className="text-xs text-muted-foreground">{confirmBlocked}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Writes entity, category, and the Amazon order link, then moves this charge to Done.
+          </p>
+        )}
       </div>
       </>
       ) : null}
