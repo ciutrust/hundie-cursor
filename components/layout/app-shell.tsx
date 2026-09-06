@@ -26,6 +26,7 @@ import {
   TrendingUp,
   X,
 } from "lucide-react";
+import { AmazonLogo } from "@/components/amazon/amazon-logo";
 import { BottomNav } from "@/components/layout/bottom-nav";
 import { SidebarEntitiesNav } from "@/components/layout/sidebar-entities-nav";
 import { SidebarMonthCloseNav } from "@/components/layout/sidebar-month-close-nav";
@@ -99,6 +100,12 @@ const FUNCTIONS_ITEMS: NavItem[] = [
     label: "Bills",
     icon: Receipt,
     match: (path) => path.startsWith("/bills"),
+  },
+  {
+    href: "/amazon",
+    label: "Amazon",
+    icon: AmazonLogo,
+    match: (path) => path.startsWith("/amazon"),
   },
   {
     href: "/transactions",
