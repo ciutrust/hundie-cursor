@@ -34,14 +34,29 @@ Hundie is deployed on Vercel. The **publishable (anon) key** is in the browser b
 
 **App-layer auth:** `proxy.ts` + `lib/supabase/middleware.ts` protect `/review`, `/reports`, `/categories`, `/month-close`, `/tax-close`, and `/settings` (defense in depth alongside RLS).
 
-### Self-signup is disabled (allowlist model)
+### Sign-in is Google-only (two operators)
 
-RLS trusts *any* authenticated JWT (`USING (true)`), so who can obtain a JWT is the real trust boundary. Sign-in is allowlist-only:
+RLS trusts *any* authenticated JWT (`USING (true)`), so who can obtain a JWT is the real trust boundary. Password and magic-link UI are removed. The only operators:
 
-- **Client:** `login-form.tsx` sends magic links via `magicLinkOtpOptions()` (`lib/auth/sign-in-options.ts`) with `shouldCreateUser: false` — an OTP request for an unknown email fails instead of creating a user.
-- **Dashboard:** Authentication → Providers → Email → **"Allow new users to sign up" = OFF** (project `ihciuqpiavxhbulfkwod`). Verified 2026-07-02.
+- `alexbhp@gmail.com` — Alex Ciunciusky
+- `clauciun@gmail.com` — Claudia Ciunciusky
 
-Until per-user RLS exists (no `user_id` columns yet), do NOT enable signups. Adding a user = invite from the dashboard only.
+Those emails are **hardcoded** in `public.hook_restrict_signup_to_allowed_operators` (migration `20260906053800_restrict_signup_to_allowed_operators`). There is no table and no app UI to add people. PostgREST and the service-role import key cannot expand the list. Changing who can sign in requires a new migration (or Dashboard SQL as `postgres`) that edits the function, plus a git review.
+
+**Dashboard (keep closed):**
+
+- Authentication → Providers → Email → **"Allow new users to sign up" = OFF**. Do not invite extra Auth users.
+- Authentication → Hooks → **Before User Created**: enable the Postgres function `public.hook_restrict_signup_to_allowed_operators` (`pg-functions://postgres/public/hook_restrict_signup_to_allowed_operators`). The migration creates the function; it does **not** flip this dashboard switch.
+- Authentication → Users: confirm the two Gmail addresses exist (invite once if missing). Sign in with those Google accounts only.
+
+**Google Cloud (operator, not in git):**
+
+1. [Google Auth Platform](https://console.cloud.google.com/) — consent screen; scopes `openid`, `userinfo.email`, `userinfo.profile`. Optional: Testing audience limited to the two emails until you publish the Google app.
+2. Create an OAuth **Web** client. Authorized JavaScript origins: `http://localhost:3001` (login worktree), `http://localhost:3000`, production origin. Authorized redirect URI: `https://ihciuqpiavxhbulfkwod.supabase.co/auth/v1/callback`.
+3. Dashboard → Authentication → Providers → **Google**: enable; paste Client ID and Secret. Do not put Google secrets in `.env.local` or Vercel.
+4. Dashboard → Authentication → URL configuration: add `http://localhost:3001/auth/callback`, `http://localhost:3000/auth/callback`, and the production `/auth/callback`.
+
+To revoke an operator: ban/delete them under Authentication → Users, then ship a migration that removes their email from the hook (otherwise Google could recreate the user).
 
 ### Verify anon is locked out
 
@@ -107,6 +122,7 @@ Later migrations (Stage-2 through the 2026-07-02 perf review, `20260702*`–`202
 | `20260709120000_harden_audit_triggers` | **Security (S2/S8):** `changed_by` from JWT identity + `revoke execute` on both audit trigger fns |
 | `20260709121000_fk_covering_indexes` | **Perf (T6):** covering indexes for FKs on the active tables |
 | `20260710120000_perf_indexes` | **Perf (D1/D2/D4):** proposals `(entity_slug,status,vendor_key,id)` composite (drop mismatched entity_id-keyed); `pg_trgm` GIN indexes for ILIKE scans; drop dead small-table indexes |
+| `20260906053800_restrict_signup_to_allowed_operators` | **Security:** `before-user-created` hook — only `alexbhp@gmail.com` and `clauciun@gmail.com` may create an Auth user |
 
 ## Card CSV import
 
