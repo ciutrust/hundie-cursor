@@ -105,7 +105,7 @@ export async function fetchAmazonLedgerCharges(): Promise<AmazonLedgerCharge[]> 
       description,
       vendor,
       split_at,
-      accounts!inner ( slug, name ),
+      accounts!inner ( slug, display_name ),
       classifications!inner (
         id,
         entity_id,
@@ -131,7 +131,7 @@ export async function fetchAmazonLedgerCharges(): Promise<AmazonLedgerCharge[]> 
     description: string | null;
     vendor: string | null;
     split_at: string | null;
-    accounts: { slug: string; name: string } | { slug: string; name: string }[];
+    accounts: { slug: string; display_name: string } | { slug: string; display_name: string }[];
     classifications:
       | {
           id: string;
@@ -168,7 +168,7 @@ export async function fetchAmazonLedgerCharges(): Promise<AmazonLedgerCharge[]> 
       descriptor: desc,
       vendor: row.vendor,
       accountSlug: account.slug,
-      accountName: account.name,
+      accountName: account.display_name,
       entityId: entity.id,
       entitySlug: entity.slug,
       categoryId: cls.category_id,
