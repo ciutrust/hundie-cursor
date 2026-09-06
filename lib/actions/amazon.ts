@@ -104,7 +104,40 @@ async function persistShipments(
     if (error) throw new Error(error.message);
   }
 
+  await attachConfirmedLinksToShipments(supabase, keyToId);
+
   return keyToId;
+}
+
+/** Confirmed backfill rows store shipment_key in match_hypothesis until the export is imported. */
+async function attachConfirmedLinksToShipments(
+  supabase: SupabaseClient,
+  keyToId: Map<string, string>,
+) {
+  if (keyToId.size === 0) return;
+  const rows = [...keyToId.entries()].map(([shipment_key, shipment_id]) => ({
+    shipment_key,
+    shipment_id,
+  }));
+  for (const part of chunk(rows, 100)) {
+    const keys = part.map((r) => r.shipment_key);
+    const { data: links, error } = await supabase
+      .from("amazon_charge_links")
+      .select("id, match_hypothesis")
+      .eq("status", "confirmed")
+      .is("shipment_id", null)
+      .in("match_hypothesis", keys);
+    if (error) throw new Error(error.message);
+    for (const link of links ?? []) {
+      const shipmentId = keyToId.get(link.match_hypothesis as string);
+      if (!shipmentId) continue;
+      const { error: updErr } = await supabase
+        .from("amazon_charge_links")
+        .update({ shipment_id: shipmentId, match_tier: "A", updated_at: new Date().toISOString() })
+        .eq("id", link.id);
+      if (updErr) throw new Error(updErr.message);
+    }
+  }
 }
 
 export async function importAmazonExport(formData: FormData): Promise<

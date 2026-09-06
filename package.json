@@ -50,7 +50,10 @@
     "cleanup:ledger-dupes": "node scripts/cleanup-ledger-duplicates.mjs --dry-run",
     "cleanup:ledger-dupes:apply": "node scripts/cleanup-ledger-duplicates.mjs --apply",
     "cleanup:ledger-dupes:dry-run": "node scripts/cleanup-ledger-duplicates.mjs --dry-run",
-    "report:qb-drift": "node scripts/qb-drift-report.mjs"
+    "report:qb-drift": "node scripts/qb-drift-report.mjs",
+    "import:amazon-decisions": "node scripts/backfill-amazon-decisions.mjs --dry-run",
+    "import:amazon-decisions:apply": "node scripts/backfill-amazon-decisions.mjs --apply",
+    "import:amazon-decisions:dry-run": "node scripts/backfill-amazon-decisions.mjs --dry-run"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.17",

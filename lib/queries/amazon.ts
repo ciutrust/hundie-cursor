@@ -301,6 +301,7 @@ export async function getAmazonDeskQueue(filter: {
   const shipmentKeys = new Set<string>();
   for (const link of links.values()) {
     if (link.shipment_id) shipmentIds.add(link.shipment_id);
+    if (link.match_hypothesis) shipmentKeys.add(link.match_hypothesis);
     for (const c of link.candidates) {
       if (c.shipment_id) shipmentIds.add(c.shipment_id);
       if (c.shipment_key) shipmentKeys.add(c.shipment_key);
@@ -316,6 +317,9 @@ export async function getAmazonDeskQueue(filter: {
     const link = links.get(charge.transactionId) ?? null;
     let shipment: (AmazonShipmentRow & { items: AmazonShipmentItemRow[] }) | null = null;
     if (link?.shipment_id) shipment = byId.get(link.shipment_id) ?? null;
+    if (!shipment && link?.match_hypothesis) {
+      shipment = byKey.get(link.match_hypothesis) ?? null;
+    }
 
     const candidateShipments: AmazonShipmentWithItems[] = [];
     if (link) {

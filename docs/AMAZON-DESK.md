@@ -8,7 +8,7 @@ There is **no** consumer Orders API or login token for personal Amazon accounts.
 
 1. Amazon → Account → **Request Your Information** → choose **Your Orders**
 2. Download the zip when ready
-3. In Hundie → **Amazon** → Upload export (`.zip` or `Order History.csv`)
+3. In Hundie → **Amazon** (sidebar, with the rest of the app chrome) → Upload export (`.zip` or `Order History.csv`)
 
 The parser reads `Your Amazon Orders/Order History.csv` (also accepts older `Retail.OrderHistory.*.csv` names). Digital orders from `Digital Content Orders.csv` are included when present. Returns/cart/wishlist CSVs are ignored.
 
@@ -41,3 +41,16 @@ Same `amazon_*` tables with `source = business_api`. Adapter stub: `lib/amazon/s
 - `amazon_charge_links` (one row per ledger transaction)
 
 Migration: `supabase/migrations/20260907000000_amazon_desk.sql`.
+
+## One-time backfill (hundie-amazon-match)
+
+The 2026 review in the sibling `hundie-amazon-match` repo already decided entity/category (and splits). Those ledger writes often landed via SQL; the desk still needs shipment links + order-URL notes.
+
+Live `ihciuqpiavxhbulfkwod` already has **251 confirmed** `amazon_charge_links` from that review (2026-09-05). Reload `/amazon` — they should sit in **Done**. Upload a fresh Your Orders zip so shipment rows attach (confirmed links store `shipment_key` in `match_hypothesis` until import).
+
+```bash
+npm run import:amazon-decisions          # dry-run
+npm run import:amazon-decisions:apply     # write links / notes / missing categories
+```
+
+Reads `../hundie-amazon-match/data/import_ready.json` and `matches.json` (not committed here). Override with `--file` / `--matches`.
