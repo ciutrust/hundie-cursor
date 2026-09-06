@@ -71,6 +71,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-plaid-link": "^4.1.1",
+    "simple-icons": "^16.30.0",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {

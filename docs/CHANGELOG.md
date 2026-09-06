@@ -4,6 +4,16 @@ All notable changes to the Hundie project. Format based on [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### 2026-09-06 secure wallet vault on Settings → Accounts
+
+**Added**
+
+- **Encrypted wallet vault** for the plastic-card Accounts page. Last four and expiry render on the card front; PAN, CVV, routing, and account number live in `wallet_secrets` as AES-256-GCM ciphertext (`WALLET_VAULT_ENC_KEY`, not the Plaid key). Reveal is on demand after Google sign-in. Untracked Add persists a wallet-only row (`account_id` null); linking stays on Connections.
+
+**Changed**
+
+- Settings → Accounts title is **Accounts**. Mock PAN/CVV fixtures and the fake-numbers banner are gone.
+
 ### 2026-08-31 dashboard redesign — period-scoped "current state" view + legacy dash
 
 **Added**

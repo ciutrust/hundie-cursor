@@ -1,23 +1,28 @@
-import { AccountSettingsEditor } from "@/components/settings/account-settings-editor";
-import { getAccountsWithEntities } from "@/lib/queries/accounts";
+import Link from "next/link";
+import { AccountWallet } from "@/components/settings/account-wallet";
 import { getClassifiableEntities } from "@/lib/queries/review";
+import { getWalletItems } from "@/lib/queries/wallet";
 
 export default async function AccountSettingsPage() {
-  const [accounts, entities] = await Promise.all([getAccountsWithEntities(), getClassifiableEntities()]);
+  const [items, entities] = await Promise.all([getWalletItems(), getClassifiableEntities()]);
 
   return (
     <div className="space-y-8">
       <div className="space-y-1">
         <p className="text-sm font-medium text-primary">Settings</p>
-        <h1 className="text-3xl font-semibold tracking-tight">Accounts & entities</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Accounts</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
-          Configure which entity new imports land in. Date rules switch entity assignment from a chosen date
-          forward — like Capital One Quicksilver moving from GBSL to Personal in July. Existing classified
-          transactions stay as-is until you reclassify them.
+          Front shows the last four digits and entity. Flip, then click a number to reveal card number, expiration, and
+          CVV (or routing and account). Edit saves to the encrypted vault. Add a card or account as untracked (wallet
+          only); link it under{" "}
+          <Link href="/settings/connections" className="font-medium text-foreground underline-offset-4 hover:underline">
+            Connections
+          </Link>
+          .
         </p>
       </div>
 
-      <AccountSettingsEditor accounts={accounts} entities={entities} />
+      <AccountWallet items={items} entities={entities} />
     </div>
   );
 }
