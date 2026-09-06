@@ -22,6 +22,7 @@ Default period is the **calendar year** (picker at the top). Tabs:
 |-----|---------|
 | Uncategorized | Amazon purchase, not linked, still needs a category (or Ask My Accountant) |
 | Unmatched | Categorized, not yet linked to a shipment |
+| Skipped | Categorized **on purpose without** an Amazon order (fraud, another account, cancelled). Needs a note. |
 | Done | Categorized **and** matched — archived. Edit unlocks the form; bulk fixes go through code. |
 | All | Everything in the period except card-pay transfers |
 
@@ -37,7 +38,7 @@ Card charges are per **shipment** (`Order ID` + `Ship Date`), not per order. Mat
 | B | Ambiguous — pick in the desk |
 | C | No candidate |
 
-Suggestions never write the books. **Confirm & link** (or split) does. On a Done row, **Edit → Save category** changes entity/category only and leaves the Amazon match and order notes alone.
+Suggestions never write the books. **Confirm & link** (or split) does. **Skip / no match** writes entity, category, and a note, then archives under **Skipped** with no shipment. On a Done or Skipped row, **Edit → Save category** changes entity/category only.
 
 ## Splits
 

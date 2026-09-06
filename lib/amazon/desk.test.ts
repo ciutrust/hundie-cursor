@@ -32,7 +32,13 @@ describe("amazonDeskBucket", () => {
     ).toBe("uncategorized");
     expect(
       amazonDeskBucket({ linkStatus: "rejected", categoryFullPath: "Job Supplies Expense" }),
-    ).toBe("unmatched");
+    ).toBe("skipped");
+    expect(
+      amazonDeskBucket({ linkStatus: "rejected", categoryFullPath: "Fraudulent charge" }),
+    ).toBe("skipped");
+    expect(amazonDeskBucket({ linkStatus: "rejected", categoryFullPath: null })).toBe(
+      "uncategorized",
+    );
   });
 });
 
@@ -40,7 +46,7 @@ describe("parseAmazonDeskStatus", () => {
   it("maps legacy query values", () => {
     expect(parseAmazonDeskStatus("open")).toBe("uncategorized");
     expect(parseAmazonDeskStatus("confirmed")).toBe("done");
-    expect(parseAmazonDeskStatus("suggested")).toBe("unmatched");
+    expect(parseAmazonDeskStatus("rejected")).toBe("skipped");
     expect(parseAmazonDeskStatus(undefined)).toBe("uncategorized");
   });
 });

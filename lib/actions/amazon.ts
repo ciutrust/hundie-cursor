@@ -582,18 +582,69 @@ export async function confirmAmazonSplit(
   return { success: true };
 }
 
-export async function rejectAmazonMatch(
-  transactionId: string,
-): Promise<{ success: true } | { error: string }> {
+export async function skipAmazonMatch(input: {
+  transactionId: string;
+  entityId: string;
+  categoryId: string;
+  entitySlug: string;
+  notes: string;
+}): Promise<{ success: true } | { error: string }> {
   const auth = await requireUser();
   if (auth.error || !auth.user) return { error: auth.error ?? "Not authenticated" };
+
+  const reason = input.notes.trim();
+  if (!reason) return { error: "Add a note (son's account, fraud, etc.)" };
+
+  const { data: txRaw, error: txErr } = await auth.supabase
+    .from("transactions")
+    .select("id, split_at, classifications!inner ( id, notes )")
+    .eq("id", input.transactionId)
+    .maybeSingle();
+  if (txErr) return { error: txErr.message };
+  const tx = txRaw as {
+    id: string;
+    split_at: string | null;
+    classifications: { id: string; notes: string | null } | { id: string; notes: string | null }[];
+  } | null;
+  if (!tx) return { error: "Transaction not found" };
+  if (tx.split_at) {
+    return { error: "Charge is split — change legs in code or unsplit first" };
+  }
+
+  const cls = Array.isArray(tx.classifications) ? tx.classifications[0] : tx.classifications;
+  if (!cls) return { error: "Classification missing" };
+
+  const { data: category, error: catErr } = await auth.supabase
+    .from("categories")
+    .select("entity_id")
+    .eq("id", input.categoryId)
+    .maybeSingle();
+  if (catErr) return { error: catErr.message };
+  if (!category || category.entity_id !== input.entityId) {
+    return { error: "Category does not belong to the selected entity" };
+  }
+
+  const existing = (cls.notes ?? "").trim();
+  const notes = existing.includes(reason) ? existing : [existing, reason].filter(Boolean).join("\n");
+
+  const { error: updErr } = await auth.supabase
+    .from("classifications")
+    .update({
+      entity_id: input.entityId,
+      category_id: input.categoryId,
+      notes,
+      classified_by: auth.user.email ?? auth.user.id,
+      classified_at: new Date().toISOString(),
+    })
+    .eq("id", cls.id);
+  if (updErr) return { error: updErr.message };
 
   const supabase = await amazonDb();
   const { error } = await supabase
     .from("amazon_charge_links")
     .upsert(
       {
-        transaction_id: transactionId,
+        transaction_id: input.transactionId,
         shipment_id: null,
         match_tier: "C",
         status: "rejected",
@@ -606,6 +657,7 @@ export async function rejectAmazonMatch(
     );
   if (error) return { error: error.message };
   revalidateAmazon();
+  revalidatePath(`/review/${input.entitySlug}`);
   return { success: true };
 }
 

@@ -47,9 +47,9 @@ export default async function AmazonDeskPage({ searchParams }: PageProps) {
             <h1 className="text-3xl font-semibold tracking-tight">Amazon desk</h1>
           </div>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Link card Amazon charges to order shipments. Uncategorized still need a category;
-            unmatched already have one. Done is archived. Paying an Amazon card from checking is
-            hidden.
+            Link card Amazon charges to order shipments. Skip is for fraud or another person’s
+            Amazon account: pick a category, add a note, and it archives under Skipped with no
+            order. Paying an Amazon card from checking is hidden.
           </p>
         </div>
         <Suspense fallback={null}>

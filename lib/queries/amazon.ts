@@ -307,6 +307,7 @@ export async function getAmazonDeskQueue(filter: {
   counts: {
     uncategorized: number;
     unmatched: number;
+    skipped: number;
     done: number;
     total: number;
   };
@@ -360,6 +361,7 @@ export async function getAmazonDeskQueue(filter: {
   const counts = {
     uncategorized: 0,
     unmatched: 0,
+    skipped: 0,
     done: 0,
     total: items.length,
   };

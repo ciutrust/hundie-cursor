@@ -5,7 +5,7 @@ import Link from "next/link";
 import {
   confirmAmazonSplit,
   confirmAmazonWhole,
-  rejectAmazonMatch,
+  skipAmazonMatch,
   updateAmazonDeskClassification,
 } from "@/lib/actions/amazon";
 import { AmazonLogo } from "@/components/amazon/amazon-logo";
@@ -30,7 +30,7 @@ type CatOpt = { id: string; full_path: string };
 
 type AmazonDeskClientProps = {
   items: AmazonDeskQueueItem[];
-  counts: { uncategorized: number; unmatched: number; done: number; total: number };
+  counts: { uncategorized: number; unmatched: number; skipped: number; done: number; total: number };
   entities: EntityOpt[];
   categoriesByEntity: Record<string, CatOpt[]>;
   filter: string;
@@ -84,6 +84,11 @@ export function AmazonDeskClient({
             label={`Unmatched ${counts.unmatched}`}
           />
           <FilterPill
+            href={`/amazon?${queryBase}&status=skipped`}
+            active={filter === "skipped"}
+            label={`Skipped ${counts.skipped}`}
+          />
+          <FilterPill
             href={`/amazon?${queryBase}&status=done`}
             active={filter === "done"}
             label={`Done ${counts.done}`}
@@ -95,7 +100,8 @@ export function AmazonDeskClient({
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          Uncategorized still need a category. Unmatched already have one. Done is archived.
+          Uncategorized still need a category. Unmatched already have one. Skipped has no Amazon
+          order. Done is matched.
         </p>
         <ul className="max-h-[70vh] space-y-1 overflow-y-auto rounded-xl border border-border">
           {items.length === 0 ? (
@@ -123,9 +129,11 @@ export function AmazonDeskClient({
                       <span>
                         {item.link?.status === "confirmed"
                           ? "Done"
-                          : item.charge.categoryFullPath
-                            ? "Unmatched"
-                            : "Uncategorized"}
+                          : item.link?.status === "rejected"
+                            ? "Skipped"
+                            : item.charge.categoryFullPath
+                              ? "Unmatched"
+                              : "Uncategorized"}
                       </span>
                     </div>
                     {item.shipment ? (
@@ -205,7 +213,7 @@ function AmazonChargeArchive({
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Archived match
+          {item.link?.status === "rejected" ? "Skipped — no Amazon order" : "Archived match"}
         </p>
         <Button type="button" variant="outline" size="sm" onClick={onEdit}>
           Edit
@@ -249,7 +257,9 @@ function AmazonChargeArchive({
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">
-          Linked, but no shipment row yet. Upload a Your Orders export to attach items.
+          {item.link?.status === "rejected"
+            ? "No Amazon order to match (fraud, another account, cancelled, etc.)."
+            : "Linked, but no shipment row yet. Upload a Your Orders export to attach items."}
         </p>
       )}
       {item.charge.notes ? (
@@ -296,8 +306,10 @@ function AmazonChargeDetail({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const isDone = item.link?.status === "confirmed";
+  const isSkipped = item.link?.status === "rejected";
+  const isArchived = isDone || isSkipped;
   const [editing, setEditing] = useState(false);
-  const showForm = !isDone || editing;
+  const showForm = !isArchived || editing;
   const entityName = entities.find((e) => e.id === charge.entityId)?.name ?? charge.entitySlug;
   const categoryLabel =
     categories.find((c) => c.id === charge.categoryId)?.full_path ??
@@ -373,6 +385,15 @@ function AmazonChargeDetail({
           : mode === "split" && remaining !== 0
             ? "Split legs must sum to the charge."
             : null;
+  const skipBlocked = pending
+    ? null
+    : mode !== "whole"
+      ? "Switch to Whole charge to skip without an Amazon order."
+      : !categoryId
+        ? "Pick a category (Fraudulent charge, etc.)."
+        : extraNotes.trim()
+          ? null
+          : "Add a note (son's account, fraud, cancelled).";
 
   function confirmWhole() {
     if (!shipmentId || !categoryId) {
@@ -432,10 +453,24 @@ function AmazonChargeDetail({
     });
   }
 
-  function onReject() {
+  function onSkip() {
+    if (!categoryId) {
+      setError("Pick a category");
+      return;
+    }
+    if (!extraNotes.trim()) {
+      setError("Add a note (son's account, fraud, cancelled)");
+      return;
+    }
     setError(null);
     startTransition(async () => {
-      const res = await rejectAmazonMatch(charge.transactionId);
+      const res = await skipAmazonMatch({
+        transactionId: charge.transactionId,
+        entityId,
+        categoryId,
+        entitySlug,
+        notes: extraNotes,
+      });
       if ("error" in res) setError(res.error);
       else onDone();
     });
@@ -484,7 +519,7 @@ function AmazonChargeDetail({
         ) : null}
       </div>
 
-      {isDone && !editing ? (
+      {isArchived && !editing ? (
         <AmazonChargeArchive
           item={item}
           entityName={entityName}
@@ -662,17 +697,17 @@ function AmazonChargeDetail({
         </div>
       )}
 
-      {isDone ? null : (
+      {isArchived ? null : (
       <div className="space-y-2">
-        <Label htmlFor="amazon-extra-notes">Extra notes (optional)</Label>
+        <Label htmlFor="amazon-extra-notes">Note (required to skip)</Label>
         <Input
           id="amazon-extra-notes"
           value={extraNotes}
           onChange={(e) => setExtraNotes(e.target.value)}
-          placeholder="Added before item summary + order URL"
+          placeholder="Son's cancelled account, fraud $400, no order to match"
         />
         <p className="text-xs text-muted-foreground">
-          On confirm, notes get the item summary and Amazon order link automatically.
+          Skip archives without an Amazon order. Confirm & link still adds item summary + order URL.
         </p>
       </div>
       )}
@@ -681,7 +716,7 @@ function AmazonChargeDetail({
 
       <div className="space-y-2">
         <div className="flex flex-wrap gap-2">
-          {isDone ? (
+          {isArchived ? (
             <Button
               type="button"
               disabled={pending || !categoryId || mode !== "whole"}
@@ -692,14 +727,19 @@ function AmazonChargeDetail({
           ) : null}
           <Button
             type="button"
-            variant={isDone ? "outline" : "default"}
+            variant={isArchived ? "outline" : "default"}
             disabled={pending || Boolean(confirmBlocked)}
             onClick={mode === "whole" ? confirmWhole : confirmSplit}
           >
             {pending ? "Saving…" : "Confirm & link"}
           </Button>
-          {!isDone ? (
-            <Button type="button" variant="outline" disabled={pending} onClick={onReject}>
+          {!isArchived ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending || Boolean(skipBlocked)}
+              onClick={onSkip}
+            >
               Skip / no match
             </Button>
           ) : (
@@ -708,17 +748,19 @@ function AmazonChargeDetail({
             </Button>
           )}
         </div>
-        {isDone ? (
+        {isArchived ? (
           <p className="text-xs text-muted-foreground">
             {mode !== "whole"
               ? "Switch to Whole charge to save a category without touching the Amazon match."
               : "Save category updates Hundie only. Confirm & link rewrites the Amazon match and notes."}
           </p>
-        ) : confirmBlocked ? (
-          <p className="text-xs text-muted-foreground">{confirmBlocked}</p>
         ) : (
           <p className="text-xs text-muted-foreground">
-            Writes entity, category, and the Amazon order link, then moves this charge to Done.
+            {skipBlocked
+              ? skipBlocked
+              : confirmBlocked
+                ? `Skip is ready. ${confirmBlocked}`
+                : "Confirm writes a shipment match. Skip archives with category + note and no Amazon order."}
           </p>
         )}
       </div>
