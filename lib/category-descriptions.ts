@@ -38,6 +38,8 @@ export const DESCRIPTIONS: Record<string, string> = {
   "Refund / credit": "A refund or merchant credit reversing a prior charge. Nets against spend; not income.",
   "Chargeback":
     "Member/customer disputed a card charge (issuer pullback) — a lost sale / expense. Distinct from a voluntary Refund / credit.",
+  "Fraudulent charge":
+    "Unauthorized / stolen-card charge on YOUR card — an expense. Pair with Refund / credit when the issuer refunds it. Not Chargeback (that's a member disputing against you).",
   "Owner Contribution": "Owner putting personal money INTO this entity (capital in). Equity, not income — excluded from P&L. Pairs with a 'Transfer' out on the funding account.",
   "Owner Distribution": "Money taken OUT of the entity to the owner (a draw). Equity, not an expense — excluded from P&L.",
   "Owners Equity": "Owner-equity movements (contributions / draws). Balance sheet, not P&L.",

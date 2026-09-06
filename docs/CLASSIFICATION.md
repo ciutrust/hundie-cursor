@@ -18,6 +18,7 @@ Human-in-the-loop always — suggestions help; Alex confirms every category.
   - `Refund / credit` — voluntary refunds / merchant credits; **not P&L**
 - **Hundie-only (expense):**
   - `Chargeback` — member/customer card disputes (issuer pullback); **counts as expense**
+  - `Fraudulent charge` — unauthorized / stolen charges on your card; **counts as expense** (pair issuer refunds with `Refund / credit`)
 - **CPA review:** `Ask My Accountant` — imported from QB; still needs Alex's call (treated as review backlog, not final).
 
 ### Personal (`personal`)
@@ -31,6 +32,7 @@ Human-in-the-loop always — suggestions help; Alex confirms every category.
 | `Credit card payment` | Autopay / online transfer to pay a card |
 | `Transfer / Zelle (personal)` | Moving money, not spend |
 | `Refund / credit` | Refunds, credits |
+| `Fraudulent charge` | Unauthorized / stolen card charges (pair refunds with Refund / credit) |
 | `Credit card interest (non-deductible)` | CC interest on personal cards (added Jun 2026) |
 | `Mortgage payment` | Whole mortgage payment as one line — **no principal/interest split** (split is QBO's job); added Jul 2026 |
 | `HELOC payment` | Whole HELOC payment as one line — no split (added Jul 2026) |
@@ -93,6 +95,7 @@ Card **refunds/credits** now import as **negative-amount** rows. (Before this ch
 
 - Classify a refund as **`Refund / credit`**. The negative amount keeps it out of the `amount > 0` expense totals automatically; it still shows in the category drill-down and the CSV export (`counts_as_expense = no`).
 - Classify a **member/customer card dispute** (issuer pullback) as **`Chargeback`** on GBSL — not `Refund / credit` (voluntary refunds / merchant credits).
+- Classify an **unauthorized / stolen charge on your card** as **`Fraudulent charge`** (expense). When the issuer refunds it, classify that negative row as **`Refund / credit`**. Same note on both (e.g. `Fraud — issuer refunding`). Totals stay gross — the refund does not auto-net the fraud expense in Hundie.
 - Card **payments** (paying off the card) and **checking deposits / income** are still dropped at import — they are not spend.
 - Totals stay **gross**: a refund is a visible row, not auto-netted against the original charge. Net spend = charges − refunds; the netting and tax treatment happen in **QBO**, not here (Hundie is expense control, not the books).
 - **Backfill:** to pull in refunds from CSVs imported before this change, **re-import the card CSVs** — dedupe is safe, so existing charges are not duplicated (`npm run import:cards:apply`; bare `import:cards` is dry-run). See [RUN.md](../RUN.md) for `cleanup:ledger-dupes` if legacy double-imports exist.
@@ -122,6 +125,8 @@ Transactions need review when:
 | `ONLINE TRANSFER … TO BUSINESSLINE …` | GBSL | **Credit card payment** (LOC treated as card) |
 | `ZELLE … REFUND` | entity of original charge | **Refund / credit** |
 | Member/customer card dispute (issuer pullback) | GBSL | **Chargeback** (not Refund / credit) |
+| Unauthorized / stolen charge on your card | entity of the card | **Fraudulent charge** |
+| Issuer fraud refund (negative) | same entity | **Refund / credit** |
 | `IN *GRACIE BARRA …` ~$125 | GBSL | **Software** (CRM) |
 | `IN *GRACIE BARRA …` ~$850–900 | GBSL | **Franchise Fees** |
 | `PAST DUE FEE` on rental CC | acaa-austin / pflugerville | **Bank fees** |
@@ -169,6 +174,7 @@ Transactions need review when:
 | `20260629120000_add_transfer_and_rental_categories.sql` | GBSL transfer categories, Personal CC interest, rental Bank fees / CC interest / meals |
 | `20260905170000_gbsl_chargeback_category.sql` | GBSL `Chargeback` (expense — member card disputes) |
 | `20260905180000_gbsl_chargeback_kind_expense.sql` | Ensure GBSL `Chargeback` kind is expense (fix if seeded as transfer) |
+| `20260906000000_fraudulent_charge_category.sql` | `Fraudulent charge` (expense) on Personal, GBSL, Keller, rentals |
 | `20260701120000_mortgage_heloc_payment_categories.sql` | `Mortgage payment` + `HELOC payment` (counted) on Pflugerville, Austin ACAA, Personal |
 
 ---
