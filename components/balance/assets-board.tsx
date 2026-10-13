@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { updateAssetValue } from "@/lib/actions/update-asset-value";
 import { cn, formatCurrency } from "@/lib/utils";
+import { BalanceTotals, type BalanceTotalsData } from "./balance-totals";
+import { EntityStack } from "./entity-stack";
 import { useStoredView, ViewToggle } from "./view-toggle";
 
 export type AssetCard = {
@@ -107,7 +109,7 @@ function AssetItem({ asset, view }: { asset: AssetCard; view: "grid" | "list" })
   return (
     <article
       className={cn(
-        "rounded-xl border border-border bg-card p-4",
+        "rounded-xl border border-border bg-background p-4",
         view === "grid" ? "flex min-h-44 flex-col justify-between" : "flex flex-col gap-3 sm:flex-row sm:items-center",
       )}
     >
@@ -115,8 +117,7 @@ function AssetItem({ asset, view }: { asset: AssetCard; view: "grid" | "list" })
         <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           {label(asset.type)}
         </p>
-        <h2 className="mt-1 text-sm font-semibold leading-snug">{asset.name}</h2>
-        <p className="mt-1 text-xs text-muted-foreground">{asset.entity}</p>
+        <h3 className="mt-1 text-sm font-semibold leading-snug">{asset.name}</h3>
         {asset.notes ? <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{asset.notes}</p> : null}
       </div>
       <div className={cn(view === "list" && "sm:w-56")}>
@@ -134,7 +135,17 @@ function AssetItem({ asset, view }: { asset: AssetCard; view: "grid" | "list" })
   );
 }
 
-export function AssetsBoard({ assets, total }: { assets: AssetCard[]; total: string }) {
+function groupByEntity(items: AssetCard[]) {
+  const groups = new Map<string, AssetCard[]>();
+  for (const item of items) {
+    const list = groups.get(item.entity) ?? [];
+    list.push(item);
+    groups.set(item.entity, list);
+  }
+  return [...groups.entries()];
+}
+
+export function AssetsBoard({ assets, totals }: { assets: AssetCard[]; totals: BalanceTotalsData }) {
   const [view, setView] = useStoredView("hundie:assets-view");
 
   return (
@@ -142,18 +153,24 @@ export function AssetsBoard({ assets, total }: { assets: AssetCard[]; total: str
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Assets</h1>
-          <p className="text-sm text-muted-foreground">Total value: {total}</p>
+          <p className="text-sm text-muted-foreground">Grouped by entity. Arrows change the order on Liabilities too.</p>
         </div>
         <ViewToggle view={view} onChange={setView} />
       </div>
+      <BalanceTotals totals={totals} highlight="assets" />
       {assets.length === 0 ? (
         <p className="text-sm text-muted-foreground">No assets yet.</p>
       ) : (
-        <div className={view === "grid" ? "grid gap-3 sm:grid-cols-2 xl:grid-cols-3" : "space-y-2"}>
-          {assets.map((asset) => (
-            <AssetItem key={asset.id} asset={asset} view={view} />
-          ))}
-        </div>
+        <EntityStack
+          collapseKey="hundie:assets-collapsed"
+          view={view}
+          groups={groupByEntity(assets).map(([name, items]) => ({
+            name,
+            total: items.reduce((sum, item) => sum + item.value, 0),
+            count: items.length,
+            body: items.map((asset) => <AssetItem key={asset.id} asset={asset} view={view} />),
+          }))}
+        />
       )}
     </div>
   );

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ChevronDown } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
+import { BalanceTotals, type BalanceTotalsData } from "./balance-totals";
+import { EntityStack } from "./entity-stack";
 import { useStoredView, ViewToggle } from "./view-toggle";
 
 export type LiabilityCard = {
@@ -12,11 +12,10 @@ export type LiabilityCard = {
   entity: string;
   balance: number;
   apr: number | null;
+  notes: string | null;
   updatedLabel: string;
   stale: boolean;
 };
-
-const COLLAPSED_KEY = "hundie:liabilities-collapsed";
 
 function label(type: string) {
   return type.replaceAll("_", " ");
@@ -47,113 +46,48 @@ function LiabilityItem({ item, view }: { item: LiabilityCard; view: "grid" | "li
   );
 }
 
-function groupByEntity(items: LiabilityCard[]): [string, LiabilityCard[]][] {
+function groupByEntity(items: LiabilityCard[]) {
   const groups = new Map<string, LiabilityCard[]>();
   for (const item of items) {
     const list = groups.get(item.entity) ?? [];
     list.push(item);
     groups.set(item.entity, list);
   }
-  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
-}
-
-function useCollapsedEntities(): [Set<string>, (entity: string) => void] {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(COLLAPSED_KEY);
-      if (!stored) return;
-      const names = JSON.parse(stored) as unknown;
-      if (Array.isArray(names)) {
-        setCollapsed(new Set(names.filter((name): name is string => typeof name === "string")));
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  function toggle(entity: string) {
-    setCollapsed((current) => {
-      const next = new Set(current);
-      if (next.has(entity)) next.delete(entity);
-      else next.add(entity);
-      try {
-        window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
-  }
-
-  return [collapsed, toggle];
+  return [...groups.entries()];
 }
 
 export function LiabilitiesBoard({
   liabilities,
-  total,
+  totals,
 }: {
   liabilities: LiabilityCard[];
-  total: string;
+  totals: BalanceTotalsData;
 }) {
   const [view, setView] = useStoredView("hundie:liabilities-view");
-  const [collapsed, toggleCollapsed] = useCollapsedEntities();
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Liabilities</h1>
-          <p className="text-sm text-muted-foreground">Total owed: {total}</p>
+          <p className="text-sm text-muted-foreground">Grouped by entity. Arrows change the order on Assets too.</p>
         </div>
         <ViewToggle view={view} onChange={setView} />
       </div>
+      <BalanceTotals totals={totals} highlight="liabilities" />
       {liabilities.length === 0 ? (
         <p className="text-sm text-muted-foreground">No liabilities yet.</p>
       ) : (
-        <div className="space-y-4">
-          {groupByEntity(liabilities).map(([entity, items]) => {
-            const subtotal = items.reduce((sum, item) => sum + item.balance, 0);
-            const isCollapsed = collapsed.has(entity);
-            return (
-              <section key={entity} className="overflow-hidden rounded-xl border border-border bg-card">
-                <button
-                  type="button"
-                  aria-expanded={!isCollapsed}
-                  onClick={() => toggleCollapsed(entity)}
-                  className="flex w-full items-center gap-3 px-4 py-4 text-left hover:bg-accent/40"
-                >
-                  <ChevronDown
-                    className={cn(
-                      "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-                      isCollapsed && "-rotate-90",
-                    )}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-base font-semibold">{entity}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {items.length} {items.length === 1 ? "item" : "items"}
-                    </span>
-                  </span>
-                  <span className="text-2xl font-semibold tabular-nums">{formatCurrency(subtotal)}</span>
-                </button>
-                {isCollapsed ? null : (
-                  <div
-                    className={cn(
-                      "border-t border-border p-4",
-                      view === "grid" ? "grid gap-3 sm:grid-cols-2 xl:grid-cols-3" : "space-y-2",
-                    )}
-                  >
-                    {items.map((item) => (
-                      <LiabilityItem key={item.id} item={item} view={view} />
-                    ))}
-                  </div>
-                )}
-              </section>
-            );
-          })}
-        </div>
+        <EntityStack
+          collapseKey="hundie:liabilities-collapsed"
+          view={view}
+          groups={groupByEntity(liabilities).map(([name, items]) => ({
+            name,
+            total: items.reduce((sum, item) => sum + item.balance, 0),
+            count: items.length,
+            body: items.map((item) => <LiabilityItem key={item.id} item={item} view={view} />),
+          }))}
+        />
       )}
     </div>
   );
