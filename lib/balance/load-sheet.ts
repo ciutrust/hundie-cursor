@@ -31,7 +31,7 @@ export async function loadBalanceSheet(): Promise<{
     supabase
       .from("liabilities")
       .select(
-        "id, type, name, current_balance, interest_rate, notes, updated_at, last_synced_at, entity:entities(name, slug)",
+        "id, type, name, current_balance, interest_rate, notes, plaid_account_id, updated_at, last_synced_at, entity:entities(name, slug)",
       )
       .order("type")
       .order("name"),
@@ -63,6 +63,7 @@ export async function loadBalanceSheet(): Promise<{
       balance: Number(item.current_balance || 0),
       apr: item.interest_rate == null ? null : Number(item.interest_rate),
       notes: item.notes,
+      manual: item.plaid_account_id == null,
       updatedLabel: fresh.label,
       stale: fresh.stale,
     };
