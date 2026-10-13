@@ -13,6 +13,8 @@ export type AssetCard = {
   entity: string;
   value: number;
   notes: string | null;
+  updatedLabel: string;
+  stale: boolean;
 };
 
 function label(type: string) {
@@ -119,6 +121,14 @@ function AssetItem({ asset, view }: { asset: AssetCard; view: "grid" | "list" })
       </div>
       <div className={cn(view === "list" && "sm:w-56")}>
         <ValueField id={asset.id} value={asset.value} />
+        <p
+          className={cn(
+            "mt-1 text-xs",
+            asset.stale ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground",
+          )}
+        >
+          {asset.updatedLabel}
+        </p>
       </div>
     </article>
   );

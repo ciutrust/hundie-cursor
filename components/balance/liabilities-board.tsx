@@ -10,6 +10,8 @@ export type LiabilityCard = {
   entity: string;
   balance: number;
   apr: number | null;
+  updatedLabel: string;
+  stale: boolean;
 };
 
 function label(type: string) {
@@ -34,6 +36,9 @@ function LiabilityItem({ item, view }: { item: LiabilityCard; view: "grid" | "li
       <div className={cn(view === "list" && "sm:text-right")}>
         <p className="text-lg font-semibold tabular-nums">{formatCurrency(item.balance)}</p>
         <p className="text-xs text-muted-foreground">{item.apr != null ? `${item.apr}% APR` : "APR not set"}</p>
+        <p className={cn("text-xs", item.stale ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")}>
+          {item.updatedLabel}
+        </p>
       </div>
     </article>
   );

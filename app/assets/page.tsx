@@ -1,4 +1,5 @@
 import { AssetsBoard, type AssetCard } from "@/components/balance/assets-board";
+import { freshness } from "@/lib/balance/freshness";
 import { createClient } from "@/lib/supabase/server";
 import { formatCurrency } from "@/lib/utils";
 
@@ -18,18 +19,23 @@ export default async function AssetsPage() {
   const supabase = await createClient();
   const { data: assets } = await supabase
     .from("assets")
-    .select("id, type, name, current_value, notes, entity:entities(name, slug)")
+    .select("id, type, name, current_value, notes, updated_at, entity:entities(name, slug)")
     .order("type")
     .order("name");
 
-  const cards: AssetCard[] = (assets ?? []).map((asset) => ({
-    id: asset.id,
-    name: asset.name,
-    type: asset.type,
-    entity: entityLabel(asset.entity),
-    value: Number(asset.current_value || 0),
-    notes: asset.notes,
-  }));
+  const cards: AssetCard[] = (assets ?? []).map((asset) => {
+    const fresh = freshness(asset.updated_at);
+    return {
+      id: asset.id,
+      name: asset.name,
+      type: asset.type,
+      entity: entityLabel(asset.entity),
+      value: Number(asset.current_value || 0),
+      notes: asset.notes,
+      updatedLabel: fresh.label,
+      stale: fresh.stale,
+    };
+  });
   const total = cards.reduce((sum, asset) => sum + asset.value, 0);
 
   return <AssetsBoard assets={cards} total={formatCurrency(total)} />;
