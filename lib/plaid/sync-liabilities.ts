@@ -3,6 +3,8 @@ import { decryptSecret } from "@/lib/crypto/secret-box";
 import {
   liabilityErrorNeedsConsent,
   matchLiabilities,
+  planCreditCardLiabilities,
+  type CreditCardLink,
   type LiabilityRow,
 } from "@/lib/plaid/match-liabilities";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
@@ -28,7 +30,9 @@ export type LiabilitySyncConnection = {
 
 /**
  * Pull /liabilities/get for each connection and write balance + APR onto existing rows.
- * Does not insert. A missing product comes back as needsConsent so the UI can open Link.
+ * Credit cards are inserted only when that Plaid account is already mapped to a Hundie
+ * credit card, so the entity comes from the ledger instead of a name guess.
+ * A missing product comes back as needsConsent so the UI can open Link.
  */
 export async function runLiabilitiesSync(
   admin: Admin,
@@ -50,6 +54,39 @@ export async function runLiabilitiesSync(
     name: row.name as string,
     plaidAccountId: (row.plaid_account_id as string | null) ?? null,
   }));
+
+  const { data: linkRows, error: linkError } = await admin
+    .from("plaid_account_links")
+    .select("connection_id, plaid_account_id, accounts(display_name, account_type, default_entity_id)");
+  if (linkError) throw linkError;
+
+  const { data: ignoredRows, error: ignoredError } = await admin
+    .from("plaid_ignored_accounts")
+    .select("plaid_account_id");
+  if (ignoredError) throw ignoredError;
+
+  const ignoredPlaidAccountIds = new Set<string>(
+    (ignoredRows ?? []).map((row) => row.plaid_account_id as string),
+  );
+
+  const linksByConnection = new Map<string, CreditCardLink[]>();
+  for (const link of linkRows ?? []) {
+    const account = Array.isArray(link.accounts) ? link.accounts[0] : link.accounts;
+    if (!account || typeof account !== "object") continue;
+    const record = account as {
+      display_name?: string;
+      account_type?: string;
+      default_entity_id?: string | null;
+    };
+    const list = linksByConnection.get(link.connection_id as string) ?? [];
+    list.push({
+      plaidAccountId: link.plaid_account_id as string,
+      accountType: record.account_type ?? "",
+      displayName: record.display_name ?? "Credit card",
+      entityId: record.default_entity_id ?? null,
+    });
+    linksByConnection.set(link.connection_id as string, list);
+  }
 
   const claimed = new Set<string>();
   const results: LiabilitySyncConnection[] = [];
@@ -114,7 +151,46 @@ export async function runLiabilitiesSync(
         });
       }
 
-      result.unmatched = unmatched.map((item) => ({
+      const { create, stillUnmatched } = planCreditCardLiabilities(
+        unmatched,
+        linksByConnection.get(conn.id) ?? [],
+        ignoredPlaidAccountIds,
+      );
+
+      for (const card of create) {
+        const { data: inserted, error: insertError } = await admin
+          .from("liabilities")
+          .insert({
+            type: "credit_card",
+            name: card.name,
+            entity_id: card.entityId,
+            current_balance: card.plaid.balance ?? 0,
+            interest_rate: card.plaid.apr,
+            plaid_account_id: card.plaid.accountId,
+            last_synced_at: now,
+            updated_at: now,
+          })
+          .select("id")
+          .single();
+        if (insertError) throw new Error(insertError.message);
+
+        const id = inserted.id as string;
+        claimed.add(id);
+        liabilityRows.push({
+          id,
+          type: "credit_card",
+          name: card.name,
+          plaidAccountId: card.plaid.accountId,
+        });
+        result.updated.push({
+          id,
+          name: card.name,
+          balance: card.plaid.balance,
+          apr: card.plaid.apr,
+        });
+      }
+
+      result.unmatched = stillUnmatched.map((item) => ({
         accountId: item.accountId,
         name: item.name,
         mask: item.mask,

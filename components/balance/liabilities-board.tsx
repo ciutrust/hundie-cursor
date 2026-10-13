@@ -44,6 +44,17 @@ function LiabilityItem({ item, view }: { item: LiabilityCard; view: "grid" | "li
   );
 }
 
+
+function groupByEntity(items: LiabilityCard[]): [string, LiabilityCard[]][] {
+  const groups = new Map<string, LiabilityCard[]>();
+  for (const item of items) {
+    const list = groups.get(item.entity) ?? [];
+    list.push(item);
+    groups.set(item.entity, list);
+  }
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+}
+
 export function LiabilitiesBoard({
   liabilities,
   total,
@@ -65,10 +76,23 @@ export function LiabilitiesBoard({
       {liabilities.length === 0 ? (
         <p className="text-sm text-muted-foreground">No liabilities yet.</p>
       ) : (
-        <div className={view === "grid" ? "grid gap-3 sm:grid-cols-2 xl:grid-cols-3" : "space-y-2"}>
-          {liabilities.map((item) => (
-            <LiabilityItem key={item.id} item={item} view={view} />
-          ))}
+        <div className="space-y-8">
+          {groupByEntity(liabilities).map(([entity, items]) => {
+            const subtotal = items.reduce((sum, item) => sum + item.balance, 0);
+            return (
+              <section key={entity} className="space-y-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <h2 className="text-sm font-semibold">{entity}</h2>
+                  <p className="text-xs tabular-nums text-muted-foreground">{formatCurrency(subtotal)}</p>
+                </div>
+                <div className={view === "grid" ? "grid gap-3 sm:grid-cols-2 xl:grid-cols-3" : "space-y-2"}>
+                  {items.map((item) => (
+                    <LiabilityItem key={item.id} item={item} view={view} />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
         </div>
       )}
     </div>

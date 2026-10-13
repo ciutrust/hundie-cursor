@@ -149,3 +149,52 @@ export function liabilityErrorNeedsConsent(error: string): boolean {
     error,
   );
 }
+
+export type CreditCardLink = {
+  plaidAccountId: string;
+  accountType: string;
+  displayName: string;
+  entityId: string | null;
+};
+
+export type CreditCardPlan = {
+  plaid: PlaidLiability;
+  name: string;
+  entityId: string | null;
+};
+
+export function creditCardLiabilityName(displayName: string, mask: string | null): string {
+  if (mask && !displayName.includes(mask)) return `${displayName} ••${mask}`;
+  return displayName;
+}
+
+/**
+ * Turn unmatched Plaid credit liabilities into rows only when the operator already mapped
+ * that Plaid account to a Hundie credit card. Mortgages and unmapped cards are not created.
+ * Ignored accounts are dropped instead of shown as unmatched.
+ */
+export function planCreditCardLiabilities(
+  unmatched: PlaidLiability[],
+  links: CreditCardLink[],
+  ignoredPlaidAccountIds: ReadonlySet<string> = new Set(),
+): { create: CreditCardPlan[]; stillUnmatched: PlaidLiability[] } {
+  const byPlaid = new Map(links.map((link) => [link.plaidAccountId, link]));
+  const create: CreditCardPlan[] = [];
+  const stillUnmatched: PlaidLiability[] = [];
+
+  for (const plaid of unmatched) {
+    if (ignoredPlaidAccountIds.has(plaid.accountId)) continue;
+    const link = byPlaid.get(plaid.accountId);
+    if (plaid.kind === "credit" && link?.accountType === "credit_card") {
+      create.push({
+        plaid,
+        name: creditCardLiabilityName(link.displayName, plaid.mask),
+        entityId: link.entityId,
+      });
+      continue;
+    }
+    stillUnmatched.push(plaid);
+  }
+
+  return { create, stillUnmatched };
+}

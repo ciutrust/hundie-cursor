@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   liabilityErrorNeedsConsent,
   matchLiabilities,
+  planCreditCardLiabilities,
   type LiabilityRow,
   type PlaidLiability,
 } from "@/lib/plaid/match-liabilities";
@@ -102,5 +103,43 @@ describe("liabilityErrorNeedsConsent", () => {
   it("flags a missing product and ignores a not-ready retry", () => {
     expect(liabilityErrorNeedsConsent("ADDITIONAL_CONSENT_REQUIRED: liabilities")).toBe(true);
     expect(liabilityErrorNeedsConsent("PRODUCT_NOT_READY: still initializing")).toBe(false);
+  });
+});
+
+describe("planCreditCardLiabilities", () => {
+  it("creates a card only when that Plaid account is mapped to a credit card", () => {
+    const { create, stillUnmatched } = planCreditCardLiabilities(
+      [
+        plaid({ accountId: "amazon", institution: "Chase", name: "CREDIT CARD", kind: "credit", mask: "4242", balance: 640 }),
+        plaid({ accountId: "mystery", institution: "Chase", name: "CREDIT CARD", kind: "credit", mask: "9999" }),
+        plaid({ accountId: "mt", institution: "M&T Bank", name: "Mortgage", kind: "mortgage" }),
+      ],
+      [
+        {
+          plaidAccountId: "amazon",
+          accountType: "credit_card",
+          displayName: "Amazon",
+          entityId: "personal-id",
+        },
+      ],
+    );
+    expect(create).toEqual([
+      {
+        plaid: expect.objectContaining({ accountId: "amazon", balance: 640 }),
+        name: "Amazon ••4242",
+        entityId: "personal-id",
+      },
+    ]);
+    expect(stillUnmatched.map((item) => item.accountId)).toEqual(["mystery", "mt"]);
+  });
+
+  it("drops a card the operator marked don't track", () => {
+    const { create, stillUnmatched } = planCreditCardLiabilities(
+      [plaid({ accountId: "skip", institution: "Chase", name: "CREDIT CARD", kind: "credit" })],
+      [],
+      new Set(["skip"]),
+    );
+    expect(create).toEqual([]);
+    expect(stillUnmatched).toEqual([]);
   });
 });
