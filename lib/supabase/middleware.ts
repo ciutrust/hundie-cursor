@@ -40,7 +40,10 @@ export async function updateSession(request: NextRequest) {
     path.startsWith("/categories") ||
     path.startsWith("/settings") ||
     path.startsWith("/month-close") ||
-    path.startsWith("/tax-close");
+    path.startsWith("/tax-close") ||
+    path.startsWith("/liabilities") ||
+    path.startsWith("/assets") ||
+    path.startsWith("/net-worth");
 
   if (!user) {
     if (isProtectedRoute || path === "/mfa") {
