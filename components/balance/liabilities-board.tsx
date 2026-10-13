@@ -16,6 +16,7 @@ export type LiabilityCard = {
   balance: number;
   apr: number | null;
   notes: string | null;
+  assetId: string | null;
   manual: boolean;
   updatedLabel: string;
   stale: boolean;

@@ -36,9 +36,11 @@ export function summarizeTotals(
 export function BalanceTotals({
   totals,
   highlight,
+  details = true,
 }: {
   totals: BalanceTotalsData;
   highlight: "assets" | "liabilities" | "net";
+  details?: boolean;
 }) {
   const net = totals.assetTotal - totals.liabilityTotal;
   const boxes = [
@@ -64,6 +66,7 @@ export function BalanceTotals({
           </div>
         ))}
       </div>
+      {details ? (
       <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm">
         <p>
           These three numbers are the same on Assets, Liabilities, and Net worth. Loans are{" "}
@@ -92,6 +95,7 @@ export function BalanceTotals({
           </p>
         ) : null}
       </div>
+      ) : null}
     </div>
   );
 }

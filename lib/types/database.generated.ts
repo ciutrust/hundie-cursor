@@ -290,6 +290,7 @@ export type Database = {
           name: string
           notes: string | null
           plaid_account_id: string | null
+          asset_id: string | null
           type: string
           updated_at: string
         }
@@ -305,6 +306,7 @@ export type Database = {
           name: string
           notes?: string | null
           plaid_account_id?: string | null
+          asset_id?: string | null
           type: string
           updated_at?: string
         }
@@ -320,6 +322,7 @@ export type Database = {
           name?: string
           notes?: string | null
           plaid_account_id?: string | null
+          asset_id?: string | null
           type?: string
           updated_at?: string
         }
@@ -329,6 +332,13 @@ export type Database = {
             columns: ["entity_id"]
             isOneToOne: false
             referencedRelation: "entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "liabilities_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
             referencedColumns: ["id"]
           },
         ]
