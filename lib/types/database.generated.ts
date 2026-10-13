@@ -12,6 +12,88 @@ export type Database = {
   }
   public: {
     Tables: {
+      asset_value_history: {
+        Row: {
+          asset_id: string
+          created_at: string
+          id: string
+          notes: string | null
+          source: string
+          value: number
+          valued_on: string
+        }
+        Insert: {
+          asset_id: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          source?: string
+          value: number
+          valued_on?: string
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          source?: string
+          value?: number
+          valued_on?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asset_value_history_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      assets: {
+        Row: {
+          acquired_date: string | null
+          created_at: string
+          current_value: number
+          entity_id: string | null
+          id: string
+          name: string
+          notes: string | null
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          acquired_date?: string | null
+          created_at?: string
+          current_value?: number
+          entity_id?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          type: string
+          updated_at?: string
+        }
+        Update: {
+          acquired_date?: string | null
+          created_at?: string
+          current_value?: number
+          entity_id?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assets_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "entities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       accounts: {
         Row: {
           account_type: Database["public"]["Enums"]["account_type"]
@@ -194,6 +276,62 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      liabilities: {
+        Row: {
+          created_at: string
+          credit_limit: number | null
+          current_balance: number
+          due_date: string | null
+          entity_id: string | null
+          id: string
+          interest_rate: number | null
+          last_synced_at: string | null
+          name: string
+          notes: string | null
+          plaid_account_id: string | null
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          credit_limit?: number | null
+          current_balance?: number
+          due_date?: string | null
+          entity_id?: string | null
+          id?: string
+          interest_rate?: number | null
+          last_synced_at?: string | null
+          name: string
+          notes?: string | null
+          plaid_account_id?: string | null
+          type: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          credit_limit?: number | null
+          current_balance?: number
+          due_date?: string | null
+          entity_id?: string | null
+          id?: string
+          interest_rate?: number | null
+          last_synced_at?: string | null
+          name?: string
+          notes?: string | null
+          plaid_account_id?: string | null
+          type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "liabilities_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "entities"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       import_batches: {
         Row: {

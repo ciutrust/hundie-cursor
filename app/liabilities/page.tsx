@@ -6,7 +6,7 @@ export default async function LiabilitiesPage() {
   const { data: liabilities } = await supabase
     .from("liabilities")
     .select("id, type, name, current_balance, interest_rate, entity:entities(name, slug)")
-    .order("type, name");
+    .order("type").order("name");
 
   const total = (liabilities ?? []).reduce((sum, l) => sum + Number(l.current_balance || 0), 0);
 

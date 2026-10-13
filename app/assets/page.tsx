@@ -6,7 +6,7 @@ export default async function AssetsPage() {
   const { data: assets } = await supabase
     .from("assets")
     .select("id, type, name, current_value, notes, entity:entities(name, slug)")
-    .order("type, name");
+    .order("type").order("name");
 
   const total = (assets ?? []).reduce((sum, a) => sum + Number(a.current_value || 0), 0);
 
