@@ -7,6 +7,7 @@ import {
   ArrowLeftRight,
   BookOpen,
   Brain,
+  Building2,
   CalendarCheck,
   Camera,
   ClipboardCheck,
@@ -21,9 +22,11 @@ import {
   PieChart,
   Plane,
   Receipt,
+  Scale,
   Settings2,
   ShieldCheck,
   TrendingUp,
+  Wallet,
   X,
 } from "lucide-react";
 import { AmazonLogo } from "@/components/amazon/amazon-logo";
@@ -124,6 +127,27 @@ const FUNCTIONS_ITEMS: NavItem[] = [
     label: "Capture",
     icon: Camera,
     match: (path) => path.startsWith("/capture"),
+  },
+];
+
+const BALANCE_ITEMS: NavItem[] = [
+  {
+    href: "/net-worth",
+    label: "Net worth",
+    icon: Scale,
+    match: (path) => path.startsWith("/net-worth"),
+  },
+  {
+    href: "/assets",
+    label: "Assets",
+    icon: Building2,
+    match: (path) => path.startsWith("/assets"),
+  },
+  {
+    href: "/liabilities",
+    label: "Liabilities",
+    icon: Wallet,
+    match: (path) => path.startsWith("/liabilities"),
   },
 ];
 
@@ -352,6 +376,13 @@ export function AppShell({
               Functions
             </p>
             <ul className="space-y-0.5">{FUNCTIONS_ITEMS.map(renderNavItem)}</ul>
+          </div>
+
+          <div>
+            <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Balance sheet
+            </p>
+            <ul className="space-y-0.5">{BALANCE_ITEMS.map(renderNavItem)}</ul>
           </div>
 
           <div>
