@@ -62,7 +62,13 @@ export function BalanceTotals({
             }
           >
             <p className="text-xs text-muted-foreground">{label}</p>
-            <p className="text-xl font-semibold tabular-nums">{formatCurrency(amount)}</p>
+            <p
+              className={
+                key === "liabilities" || (key === "net" && amount < 0)
+                  ? "text-xl font-semibold tabular-nums text-red-600 dark:text-red-400"
+                  : "text-xl font-semibold tabular-nums"
+              }
+            >{formatCurrency(amount)}</p>
           </div>
         ))}
       </div>

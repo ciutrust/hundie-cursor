@@ -7,10 +7,12 @@ function cents(value: number) {
   return Math.round(value * 100);
 }
 
-function Money({ amount, muted = false }: { amount: number; muted?: boolean }) {
+function Money({ amount, debt = false }: { amount: number; debt?: boolean }) {
+  const shown = debt ? -Math.abs(amount) : amount;
+  const red = debt || shown < 0;
   return (
-    <span className={muted ? "tabular-nums text-muted-foreground" : "tabular-nums font-medium"}>
-      {formatCurrency(amount)}
+    <span className={red ? "font-medium tabular-nums text-red-600 dark:text-red-400" : "font-medium tabular-nums"}>
+      {formatCurrency(shown)}
     </span>
   );
 }
@@ -67,7 +69,13 @@ export function NetWorthSheet({
               <h2 className="text-base font-semibold">{entity}</h2>
               <p className="text-right">
                 <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Net</span>
-                <span className="text-lg font-semibold tabular-nums">
+                <span
+                  className={
+                    entityAssetTotal - entityLiabilityTotal < 0
+                      ? "text-lg font-semibold tabular-nums text-red-600 dark:text-red-400"
+                      : "text-lg font-semibold tabular-nums"
+                  }
+                >
                   {formatCurrency(entityAssetTotal - entityLiabilityTotal)}
                 </span>
               </p>
@@ -90,12 +98,12 @@ export function NetWorthSheet({
                     {debts.map((debt) => (
                       <div key={debt.id} className="mt-2 flex items-baseline justify-between gap-3 pl-4">
                         <div>
-                          <p className="text-sm">{debt.name}</p>
+                          <p className="text-sm text-red-600 dark:text-red-400">{debt.name}</p>
                           {debt.entity !== asset.entity ? (
                             <p className="text-xs text-muted-foreground">Debt is on {debt.entity}</p>
                           ) : null}
                         </div>
-                        <Money amount={debt.balance} muted />
+                        <Money amount={debt.balance} debt />
                       </div>
                     ))}
                     {debts.length > 0 ? (
@@ -108,14 +116,18 @@ export function NetWorthSheet({
                 );
               })}
               {entityUnlinked.length > 0 ? (
-                <div className="px-4 py-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Liabilities only
-                  </p>
+                <div className="px-4 py-4">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <h3 className="text-lg font-semibold">Other liabilities</h3>
+                    <Money
+                      amount={entityUnlinked.reduce((sum, item) => sum + item.balance, 0)}
+                      debt
+                    />
+                  </div>
                   {entityUnlinked.map((item) => (
                     <div key={item.id} className="mt-2 flex items-baseline justify-between gap-3">
-                      <p className="text-sm">{item.name}</p>
-                      <Money amount={item.balance} muted />
+                      <p className="text-sm text-red-600 dark:text-red-400">{item.name}</p>
+                      <Money amount={item.balance} debt />
                     </div>
                   ))}
                 </div>
