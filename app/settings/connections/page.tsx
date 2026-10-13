@@ -5,6 +5,7 @@ import { getClassifiableEntities } from "@/lib/queries/review";
 import { ConnectBank } from "./connect-bank";
 import { ConnectionActions } from "./connection-actions";
 import { MapAccountsPanel } from "./map-accounts-panel";
+import { SyncLiabilitiesButton } from "./sync-liabilities-button";
 import { SyncNowButton } from "./sync-now-button";
 
 const STATUS_STYLES: Record<string, string> = {
@@ -53,6 +54,7 @@ export default async function ConnectionsPage() {
         <p className="text-sm text-muted-foreground">
           Link a bank once, map its accounts to your Hundie accounts, then pull transactions with
           Sync now — no more CSV downloads. Tokens are encrypted; nothing is stored in the browser.
+          Liabilities on an existing bank needs the Liabilities button on that bank once.
         </p>
       </div>
 
@@ -67,6 +69,7 @@ export default async function ConnectionsPage() {
       <div className="flex flex-wrap items-center gap-3">
         <ConnectBank accounts={accounts} />
         {connections.length > 0 ? <SyncNowButton /> : null}
+        {connections.length > 0 ? <SyncLiabilitiesButton /> : null}
       </div>
 
       {connections.length === 0 ? (
@@ -115,19 +118,16 @@ export default async function ConnectionsPage() {
                   holding its place in your history until they do. Not every account has to be
                   mapped — click <strong>Map accounts</strong> and settle each one, either by
                   pointing it at a Hundie account or by marking it{" "}
-                  <strong>Don&apos;t track this account</strong> if it should never be in the
+                  <strong>Don't track this account</strong> if it should never be in the
                   ledger. Then <strong>Sync now</strong> — the flag clears on the next sync, not
                   when you save. Accounts already mapped keep importing normally.
                 </p>
               ) : null}
               <div className="mt-3 divide-y divide-border border-t border-border">
                 {c.links.length === 0 ? (
-                  // Zero links no longer means zero decisions — every account here may be marked
-                  // "don't track". This list is links-only, so point at the panel rather than
-                  // asserting nothing has been settled.
                   <p className="pt-3 text-sm text-muted-foreground">
                     No accounts from this bank feed a Hundie account. Use{" "}
-                    <strong>Map accounts</strong> below — that&apos;s also where accounts marked not
+                    <strong>Map accounts</strong> below — that's also where accounts marked not
                     tracked are listed.
                   </p>
                 ) : (
@@ -148,10 +148,6 @@ export default async function ConnectionsPage() {
                 )}
               </div>
               {c.ignored.length > 0 ? (
-                // Standing record of what is deliberately out of scope. Once these are marked the
-                // connection reads 'healthy', so without this the excluded accounts would be
-                // invisible outside the panel — and which bank accounts are out of scope is
-                // material to anyone reading the books.
                 <div className="mt-3 border-t border-border pt-3">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Not tracked ({c.ignored.length})
@@ -188,7 +184,7 @@ export default async function ConnectionsPage() {
       {encFingerprint ? (
         <p className="text-xs text-muted-foreground">
           Encryption-key fingerprint <code className="font-mono">{encFingerprint}</code> — record
-          this. If it ever changes, saved tokens can&apos;t be decrypted and banks must be removed
+          this. If it ever changes, saved tokens can't be decrypted and banks must be removed
           and re-linked.
         </p>
       ) : null}

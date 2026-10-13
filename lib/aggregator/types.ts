@@ -19,6 +19,17 @@ export interface AggregatorAccount {
   institution: string;
 }
 
+/** One account returned by the liabilities product. Balance is amount owed, dollars. */
+export interface AggregatorLiability {
+  accountId: string;
+  name: string;
+  mask: string | null;
+  institution: string;
+  kind: "mortgage" | "credit" | "student";
+  balance: number | null;
+  apr: number | null;
+}
+
 /**
  * A normalized transaction in THIS repo's ledger shape (the same fields the CSV parsers emit),
  * so the sync runner can hand it straight to buildImportPlanFromTransactions.
@@ -56,6 +67,8 @@ export interface Aggregator {
   linkToken(userId: string): Promise<AggregatorResult<string>>;
   /** Link token to re-authenticate an EXISTING connection (update mode) — keeps the access token. */
   linkTokenForUpdate(accessToken: string): Promise<AggregatorResult<string>>;
+  /** Update-mode token that asks an existing item to consent to liabilities. */
+  linkTokenForLiabilities(accessToken: string): Promise<AggregatorResult<string>>;
   /** Revoke the access token at the vendor (called on disconnect). */
   removeItem(accessToken: string): Promise<AggregatorResult<void>>;
   /** Exchange the public token from the widget for an access token + item id. */
@@ -68,5 +81,7 @@ export interface Aggregator {
     accessToken: string,
     cursor?: string | null,
   ): Promise<AggregatorResult<AggregatorSyncResult>>;
+  /** /liabilities/get. Empty when the item has the product but no liability accounts. */
+  getLiabilities(accessToken: string): Promise<AggregatorResult<AggregatorLiability[]>>;
   verifyWebhook(rawBody: string, signature: string): boolean;
 }
