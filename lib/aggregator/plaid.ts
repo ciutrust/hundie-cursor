@@ -11,6 +11,7 @@ import { collectSync } from "./plaid-sync";
 import type {
   Aggregator,
   AggregatorAccount,
+  AggregatorLiability,
   AggregatorResult,
   AggregatorSyncResult,
 } from "./types";
@@ -57,6 +58,18 @@ function errMsg(e: unknown): string {
   return ax?.message ?? "unknown Plaid error";
 }
 
+/** Amount owed. Plaid reports credit and mortgage current balances as positive. */
+function owed(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return Math.round(Math.abs(value) * 100) / 100;
+}
+
+/** APR percent, capped to the liabilities.interest_rate numeric(5,3) column. */
+function finiteApr(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value) || value < 0 || value >= 100) return null;
+  return Math.round(value * 1000) / 1000;
+}
+
 const NOT_CONFIGURED: AggregatorResult<never> = {
   ok: false,
   error: "PLAID_CLIENT_ID / PLAID_SECRET not set",
@@ -78,6 +91,8 @@ export class PlaidAggregator implements Aggregator {
         user: { client_user_id: userId },
         client_name: "Hundie",
         products: [Products.Transactions],
+        // Consent to liabilities when the institution supports it. Checking-only banks still link.
+        required_if_supported_products: [Products.Liabilities],
         country_codes: [CountryCode.Us],
         language: "en",
       });
@@ -98,6 +113,25 @@ export class PlaidAggregator implements Aggregator {
         country_codes: [CountryCode.Us],
         language: "en",
         access_token: accessToken,
+      });
+      return { ok: true, data: res.data.link_token };
+    } catch (e) {
+      return { ok: false, error: errMsg(e) };
+    }
+  }
+
+  async linkTokenForLiabilities(accessToken: string): Promise<AggregatorResult<string>> {
+    const plaid = client();
+    if (!plaid) return NOT_CONFIGURED;
+    try {
+      // Update mode for ONE new product. Do not repeat Transactions or Link will refuse the token.
+      const res = await plaid.linkTokenCreate({
+        user: { client_user_id: "hundie-operator" },
+        client_name: "Hundie",
+        country_codes: [CountryCode.Us],
+        language: "en",
+        access_token: accessToken,
+        products: [Products.Liabilities],
       });
       return { ok: true, data: res.data.link_token };
     } catch (e) {
@@ -192,6 +226,68 @@ export class PlaidAggregator implements Aggregator {
           cursor: collected.cursor ?? null,
         },
       };
+    } catch (e) {
+      return { ok: false, error: errMsg(e) };
+    }
+  }
+
+  async getLiabilities(accessToken: string): Promise<AggregatorResult<AggregatorLiability[]>> {
+    const plaid = client();
+    if (!plaid) return NOT_CONFIGURED;
+    try {
+      const res = await plaid.liabilitiesGet({ access_token: accessToken });
+      const institution = await this.institutionName(
+        plaid,
+        res.data.item.institution_id ?? null,
+      );
+      const byId = new Map(res.data.accounts.map((account) => [account.account_id, account]));
+      const out: AggregatorLiability[] = [];
+
+      for (const mortgage of res.data.liabilities.mortgage ?? []) {
+        if (!mortgage.account_id) continue;
+        const account = byId.get(mortgage.account_id);
+        out.push({
+          accountId: mortgage.account_id,
+          name: account?.name ?? "Mortgage",
+          mask: account?.mask ?? null,
+          institution,
+          kind: "mortgage",
+          balance: owed(account?.balances.current),
+          apr: finiteApr(mortgage.interest_rate?.percentage),
+        });
+      }
+
+      for (const credit of res.data.liabilities.credit ?? []) {
+        if (!credit.account_id) continue;
+        const account = byId.get(credit.account_id);
+        const purchase =
+          credit.aprs?.find((apr) => apr.apr_type === "purchase_apr") ?? credit.aprs?.[0];
+        out.push({
+          accountId: credit.account_id,
+          name: account?.name ?? "Credit",
+          mask: account?.mask ?? null,
+          institution,
+          kind: "credit",
+          balance: owed(account?.balances.current),
+          apr: finiteApr(purchase?.apr_percentage),
+        });
+      }
+
+      for (const student of res.data.liabilities.student ?? []) {
+        if (!student.account_id) continue;
+        const account = byId.get(student.account_id);
+        out.push({
+          accountId: student.account_id,
+          name: account?.name ?? "Student loan",
+          mask: account?.mask ?? null,
+          institution,
+          kind: "student",
+          balance: owed(account?.balances.current),
+          apr: null,
+        });
+      }
+
+      return { ok: true, data: out };
     } catch (e) {
       return { ok: false, error: errMsg(e) };
     }
